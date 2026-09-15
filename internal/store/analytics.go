@@ -51,30 +51,36 @@ type UsageRow struct {
 	Key string `json:"key,omitempty"`
 }
 
-// UsageBy rolls usage_daily up over the last `days` days, split by one
-// dimension, oldest first because a chart reads left to right.
-func (d *DB) UsageBy(ctx context.Context, days int, dim UsageDimension) ([]UsageRow, error) {
+// UsageWindow is the span a `days` range covers: that many UTC calendar
+// days ending with the day `now` falls in, as the first and last YYYY-MM-DD
+// inclusive. UTC because the rollup keys usage_daily by UTC date. Out of range
+// values read as 30.
+func UsageWindow(now time.Time, days int) (first, last string) {
 	if days <= 0 || days > 365 {
 		days = 30
 	}
+	utc := now.UTC()
+	today := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	return today.AddDate(0, 0, 1-days).Format(time.DateOnly), today.Format(time.DateOnly)
+}
+
+// UsageBy rolls usage_daily up over the UsageWindow for now and days, split
+// by one dimension, oldest first because a chart reads left to right.
+func (d *DB) UsageBy(ctx context.Context, now time.Time, days int, dim UsageDimension) ([]UsageRow, error) {
+	first, last := UsageWindow(now, days)
 	col := dim.column()
 	sel, group := "'' AS k", "day"
 	if col != "" {
 		sel, group = col+" AS k", "day, "+col
 	}
-	// The LIMIT is on DAYS, not on rows. Grouping by a dimension multiplies
-	// the row count by that dimension's cardinality, so a row limit would
-	// silently return thirty rows covering four days once eight providers
-	// are in play.
 	q := `SELECT day, ` + sel + `,
 	             sum(requests), sum(attempts), sum(tokens_in), sum(tokens_out),
 	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
 	        FROM usage_daily
-	       WHERE day IN (SELECT day FROM usage_daily
-	                      GROUP BY day ORDER BY day DESC LIMIT ?)
+	       WHERE day >= ? AND day <= ?
 	       GROUP BY ` + group + `
 	       ORDER BY day, k`
-	rows, err := d.Read.QueryContext(ctx, q, days)
+	rows, err := d.Read.QueryContext(ctx, q, first, last)
 	if err != nil {
 		return nil, fmt.Errorf("usage by: %w", err)
 	}
@@ -106,10 +112,12 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	var s RecentStats
 	s.WindowSec = int64(window.Seconds())
 	// coalesce on the sums: SUM over no rows is NULL, and scanning that into an
-	// int64 fails rather than yielding zero.
+	// int64 fails rather than yielding zero. A cancelled request is the
+	// client's own hang-up, so it is not an error; any other status that did
+	// not succeed still is.
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT count(*),
-		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0)
+		        coalesce(sum(CASE WHEN status NOT IN ('success', 'cancelled') THEN 1 ELSE 0 END), 0)
 		   FROM requests WHERE ts >= ?`, since).
 		Scan(&s.Requests, &s.Errors)
 	if err != nil {

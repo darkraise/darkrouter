@@ -56,7 +56,7 @@ func TestParseStreamAppendsTextFragments(t *testing.T) {
 
 func TestParseStreamOpensOneTextBlockOnly(t *testing.T) {
 	body := data(`{"candidates":[{"content":{"parts":[{"text":"a"}]}}]}`) +
-		data(`{"candidates":[{"content":{"parts":[{"text":"b"}]}}]}`)
+		data(`{"candidates":[{"content":{"parts":[{"text":"b"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestParseStreamEmitsAFunctionCallWhole(t *testing.T) {
 }
 
 func TestParseStreamCarriesThoughtsAndSignatures(t *testing.T) {
-	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true},{"text":"","thought":true,"thoughtSignature":"sig-1"}]}}]}`)
+	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true},{"text":"","thought":true,"thoughtSignature":"sig-1"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +124,30 @@ func TestParseStreamCarriesThoughtsAndSignatures(t *testing.T) {
 	}
 	if !sawText || !sawSig {
 		t.Fatalf("events = %+v", evs)
+	}
+}
+
+func TestParseStreamWarnsWhenItDropsGeneratedMedia(t *testing.T) {
+	body := data(`{"responseId":"r1","candidates":[{"content":{"parts":[{"text":"Here:"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0K"}}]},"finishReason":"STOP"}]}`)
+	evs, err := collect(t, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := evs[len(evs)-1]
+	if stop.Type != ir.EventMessageStop {
+		t.Fatalf("last event = %+v", stop)
+	}
+	var warned bool
+	for _, w := range stop.Warnings {
+		warned = warned || strings.Contains(w.Field, "inlineData")
+	}
+	if !warned {
+		t.Errorf("warnings = %+v; dropped media must be reported", stop.Warnings)
+	}
+	for _, ev := range evs {
+		if ev.Type == ir.EventContentDelta && ev.Delta.Type == ir.BlockText && ev.Delta.Text == "" {
+			t.Errorf("media became an empty text delta: %+v", evs)
+		}
 	}
 }
 
@@ -151,7 +175,7 @@ func TestParseStreamWarnsOnAnUnknownFinishReason(t *testing.T) {
 }
 
 func TestParseStreamIgnoresAnUnparseableChunk(t *testing.T) {
-	body := "data: {not json\n\n" + data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}`)
+	body := "data: {not json\n\n" + data(`{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatalf("a bad chunk must not kill the stream: %v", err)

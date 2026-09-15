@@ -41,4 +41,42 @@ describe("snippetFor", () => {
     // an operator will paste and then debug.
     expect(snippetFor("claude-code", "http://x", "")).toContain("<your-token>")
   })
+
+  describe("with a value carrying shell or Python syntax", () => {
+    // server.public_url accepts any absolute URL path and every signed-in
+    // account can set it, so the snippet an operator pastes must carry the
+    // value as data rather than as code.
+    const hostile = "https://x.test/$(id)`id`'\"\\ a;b"
+
+    it("single-quotes the shell value so nothing in it expands", () => {
+      expect(snippetFor("claude-code", hostile, "dr_tok").split("\n")[0]).toBe(
+        "export ANTHROPIC_BASE_URL='https://x.test/$(id)`id`'\\''\"\\ a;b'",
+      )
+      expect(snippetFor("codex", hostile, "dr_tok").split("\n")[0]).toBe(
+        "export OPENAI_BASE_URL='https://x.test/$(id)`id`'\\''\"\\ a;b'",
+      )
+    })
+
+    it("quotes a tilde, which an export expands after : or =", () => {
+      expect(snippetFor("claude-code", "https://h/a:~/b", "dr_tok").split("\n")[0]).toBe(
+        "export ANTHROPIC_BASE_URL='https://h/a:~/b'",
+      )
+      expect(snippetFor("codex", "http://x", "~tok").split("\n")[1]).toBe(
+        "export OPENAI_API_KEY='~tok'",
+      )
+    })
+
+    it("quotes the placeholder token, which a shell reads as a redirect", () => {
+      expect(snippetFor("claude-code", "http://x", "")).toContain(
+        "export ANTHROPIC_AUTH_TOKEN='<your-token>'",
+      )
+    })
+
+    it("writes a Python string literal that decodes back to the value", () => {
+      for (const tool of ["openai-sdk", "anthropic-sdk"] as const) {
+        const m = /base_url=("(?:[^"\\]|\\.)*"),/.exec(snippetFor(tool, hostile, "dr_tok"))
+        expect(JSON.parse(m?.[1] ?? "null")).toBe(hostile)
+      }
+    })
+  })
 })

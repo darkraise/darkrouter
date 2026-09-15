@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/auth"
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 )
 
 // failingResolver stands in for a credential the auth manager cannot turn into
@@ -80,5 +82,47 @@ func TestAMalformedCredentialWithNoAlternativeStillReports(t *testing.T) {
 	}
 	if rec.Header().Get("X-Darkrouter-Attempts") != "0" {
 		t.Errorf("attempts header = %q; nothing was sent upstream", rec.Header().Get("X-Darkrouter-Attempts"))
+	}
+}
+
+// waitingResolver hands out an authorizer that waits for a token refresh that
+// never finishes, the way one queued behind another request's refresh does.
+type waitingResolver struct{}
+
+func (waitingResolver) For(context.Context, auth.Target, auth.Credential) (auth.Authorizer, error) {
+	return func(ctx context.Context, _ *http.Request) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}, nil
+}
+
+// A request that stops waiting for a credential says nothing about the
+// credential. Recording it as a credential failure would cool a healthy
+// account every time a client hung up, or the gateway shut down, during a
+// slow refresh.
+func TestARequestCancelledWhileItsCredentialRefreshesDoesNotBlameTheCredential(t *testing.T) {
+	logger := &captureLogger{}
+	e := newExecutorRaw(t, []providerSpec{
+		{id: "sub", kind: "openaicompat", upstreamURL: "http://sub.invalid/v1",
+			models: []string{"m"}, preset: "anthropic-oauth"},
+	}, "sk", map[string]adapter.Adapter{"openaicompat": openaicompat.New()},
+		Deps{Auth: waitingResolver{}, Log: logger}, 0, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"ping"}]}`)).WithContext(ctx)
+	r.Header.Set("Authorization", "Bearer sk")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Handle(httptest.NewRecorder(), r, openaiedge.New())
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	got := logger.only(t)
+	if len(got.Attempts) != 1 || got.Attempts[0].Outcome != string(adapter.OutcomeClientCancelled) {
+		t.Fatalf("attempts = %+v, want one attempt recorded as client_cancelled", got.Attempts)
 	}
 }

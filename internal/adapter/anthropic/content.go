@@ -2,7 +2,10 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/darkraise/darkrouter/internal/adapter/xlate"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -105,7 +108,7 @@ func renderBlock(b ir.ContentBlock, cb *cacheBudget) (map[string]any, []ir.Warni
 		return map[string]any{"type": "image", "source": src}, w
 
 	case ir.BlockDocument:
-		src, w := mediaSource(b.Media, "document")
+		src, w := documentSource(b.Media)
 		if src == nil {
 			return nil, w
 		}
@@ -180,4 +183,34 @@ func mediaSource(m *ir.Media, field string) (map[string]any, []ir.Warning) {
 		Field: "messages[]." + field, Target: targetName,
 		Reason: "carried neither data, a URL, nor a file id",
 	}}
+}
+
+// documentSource differs from mediaSource for inline data: Anthropic takes a
+// base64 document only as application/pdf, and plain text only as a text
+// source holding the text itself. Its text source has no media type but
+// text/plain, so markdown, CSV and other text/* documents go as plain text.
+func documentSource(m *ir.Media) (map[string]any, []ir.Warning) {
+	if m == nil || m.Data == "" || m.FileID != "" {
+		return mediaSource(m, "document")
+	}
+	drop := func(reason string) (map[string]any, []ir.Warning) {
+		return nil, []ir.Warning{{Field: "messages[].document", Target: targetName, Reason: reason}}
+	}
+	mime := strings.ToLower(strings.TrimSpace(m.MIME))
+	switch {
+	case mime == "application/pdf":
+		return map[string]any{"type": "base64", "media_type": mime, "data": m.Data}, nil
+	case strings.HasPrefix(mime, "text/"):
+		text, err := base64.StdEncoding.DecodeString(m.Data)
+		if err != nil {
+			return drop("the document's data is not valid base64; it was dropped")
+		}
+		if !utf8.Valid(text) {
+			return drop(m.MIME + " document is not UTF-8 text; it was dropped")
+		}
+		return map[string]any{"type": "text", "media_type": "text/plain", "data": string(text)}, nil
+	case mime == "":
+		return drop("a document with no media type cannot be sent; it was dropped")
+	}
+	return drop("Anthropic accepts PDF and plain-text documents only; " + m.MIME + " was dropped")
 }

@@ -393,3 +393,64 @@ func TestWriteConfigAcceptsABareDomainForThePublicURL(t *testing.T) {
 		t.Errorf("public_url = %q, want the normalised URL", c.Server.PublicURL)
 	}
 }
+
+// A save pinned to the table it was read against must be refused once another
+// admin's write has moved the table out from under it -- otherwise the second
+// save silently replaces the first admin's edit.
+func TestWriteConfigRejectsAStaleAliasesRevision(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	if err := db.PutAliases(ctx, map[string][]string{"fast": {"groq/a"}}); err != nil {
+		t.Fatal(err)
+	}
+	stale := config.AliasesRevision(map[string][]string{"fast": {"groq/a"}})
+
+	// Another admin's edit lands first.
+	if err := db.PutAliases(ctx, map[string][]string{"fast": {"groq/b"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Aliases:          map[string][]string{"fast": {"groq/a"}, "slow": {"groq/c"}},
+		AliasesRevisions: []string{stale},
+	})
+	var conflict config.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("err = %v, want a ConflictError", err)
+	}
+
+	stored, err := db.Aliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored["fast"]) != 1 || stored["fast"][0] != "groq/b" {
+		t.Errorf("the stale write overwrote the other admin's edit: %v", stored)
+	}
+	if _, ok := stored["slow"]; ok {
+		t.Error("the stale write's new alias was committed anyway")
+	}
+}
+
+// A save whose revision still matches the table applies normally: the check
+// exists to catch a race, not to require an extra round trip on every save.
+func TestWriteConfigAcceptsAMatchingAliasesRevision(t *testing.T) {
+	db, ctx := migrated(t), context.Background()
+	if err := db.PutAliases(ctx, map[string][]string{"fast": {"groq/a"}}); err != nil {
+		t.Fatal(err)
+	}
+	current := config.AliasesRevision(map[string][]string{"fast": {"groq/a"}})
+	stale := config.AliasesRevision(map[string][]string{"fast": {"groq/z"}})
+
+	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+		Aliases:          map[string][]string{"fast": {"groq/a", "groq/b"}},
+		AliasesRevisions: []string{stale, current},
+	}); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+	stored, err := db.Aliases(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored["fast"]) != 2 {
+		t.Errorf("aliases = %v, want the new chain", stored)
+	}
+}

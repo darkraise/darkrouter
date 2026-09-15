@@ -1,6 +1,8 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { toast } from "darkraise-ui"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { describe, it, expect } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import {
   ProviderSettingsDialog,
   draftOf,
@@ -52,6 +54,30 @@ describe("settingsPatch", () => {
     expect(settingsPatch(draft(p, { project: "my-gcp-project" }), p)).toEqual({
       project: "my-gcp-project",
     })
+  })
+
+  it("sends location only once it has been touched", () => {
+    // A Vertex row created before location was required has none, and this
+    // is the only way to give it one.
+    const p = provider({ kind: "vertex" })
+    expect(settingsPatch(draft(p), p)).not.toHaveProperty("location")
+    expect(settingsPatch(draft(p, { location: "us-central1" }), p)).toEqual({
+      location: "us-central1",
+    })
+  })
+
+  it("trims a location, and sends none that is only whitespace", () => {
+    // It can be set once, so a stray space would be stored for good.
+    const p = provider({ kind: "vertex" })
+    expect(settingsPatch(draft(p, { location: "  us-central1 " }), p)).toEqual({
+      location: "us-central1",
+    })
+    expect(settingsPatch(draft(p, { location: "   " }), p)).toEqual({})
+  })
+
+  it("sends no location for a provider that is not Vertex", () => {
+    const p = provider()
+    expect(settingsPatch(draft(p, { location: "us-central1" }), p)).toEqual({})
   })
 
   it("carries an intentional clear", () => {
@@ -126,5 +152,52 @@ describe("settingsPatch base URL", () => {
     // write anyway. Refusing to send it keeps a slip from becoming a 400.
     const p = provider()
     expect(settingsPatch(draft(p, { baseUrl: "   " }), p)).toEqual({})
+  })
+})
+
+describe("the location field", () => {
+  it("is offered only for a Vertex provider, and says it is set once", () => {
+    const { unmount } = mount(
+      <ProviderSettingsDialog provider={provider()} open onOpenChange={() => {}} />,
+    )
+    expect(screen.queryByLabelText("Location")).toBeNull()
+    unmount()
+
+    mount(<ProviderSettingsDialog provider={provider({ kind: "vertex" })} open onOpenChange={() => {}} />)
+    expect(screen.getByLabelText("Location")).toBeInTheDocument()
+    expect(screen.getByText(/location can be set once/i)).toBeInTheDocument()
+  })
+})
+
+describe("saving settings the gateway did not load", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it("closes on a saved note rather than reporting a failure", async () => {
+    // A 500 carrying routing_updated:false committed. Left open on an error,
+    // the dialog invites a second save of a change that already happened.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    )
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    const onOpenChange = vi.fn()
+    mount(<ProviderSettingsDialog provider={provider()} open onOpenChange={onOpenChange} />)
+
+    await userEvent.clear(screen.getByLabelText("Priority"))
+    await userEvent.type(screen.getByLabelText("Priority"), "20")
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/))
+    expect(error).not.toHaveBeenCalled()
   })
 })

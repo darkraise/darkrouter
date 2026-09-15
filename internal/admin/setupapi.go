@@ -54,7 +54,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Before the body is read, as on login: a flood costs a map lookup.
-	if ok, wait := s.logins.take(clientAddr(r.RemoteAddr)); !ok {
+	if ok, wait := s.logins.allow(r.RemoteAddr); !ok {
 		writeRateLimited(w, wait)
 		return
 	}

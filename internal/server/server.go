@@ -37,6 +37,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/writedeadline"
 )
 
 // Version is stamped at build time with -ldflags "-X ...Version=v1.2.3".
@@ -73,8 +74,11 @@ type Server struct {
 	// authorizer a request would, under the same per-account mutex.
 	refresher *auth.RefreshWorker
 
-	started  time.Time
-	warnings []string
+	started time.Time
+	// warningsMu guards warnings: Run appends restore failures while a test
+	// may already be serving /healthz from AdminHandler.
+	warningsMu sync.Mutex
+	warnings   []string
 }
 
 // Catalog exposes the live snapshot holder. The listing handlers read it, and
@@ -172,7 +176,16 @@ func New(cfgStore *config.Store, db *store.DB, key *crypto.Key, startupWarnings 
 		URL:      cfg.Catalog.FreeCatalogURL,
 		Interval: cfg.Catalog.FreeCatalogInterval,
 		Timeout:  cfg.Catalog.SyncTimeout,
+		OnUpdate: func(c context.Context) {
+			if err := cat.Rebuild(c); err != nil {
+				slog.Warn("catalog rebuild after free catalogue sync failed", "err", err)
+			}
+		},
 	})
+	// The same catalogue reaches the snapshot, whose models carry the free tier
+	// the router vetoes on. Reading only the embedded one there let routing and
+	// the import filter disagree about a tier the sync had regraded.
+	cat.SetFreeTiers(freeSync.Catalog)
 
 	// The price index has no embedded fallback, so the store is wired to the
 	// syncer whether or not the worker runs: with the refresh off it simply
@@ -358,7 +371,13 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1beta/models/{model}", s.authed(gm, s.handleGemini))
 	mux.HandleFunc("GET /v1beta/models", s.authed(gm, s.handleGeminiModels))
 
-	return mux
+	return writedeadline.Handler(mux, s.idleTimeout)
+}
+
+// idleTimeout is the live policy.timeout.idle, which also bounds a single
+// write to a client.
+func (s *Server) idleTimeout() time.Duration {
+	return s.store.Current().Policy.Timeout.Idle
 }
 
 // handleGemini dispatches on the method suffix the path segment carries.
@@ -410,9 +429,9 @@ func (s *Server) authed(d edge.Dialect, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		// Authentication is off only when neither mechanism is configured: a
-		// gateway with proxy tokens issued must not accept an empty header
-		// just because the shared secret is unset.
+		// Authentication is off only when the shared secret is unset and no
+		// proxy token has ever been issued. Issued, not live: revoking the
+		// last token must refuse its clients, not open the gateway to all.
 		if shared == "" && !s.tokens.configured(r.Context()) {
 			h(w, r)
 			return
@@ -511,7 +530,9 @@ func (s *Server) AdminHandler() http.Handler {
 		// Startup warnings first, then the configuration's own. The two have
 		// different lifetimes: a startup warning is fixed for the life of the
 		// process, while cfg.Warnings is replaced by every reload.
+		s.warningsMu.Lock()
 		warnings := append(append([]string{}, s.warnings...), cfg.Warnings...)
+		s.warningsMu.Unlock()
 		// Not a startup warning: the console is claimed by creating the first
 		// account while the process runs, and a warning fixed at startup would
 		// keep telling an operator to claim a console they already claimed.
@@ -584,7 +605,14 @@ func (s *Server) AdminHandler() http.Handler {
 	// an orchestrator and a Prometheus scrape read them, and a session in front
 	// of either breaks it.
 	mux.Handle("/", s.adm.Handler())
-	return mux
+	return writedeadline.Handler(mux, s.idleTimeout)
+}
+
+func (s *Server) addWarning(w string) {
+	slog.Warn(w)
+	s.warningsMu.Lock()
+	defer s.warningsMu.Unlock()
+	s.warnings = append(s.warnings, w)
 }
 
 // Run starts both listeners and blocks until ctx is cancelled, then drains.
@@ -620,14 +648,15 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 
+	// Not fatal, so warnings rather than RecordError: that slot fails
+	// readiness, and an unreadable health table costs a restart's worth of
+	// accuracy -- refusing to serve over it would be worse.
 	if err := s.persist.Restore(workerCtx); err != nil {
-		// Not fatal: an unreadable health table costs a restart's worth of
-		// accuracy, and refusing to serve over it would be worse.
-		s.store.RecordError(fmt.Errorf("health rehydration: %w", err))
+		s.addWarning(fmt.Sprintf("health rehydration: %v", err))
 	}
 
 	if lu, err := s.db.LoadLastUsed(workerCtx); err != nil {
-		s.store.RecordError(fmt.Errorf("credential usage rehydration: %w", err))
+		s.addWarning(fmt.Sprintf("credential usage rehydration: %v", err))
 	} else {
 		s.breaker.RehydrateLastUsed(lu)
 	}
@@ -681,8 +710,8 @@ func (s *Server) Run(ctx context.Context) error {
 	// SIGTERM arrives instead of letting them drain. It is cancelled only when
 	// the drain deadline expires, which is the signal handlers need to emit a
 	// terminal event.
-	lc, cancelLC := context.WithCancel(context.Background())
-	defer cancelLC()
+	lc, cancelLC := context.WithCancelCause(context.Background())
+	defer cancelLC(nil)
 
 	readTimeout, idleTimeout := listenerTimeouts(cfg.Policy.Timeout)
 	proxy := &http.Server{
@@ -690,7 +719,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler: s.ProxyHandler(),
 		// No WriteTimeout: it would kill long streams at a fixed age. Slowloris
 		// protection comes from ReadHeaderTimeout; ReadTimeout bounds a client
-		// that sends its body at a trickle.
+		// that sends its body at a trickle; writedeadline.Handler around the
+		// proxy handler bounds a client that stops reading, one write at a time.
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
@@ -738,18 +768,7 @@ func (s *Server) Run(ctx context.Context) error {
 	drain, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 
-	// Shutdown closes listeners and waits, but on deadline it returns and leaves
-	// active connections running. Cancelling the lifecycle context propagates to
-	// each handler's request context, which aborts its upstream read and lets
-	// the stream path emit a final error event; Close then forces the sockets
-	// down so the process can actually exit.
-	shutdownErr := proxy.Shutdown(drain)
-	if shutdownErr != nil {
-		cancelLC()
-		timer := time.NewTimer(terminalGrace)
-		<-timer.C
-		_ = proxy.Close()
-	}
+	shutdownErr := shutdownProxy(proxy, drain, cancelLC)
 	_ = admin.Shutdown(drain)
 	_ = admin.Close()
 
@@ -759,6 +778,24 @@ func (s *Server) Run(ctx context.Context) error {
 	stopWorkers()
 	workers.Wait()
 	return shutdownErr
+}
+
+// shutdownProxy drains the proxy until drain expires. Shutdown closes the
+// listeners and waits, but on deadline it returns and leaves active
+// connections running. Cancelling the lifecycle context propagates to each
+// handler's request context, which aborts its upstream read and lets the
+// stream path emit a final error event; Close then forces the sockets down so
+// the process can actually exit. The cause is what lets a handler record the
+// cut as the gateway's rather than as its client hanging up.
+func shutdownProxy(proxy *http.Server, drain context.Context, cancelLC context.CancelCauseFunc) error {
+	err := proxy.Shutdown(drain)
+	if err != nil {
+		cancelLC(exec.ErrShutdown)
+		timer := time.NewTimer(terminalGrace)
+		<-timer.C
+		_ = proxy.Close()
+	}
+	return err
 }
 
 // Listener bounds. minReadTimeout covers max_body_bytes at modest bandwidth;

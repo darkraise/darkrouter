@@ -18,7 +18,7 @@
     "responseId": "chatcmpl-1",
     "usageMetadata": {
       "cachedContentTokenCount": 8,
-      "candidatesTokenCount": 4,
+      "candidatesTokenCount": 1,
       "promptTokenCount": 11,
       "thoughtsTokenCount": 3,
       "totalTokenCount": 15

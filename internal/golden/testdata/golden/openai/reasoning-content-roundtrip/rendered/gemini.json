@@ -50,7 +50,7 @@
         {
           "description": "weather",
           "name": "lookup",
-          "parameters": {
+          "parametersJsonSchema": {
             "properties": {
               "city": {
                 "type": "string"

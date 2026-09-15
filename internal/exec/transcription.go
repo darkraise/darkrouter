@@ -73,6 +73,10 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 			return failedParse(ac, resp,
 				fmt.Errorf("transcription response exceeds %d bytes", int64(maxTranscriptBytes)))
 		}
+		fw, _ := ac.Adapter.(adapter.Forwarder)
+		if err := unservableBody(fw, resp, raw); err != nil {
+			return failedParse(ac, resp, err)
+		}
 		// Read for the record only. The bytes go out unchanged, because
 		// verbose_json carries per-segment timings and log-probabilities that
 		// re-emitting from a narrow IR would drop.
@@ -82,7 +86,7 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 		cw.Header().Set("Content-Type", ct)
 		_, _ = cw.Write(raw)
 		ac.Rec.ResponseBytes = cw.Bytes()
-		return adapter.OutcomeSuccess, nil
+		return ac.delivered(cw)
 	}
 
 	// Text and SSE alike are opaque and are forwarded with a flush per chunk.
@@ -103,6 +107,9 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 	// enforces this by consulting the writer, and the byte count is what the
 	// trace has instead of an in-stream error the format cannot carry.
 	ac.served(ac.Warns)
+	if cerr != nil {
+		return ac.failedAfterCommit(cerr)
+	}
 	return adapter.OutcomeSuccess, nil
 }
 
@@ -140,6 +147,11 @@ func applyTranscriptUsage(ac *AttemptCtx, raw []byte) {
 // an SSE event or an audio frame goes out without waiting for its neighbours.
 const copyChunkBytes = 32 << 10
 
+// errClientWrite marks a copy that failed writing to the client rather than
+// reading from the provider, which is the client's failure, not the
+// provider's.
+var errClientWrite = errors.New("write to client failed")
+
 // copyFlushing copies src to dst, flushing after every chunk.
 //
 // io.Copy alone would let the ResponseWriter buffer, which turns an SSE
@@ -155,9 +167,12 @@ func copyFlushing(dst *CommitWriter, src io.Reader) (int64, error) {
 			w, werr := dst.Write(buf[:n])
 			total += int64(w)
 			if werr != nil {
-				return total, werr
+				return total, fmt.Errorf("%w: %w", errClientWrite, werr)
 			}
 			dst.Flush()
+			if ferr := dst.Err(); ferr != nil {
+				return total, fmt.Errorf("%w: %w", errClientWrite, ferr)
+			}
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {

@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest"
-import { relativeTime } from "./time"
+import { relativeTime, utcDayStartMs, utcDays } from "./time"
+
+describe("a usage window's days", () => {
+  it("lists every UTC day from first to last, across a month end", () => {
+    expect(utcDays("2026-08-30", "2026-09-02")).toEqual([
+      "2026-08-30",
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02",
+    ])
+  })
+
+  it("is empty for a window that ends before it starts or cannot be read", () => {
+    expect(utcDays("2026-09-02", "2026-09-01")).toEqual([])
+    expect(utcDays("", "2026-09-01")).toEqual([])
+  })
+
+  it("starts a day at UTC midnight", () => {
+    expect(utcDayStartMs("2026-08-20")).toBe(Date.UTC(2026, 7, 20))
+  })
+})
 
 describe("how long ago something was", () => {
   const now = new Date("2026-08-28T12:00:00Z").getTime()

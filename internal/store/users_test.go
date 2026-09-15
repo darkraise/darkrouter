@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"testing"
@@ -198,11 +199,14 @@ func TestDeleteUserReportsWhetherARowWent(t *testing.T) {
 	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
 		t.Fatal(err)
 	}
-	gone, err := db.DeleteUser(ctx, "u1")
+	if err := db.CreateUser(ctx, "u2", "bob", "hash", RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := db.DeleteUser(ctx, "u2")
 	if err != nil || !gone {
 		t.Fatalf("DeleteUser: %v gone=%v", err, gone)
 	}
-	gone, err = db.DeleteUser(ctx, "u1")
+	gone, err = db.DeleteUser(ctx, "u2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,5 +230,52 @@ func TestAdminCountSeesOnlyAdmins(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("AdminCount = %d, want 1", n)
+	}
+}
+
+func TestDeleteUserRefusesTheLastAdmin(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if _, err := db.ClaimFirstUser(ctx, "u1", "alice", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := db.DeleteUser(ctx, "u1")
+	if !errors.Is(err, ErrConflict) || gone {
+		t.Fatalf("DeleteUser of the last admin = %v gone=%v, want a conflict", err, gone)
+	}
+	if n, _ := db.AdminCount(ctx); n != 1 {
+		t.Errorf("AdminCount = %d, want 1", n)
+	}
+}
+
+// Two administrators deleting each other at once both counted two before
+// either delete landed, so a count read ahead of the delete let both go.
+func TestConcurrentAdminDeletionsLeaveAnAdmin(t *testing.T) {
+	ctx := context.Background()
+	for round := 0; round < 20; round++ {
+		db := migrated(t)
+		if _, err := db.ClaimFirstUser(ctx, "a1", "alice", "hash"); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.CreateUser(ctx, "a2", "bob", "hash", RoleAdmin); err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for _, id := range []string{"a1", "a2"} {
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				<-start
+				if _, err := db.DeleteUser(ctx, id); err != nil && !errors.Is(err, ErrConflict) {
+					t.Error(err)
+				}
+			}(id)
+		}
+		close(start)
+		wg.Wait()
+		if n, _ := db.AdminCount(ctx); n != 1 {
+			t.Fatalf("round %d: AdminCount = %d, want 1", round, n)
+		}
 	}
 }

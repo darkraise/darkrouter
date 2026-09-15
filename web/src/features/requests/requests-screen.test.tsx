@@ -133,6 +133,62 @@ describe("a requests screen opened while empty", () => {
   })
 })
 
+describe("the requests table", () => {
+  it("keeps every cell on one line", async () => {
+    // The library lets a table cell break anywhere, so a full-width table
+    // crushed its columns to a letter each and rows grew far past the fixed
+    // height the virtual window places them at. jsdom has no layout, so
+    // this pins the rule that stops it rather than a measured height.
+    mockRequests([{ requests: [row({ id: "r1", model: "distinctive-model" })] }])
+    await renderScreen()
+
+    const cell = (await screen.findByText("distinctive-model")).closest("td")
+    expect(cell).not.toBeNull()
+    const nowrap = cell?.closest("[class*='[&_td]:whitespace-nowrap']")
+    expect(nowrap).not.toBeNull()
+  })
+
+  it("pins every row to the height it measured", async () => {
+    // The window places rows from that one figure, so it holds only if every
+    // row is held to it. jsdom has no layout: the height is stubbed, and the
+    // pin is read from the variable and class the stylesheet applies it by.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const h = this.tagName === "TR" && !this.classList.contains("dr-data-table-virtual-pad") ? 47.2 : 0
+      return { height: h, width: 0, top: 0, left: 0, bottom: h, right: 0, x: 0, y: 0, toJSON() {} }
+    })
+    mockRequests([{ requests: [row({ id: "r1", model: "distinctive-model" })] }])
+    await renderScreen()
+
+    const cell = await screen.findByText("distinctive-model")
+    await waitFor(() => {
+      const pinned = cell.closest<HTMLElement>(".row-height-pinned")
+      expect(pinned?.style.getPropertyValue("--row-h")).toBe("48px")
+    })
+    vi.restoreAllMocks()
+  })
+})
+
+describe("dedupeAppend", () => {
+  it("drops a row already displayed, by id", async () => {
+    const { dedupeAppend } = await import("./requests-screen")
+    // row() defaults ts_ms to Date.now(), so r0 is built once and reused --
+    // two separate calls for "the same" row would not be reference-equal
+    // and would make the comparison below flaky.
+    const r0 = row({ id: "r0" })
+    expect(
+      dedupeAppend([row({ id: "r1" })], [row({ id: "r1", model: "dup" }), r0]),
+    ).toEqual([r0])
+  })
+
+  it("keeps everything when nothing overlaps", async () => {
+    const { dedupeAppend } = await import("./requests-screen")
+    const r0 = row({ id: "r0" })
+    expect(dedupeAppend([row({ id: "r1" })], [r0])).toEqual([r0])
+  })
+})
+
 describe("what a filter offers", () => {
   it("puts the page's own values first, then everything else known", async () => {
     // A menu built from the loaded rows can only offer what is already on
@@ -313,5 +369,187 @@ describe("loading older requests", () => {
     // Given a beat to arrive; nothing should happen.
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByText("stale-model")).toBeNull()
+  })
+
+  it("stops offering Load more once the last page arrives", async () => {
+    // The handler omits next_cursor on a short page. Falling back to the
+    // first page's cursor whenever the paging state reads as "none yet"
+    // cannot tell that apart from "exhausted" -- both used to be null.
+    let olderCalls = 0
+    mockByPath((url) => {
+      if (!url.includes("cursor=")) return json({ requests: [row({ id: "r1" })], next_cursor: "c1" })
+      olderCalls++
+      return json({ requests: [row({ id: "r0" })] })
+    })
+    await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(screen.queryByRole("button", { name: /load more/i })).toBeNull())
+
+    // Nothing left to click, and the one page that was fetched stays fetched
+    // once: a poll of the first page must not resurrect the button.
+    expect(olderCalls).toBe(1)
+  })
+
+  it("does not repeat rows when newer requests arrived after the first page froze", async () => {
+    // `held` freezes the first successful page; a background poll can still
+    // land before Load more is clicked, with a newer top row and a cursor
+    // that now sits one row lower than the one the frozen page ends on.
+    // Load more has to fetch from the cursor the displayed rows end at, not
+    // from whatever the live query holds by the time it is clicked.
+    let firstCalls = 0
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (!url.includes("cursor=")) {
+        firstCalls++
+        if (firstCalls === 1) {
+          return json({ requests: [row({ id: "r2" }), row({ id: "r1" })], next_cursor: "c-r1" })
+        }
+        return json({
+          requests: [row({ id: "r3" }), row({ id: "r2" }), row({ id: "r1" })],
+          next_cursor: "c-r2",
+        })
+      }
+      if (url.includes("cursor=c-r1"))
+        return json({ requests: [row({ id: "r0", model: "correct-page" })] })
+      // A stale cursor from the later poll re-fetches from one row higher
+      // and would repeat r1 under a name that gives it away.
+      return json({ requests: [row({ id: "r1", model: "REPEATED" })] })
+    })
+    const { client } = await renderAt("/requests")
+    await screen.findByRole("button", { name: /load more/i })
+
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await waitFor(() => expect(firstCalls).toBe(2))
+
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(screen.getByText("correct-page")).toBeInTheDocument())
+    expect(screen.queryByText("REPEATED")).toBeNull()
+  })
+})
+
+describe("showing newer requests", () => {
+  const firstPages = (pages: RequestPage[]) => {
+    let calls = 0
+    return () => {
+      const page = pages[Math.min(calls, pages.length - 1)]!
+      calls++
+      return json(page)
+    }
+  }
+
+  it("keeps every row between the newer ones and the pages already loaded", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r3", model: "model-three" }), row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r4", model: "model-four" }), row({ id: "r3", model: "model-three" })], next_cursor: "c-r3" },
+    ])
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (url.includes("cursor=c-r2")) return json({ requests: [row({ id: "r1", model: "model-one" })] })
+      if (url.includes("cursor=")) return json({ requests: [row({ id: "wrong", model: "WRONG-PAGE" })] })
+      return nextFirst()
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await screen.findByText("model-one")
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /1 newer/i }))
+
+    await screen.findByText("model-four")
+    for (const model of ["model-three", "model-two", "model-one"]) {
+      expect(screen.getByText(model)).toBeInTheDocument()
+    }
+    expect(screen.queryByText("WRONG-PAGE")).toBeNull()
+  })
+
+  it("starts paging over from the new first page when it no longer meets the loaded rows", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r9", model: "model-nine" }), row({ id: "r8", model: "model-eight" })], next_cursor: "c-r8" },
+    ])
+    const cursors: string[] = []
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      const cursor = /cursor=([^&]+)/.exec(url)?.[1]
+      if (cursor === undefined) return nextFirst()
+      cursors.push(cursor)
+      return json({ requests: [row({ id: `after-${cursor}`, model: `after-${cursor}` })] })
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await screen.findByText("after-c-r2")
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /2 newer/i }))
+
+    await screen.findByText("model-nine")
+    expect(screen.queryByText("after-c-r2")).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }))
+    await screen.findByText("after-c-r8")
+    expect(cursors).toEqual(["c-r2", "c-r8"])
+  })
+
+  it("drops an older page still in flight when paging starts over", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r9", model: "model-nine" })], next_cursor: "c-r9" },
+    ])
+    let release: (() => void) | undefined
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (!url.includes("cursor=")) return nextFirst()
+      return new Promise<Response>((resolve) => {
+        release = () => resolve(json({ requests: [row({ id: "r1", model: "OLD-PAGE" })] }))
+      })
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(release).toBeDefined())
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /1 newer/i }))
+    await screen.findByText("model-nine")
+
+    release!()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText("OLD-PAGE")).toBeNull()
+  })
+})
+
+describe("a requests list that fails to load", () => {
+  it("shows a load error instead of the empty state", async () => {
+    mockByPath(() => json({ error: "log unavailable" }, 500))
+    await renderAt("/requests")
+
+    expect(await screen.findByText(/the requests did not load/i)).toBeInTheDocument()
+    expect(screen.queryByText(/point a client at the proxy/i)).not.toBeInTheDocument()
+  })
+
+  it("notes a failed refresh over an empty log", async () => {
+    let calls = 0
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      return calls++ === 0 ? json({ requests: [] }) : json({ error: "log unavailable" }, 500)
+    })
+    const { client } = await renderAt("/requests")
+    await screen.findByText(/point a client at the proxy/i)
+
+    await client.refetchQueries({ queryKey: ["requests"] })
+    expect(await screen.findByText(/last refresh failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/point a client at the proxy/i)).toBeInTheDocument()
+  })
+
+  it("offers to try again", async () => {
+    let fail = true
+    mockByPath(() =>
+      fail ? json({ error: "log unavailable" }, 500) : json({ requests: [row({ id: "r1" })] }),
+    )
+    await renderAt("/requests")
+    await screen.findByText(/the requests did not load/i)
+
+    fail = false
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }))
+    await waitFor(() => expect(screen.queryByText(/the requests did not load/i)).toBeNull())
   })
 })

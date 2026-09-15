@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { api, stream, onUnauthorized, ApiError, isTransient, throwOnExecutorError } from "./api"
+import { api, stream, onUnauthorized, ApiError, isTransient, throwOnExecutorError, getWithETag } from "./api"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -220,6 +220,48 @@ describe("the expected-rejection exemption", () => {
       api.post("/api/auth/password", {}, { expectedRejection: "invalid password" }),
     ).rejects.toMatchObject({ status: 401, message: "invalid password" })
     off()
+  })
+})
+
+describe("getWithETag", () => {
+  it("fails the way api.get does, parsed body included", async () => {
+    const reply = { error: "table changed", etag: "W/\"7\"" }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(reply), { status: 409 })),
+    )
+
+    const viaGet = await api.get("/api/x").catch((e: unknown) => e)
+    const viaETag = await getWithETag("/api/x").catch((e: unknown) => e)
+
+    expect(viaETag).toBeInstanceOf(ApiError)
+    expect(viaETag).toMatchObject({ status: 409, message: "table changed", body: reply })
+    expect(viaETag).toEqual(viaGet)
+  })
+
+  it("keeps an exempted 401 from logging out", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "invalid password" }), { status: 401 })),
+    )
+    const seen = vi.fn()
+    const off = onUnauthorized(seen)
+
+    await expect(
+      getWithETag("/api/x", { expectedRejection: "invalid password" }),
+    ).rejects.toMatchObject({ status: 401, message: "invalid password" })
+
+    expect(seen).not.toHaveBeenCalled()
+    off()
+  })
+
+  it("hands back the body and the ETag", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ a: 1 }), { status: 200, headers: { ETag: "\"v3\"" } })),
+    )
+
+    await expect(getWithETag("/api/x")).resolves.toEqual({ data: { a: 1 }, etag: "\"v3\"" })
   })
 })
 

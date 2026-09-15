@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -47,6 +49,7 @@ type Fleet interface {
 	LastUsedSnapshot() map[health.CredKey]time.Time
 	MarkUsed(ck health.CredKey, at time.Time)
 	Available(k health.Key) bool
+	ReleaseProbe(k health.Key)
 }
 
 // CatalogSource supplies the live catalog. It is an interface rather than
@@ -310,19 +313,20 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			break
 		}
 
-		// Re-check live health: another request may have tripped this breaker
-		// since the snapshot. Record the skip so the trace still explains the
-		// realized sequence.
-		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
-		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
-			rec.Skips = append(rec.Skips, traceSkipOf(c, "cooling"))
+		ad, ok := e.adapterFor(c.Kind)
+		if !ok {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "no_adapter"))
 			i++
 			continue
 		}
 
-		ad, ok := e.adapterFor(c.Kind)
-		if !ok {
-			rec.Skips = append(rec.Skips, traceSkipOf(c, "no_adapter"))
+		// Re-check live health: another request may have tripped this breaker
+		// since the snapshot. Record the skip so the trace still explains the
+		// realized sequence. This is the last check before the attempt, because
+		// a true claims the half-open probe and only the attempt releases it.
+		hk := health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model}
+		if e.deps.Fleet != nil && !e.deps.Fleet.Available(hk) {
+			rec.Skips = append(rec.Skips, traceSkipOf(c, "cooling"))
 			i++
 			continue
 		}
@@ -382,10 +386,20 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 		switch action {
 		case actionFinish:
 			rec.Status = "success"
+			if res.ClientGone {
+				rec.Status = "cancelled"
+			}
 			return
 		case actionReturn:
 			if res.Outcome == adapter.OutcomeClientCancelled {
-				rec.Status = "cancelled"
+				if shutDown(r.Context()) {
+					lastErr = shutdownError()
+					if n := len(rec.Attempts); n > 0 {
+						rec.Attempts[n-1].Error = lastErr.Message
+					}
+				} else {
+					rec.Status = "cancelled"
+				}
 			}
 			if lastErr != nil {
 				rec.ErrorCode = string(lastErr.Type)
@@ -422,6 +436,9 @@ type attemptResult struct {
 	Err       *ir.Error
 	Path      string
 	Committed bool
+	// ClientGone reports a committed response the client hung up on. The
+	// chain still ends as a success, but the client did not receive it all.
+	ClientGone bool
 	// Issued reports that a request went to the provider. An attempt that
 	// failed before that point — no credential, nothing to render — consumed
 	// no upstream quota and does not count against policy.retry.max_attempts.
@@ -436,6 +453,7 @@ const (
 	msgCredentialUnavailable = "credential unavailable"
 	msgRenderFailed          = "request could not be rendered for this provider"
 	msgUpstreamReadFailed    = "upstream read failed"
+	msgShuttingDown          = "gateway is shutting down"
 )
 
 // maxErrorBodyBytes bounds what is read from a non-2xx body: to classify a
@@ -460,18 +478,38 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	allowForward bool) (res attemptResult) {
 
 	c, rec := ac.Cand, ac.Rec
-	defer func() { ac.recordHealth(res.Outcome, ac.resp) }()
+	defer func() {
+		o := res.Outcome
+		// A fatal exit before anything was sent says nothing about the
+		// provider, and the breaker reads Fatal as proof it answered. The
+		// client decides whether its request renders, so it must not be able
+		// to clear a cooling model's ladder with one it knows will be refused.
+		// ClientCancelled is the outcome that only gives back the probe.
+		if o == adapter.OutcomeFatal && !res.Issued {
+			o = adapter.OutcomeClientCancelled
+		}
+		ac.recordHealth(o, ac.resp)
+	}()
 
 	// A timer rather than a context deadline, because the bound changes at
 	// commit: total stops applying and idle takes over. A deadline cannot be
 	// moved once set.
 	ctx, cancel := context.WithCancelCause(r.Context())
 	defer cancel(nil)
-	timer := time.AfterFunc(time.Until(bud.attemptDeadline(time.Now())), func() {
-		cancel(errDarkrouterTimeout)
+	// The pre-commit bound is connect and first_byte together; whether a
+	// connection was reached is what tells the operator which one ran out.
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { ac.connected.Store(true) },
+	})
+	ac.bud = bud
+	deadline, bound := ac.sendDeadline(time.Now())
+	ac.bound.Store(int32(bound))
+	timer := time.AfterFunc(time.Until(deadline), func() {
+		cancel(ac.firedCause())
 	})
 	defer timer.Stop()
 	ac.Timer = timer
+	ac.inbound, ac.upstream = r.Context(), ctx
 
 	path := PathIR
 	// failBefore is an exit that never reached the provider. It still leaves
@@ -481,6 +519,22 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		slog.Warn(msg, "request", rec.ID, "provider", c.ProviderID, "model", c.Model, "err", err)
 		e.recordAttempt(rec, c, o, 0, fmt.Errorf("%s: %w", msg, err), 0, path)
 		return attemptResult{Outcome: o, Path: path, Err: &ir.Error{Type: typ, Message: msg}}
+	}
+	// failRender classifies a request the adapter could not build. An adapter
+	// that names the error type is reporting something about the request
+	// itself, which the client needs in order to fix it, and every target
+	// would refuse it the same way. Anything else is this target's own
+	// configuration — a Vertex row with no project, a publisher the adapter
+	// does not serve — and says nothing about the next target, so the chain
+	// steps past it the way it steps past a model the provider lacks.
+	failRender := func(err error) attemptResult {
+		var ie *ir.Error
+		if errors.As(err, &ie) && ie.Type != "" {
+			res := failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ie.Type)
+			res.Err = ie
+			return res
+		}
+		return failBefore(adapter.OutcomeRetryableModel, err, msgRenderFailed, ir.ErrDarkrouter)
 	}
 
 	apiKey, authorizer, credErr := e.credentialFor(ctx, p, c)
@@ -493,6 +547,8 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return failBefore(adapter.OutcomeRetryableCredential, credErr,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
+	ac.authorize = authorizer
+	ac.secret = secretOf(p, c.KeyID, styleOf(p))
 	// The endpoint is per credential for a provider whose base URL carries an
 	// account, so this resolves after the credential is chosen and fails the
 	// same way: the next credential may well carry the account this one lacks.
@@ -541,7 +597,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 						Method: pt.Method, Query: pt.Query,
 					})
 					if berr != nil {
-						return failBefore(adapter.OutcomeFatal, berr, msgRenderFailed, ir.ErrDarkrouter)
+						return failRender(berr)
 					}
 					hr, fw, pop, strip, streaming, path = built, f, po, injected, pt.Stream, PathPassthrough
 				}
@@ -552,7 +608,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		built, buildWarns, err := op.Build(ctx, tgt, ac.Adapter)
 		ac.Warns = append(ac.Warns, buildWarns...)
 		if err != nil {
-			return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
+			return failRender(err)
 		}
 		hr = built
 	}
@@ -560,6 +616,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
 	}
 	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
+		if o := stoppedWaiting(r.Context(), ctx); o != "" {
+			ie := errorFor(o, err)
+			return failBefore(o, err, ie.Message, ie.Type)
+		}
 		// A credential that cannot be produced is a credential failure, not a
 		// provider one: an expired OAuth grant must cool the account rather
 		// than the upstream, which is serving everyone else fine.
@@ -567,8 +627,14 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 
-	attemptStart := time.Now()
+	// A credential refreshed above reached its token endpoint through ctx,
+	// and the trace counted that connection as this send's.
+	ac.connected.Store(false)
+	ac.sent = time.Now()
 	resp, doErr := e.client.Do(hr)
+	// A query-param key is in the URL a transport error quotes, and this text
+	// goes to the attempt row and to the client.
+	doErr = ac.transportTimeout(redact.Error(doErr, ac.secret))
 	ac.resp = resp
 	outcome := e.classify(ac.Adapter, r.Context(), ctx, resp, doErr)
 
@@ -593,7 +659,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	if resp != nil {
 		statusCode = resp.StatusCode
 	}
-	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(attemptStart), path)
+	e.recordAttempt(rec, c, outcome, statusCode, doErr, time.Since(ac.sent), path)
 
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {
@@ -606,7 +672,9 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			Path: path, Issued: true}
 	}
 
+	resp.Body = &idleBody{ReadCloser: resp.Body, ac: ac}
 	cw := NewCommitWriter(w)
+	cw.hold = ac
 	var aerr *ir.Error
 	switch {
 	case path == PathPassthrough && streaming:
@@ -621,10 +689,40 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	// outcome after bytes have gone out is describing a post-commit failure,
 	// and phase 3's rule says the chain ends there regardless — a second
 	// attempt would concatenate two half-responses on one connection.
+	//
+	// Ending the chain does not make the failure a success. The attempt row
+	// keeps its success, because it did serve, but the breaker hears the
+	// failure and the request row carries it. A client that hung up gets
+	// neither: the provider did nothing wrong and the response was not an
+	// error. Its row says cancelled instead, as a hang-up before commit does.
 	if cw.Committed() && outcome != adapter.OutcomeSuccess {
-		rec.ErrorCode = string(ir.ErrAPI)
+		var cause error
+		if aerr != nil {
+			cause = aerr
+		}
+		ac.recordFailure(outcome, resp, cause)
+		gone := outcome == adapter.OutcomeClientCancelled
+		if gone && cw.Err() == nil && shutDown(r.Context()) {
+			gone, aerr = false, shutdownError()
+		}
+		if !gone {
+			code := ir.ErrAPI
+			if aerr != nil && aerr.Type != "" {
+				code = aerr.Type
+			}
+			rec.ErrorCode = string(code)
+			if n := len(rec.Attempts); n > 0 && aerr != nil {
+				rec.Attempts[n-1].Error = aerr.Message
+			}
+		}
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
-			Path: path, Committed: true, Issued: true}
+			Path: path, Committed: true, Issued: true, ClientGone: gone}
+	}
+	if outcome == adapter.OutcomeRetryableProvider && aerr != nil {
+		// An in-body rate limit steps to the next credential as a 429 would.
+		if s := statusForParseError(aerr); s != 0 {
+			statusCode = s
+		}
 	}
 	return attemptResult{Outcome: outcome, Status: statusCode, Err: aerr,
 		Path: path, Committed: cw.Committed(), Issued: true}
@@ -708,7 +806,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 			// A 2xx whose stream fails before commit is classified from the
 			// stream error, not the status line. Anthropic delivers
 			// overloaded_error as an in-stream event under a 200.
-			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(err.Error())
+			return ac.reclassifyStream(err)
 		}
 		if ev.Usage != nil {
 			applyUsage(rec, ev.Usage)
@@ -721,7 +819,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 		if berr := buf.add(ev); berr != nil {
 			// A cap breach is an attempt failure, not a client error: the
 			// provider is misbehaving and another one may not.
-			return adapter.OutcomeRetryableProvider, ac.reclassifyStream(berr.Error())
+			return ac.reclassifyStream(berr)
 		}
 	}
 
@@ -735,6 +833,11 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	// response must not be killed, while a provider that goes silent must be.
 	ac.resetIdle()
 
+	var (
+		streamErr error
+		streamOut adapter.Outcome
+		streamIE  *ir.Error
+	)
 	events := func(yield func(ir.StreamEvent, error) bool) {
 		for _, buffered := range buf.events() {
 			if !yield(buffered, nil) {
@@ -744,7 +847,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 		if haveCommitted && !yield(committed, nil) {
 			return
 		}
-		for {
+		for cw.Err() == nil {
 			ev, err, ok := next()
 			if !ok {
 				return
@@ -755,6 +858,12 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 					applyUsage(rec, ev.Usage)
 				}
 				streamWarns = append(streamWarns, ev.Warnings...)
+			} else {
+				// Classified before the error event is written: a client
+				// that is gone by then fails that write too, and the
+				// provider's failure came first.
+				streamErr = err
+				streamOut, streamIE = ac.failedAfterCommit(err)
 			}
 			if !yield(ev, err) {
 				return
@@ -768,21 +877,105 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	}
 	_ = d.WriteStream(cw, events)
 	rec.Warnings = warningStrings(append(ac.Warns, streamWarns...))
+	if streamErr != nil {
+		return streamOut, streamIE
+	}
+	if werr := cw.Err(); werr != nil {
+		return ac.clientFailed(werr)
+	}
 	return adapter.OutcomeSuccess, nil
 }
 
-// reclassifyStream records a pre-commit stream failure against health and the
-// attempt row, and returns the error to serve if this was the last candidate.
-func (ac *AttemptCtx) reclassifyStream(msg string) *ir.Error {
-	ac.recordHealth(adapter.OutcomeRetryableProvider, ac.resp)
-	demoteLastAttempt(ac.Rec, adapter.OutcomeRetryableProvider, false)
-	if n := len(ac.Rec.Attempts); n > 0 {
-		ac.Rec.Attempts[n-1].Error = msg
+// failedAfterCommit classifies a failure that ended a response the client had
+// already started receiving. The loop ends the chain whatever it returns; the
+// outcome is what the breaker and the request row are told.
+func (ac *AttemptCtx) failedAfterCommit(err error) (adapter.Outcome, *ir.Error) {
+	outcome := ac.readOutcome(err)
+	var ie *ir.Error
+	if !errors.As(err, &ie) {
+		ie = &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
 	}
-	return &ir.Error{Type: ir.ErrAPI, Message: msg}
+	return outcome, ie
 }
 
-var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
+// reclassifyStream records a pre-commit stream failure against health and the
+// attempt row, and returns the outcome and the error to serve if this was the
+// last candidate.
+func (ac *AttemptCtx) reclassifyStream(err error) (adapter.Outcome, *ir.Error) {
+	outcome := ac.readOutcome(err)
+	ac.recordFailure(outcome, ac.resp, err)
+	demoteLastAttempt(ac.Rec, outcome, false)
+	if n := len(ac.Rec.Attempts); n > 0 {
+		ac.Rec.Attempts[n-1].Error = err.Error()
+	}
+	if outcome == adapter.OutcomeClientCancelled {
+		return outcome, errorFor(outcome, err)
+	}
+	var ie *ir.Error
+	if errors.As(err, &ie) {
+		return outcome, ie
+	}
+	return outcome, &ir.Error{Type: ir.ErrAPI, Message: err.Error()}
+}
+
+// recordFailure emits the breaker signal for a failure read from a 2xx body,
+// with the status a typed error stands for.
+func (ac *AttemptCtx) recordFailure(o adapter.Outcome, resp *http.Response, err error) {
+	if o == adapter.OutcomeRetryableProvider {
+		resp = withStatus(resp, statusForParseError(err))
+	}
+	ac.recordHealth(o, resp)
+}
+
+// ErrShutdown is the cause the server cancels request contexts with once the
+// shutdown drain has run out. A request cut by it was ended by the gateway,
+// not by its client.
+var ErrShutdown = errors.New("darkrouter: shutting down")
+
+// shutDown reports that ctx was cancelled by the gateway shutting down. The
+// breaker still hears client_cancelled for such a request, the one outcome
+// that says nothing about the provider, but its row must not blame the client.
+func shutDown(ctx context.Context) bool { return errors.Is(context.Cause(ctx), ErrShutdown) }
+
+func shutdownError() *ir.Error { return &ir.Error{Type: ir.ErrDarkrouter, Message: msgShuttingDown} }
+
+// errDarkrouterTimeout is what every attempt-timer cause matches with
+// errors.Is, whichever bound fired.
+var errDarkrouterTimeout = errors.New("darkrouter: timeout exceeded")
+
+// timeoutBound names the policy.timeout setting an attempt's timer is
+// enforcing.
+type timeoutBound int32
+
+const (
+	boundFirstByte timeoutBound = iota
+	boundConnect
+	boundIdle
+	boundTotal
+)
+
+func (b timeoutBound) String() string {
+	switch b {
+	case boundConnect:
+		return "connect"
+	case boundIdle:
+		return "idle"
+	case boundTotal:
+		return "total"
+	default:
+		return "first_byte"
+	}
+}
+
+type timeoutError struct{ bound timeoutBound }
+
+func (e *timeoutError) Error() string {
+	return "darkrouter: " + e.bound.String() + " timeout exceeded"
+}
+
+func (e *timeoutError) Is(target error) bool { return target == errDarkrouterTimeout }
+
+func timeoutCause(b timeoutBound) error { return &timeoutError{bound: b} }
 
 // classify asks the adapter, then overrides for the two cases no adapter can
 // see: a Darkrouter-imposed deadline, and a cancellation whose origin is the
@@ -791,6 +984,21 @@ var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
 // The deadline is checked first. Both cancel the same derived context, and if
 // the client also disappears in that instant, checking the disconnect first
 // would silently reclassify a genuine provider timeout as a client hang-up.
+// stoppedWaiting names why an attempt ended while its credential was still
+// being produced, when that was not the credential's doing: the attempt timer
+// fired, or the client (or the gateway shutting down) cancelled the request.
+// A refresh cut short that way says nothing about the account, and blaming it
+// would cool a healthy one. Empty when the authorizer failed on its own.
+func stoppedWaiting(inbound, upstream context.Context) adapter.Outcome {
+	switch {
+	case errors.Is(context.Cause(upstream), errDarkrouterTimeout):
+		return adapter.OutcomeRetryableProvider
+	case inbound.Err() != nil:
+		return adapter.OutcomeClientCancelled
+	}
+	return ""
+}
+
 func (e *Executor) classify(ad adapter.Adapter, inbound, upstream context.Context,
 	resp *http.Response, err error) adapter.Outcome {
 
@@ -830,18 +1038,25 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 	if snap == nil {
 		return
 	}
-	if rec.CostMicros == nil && rec.FinalProviderID != "" && rec.FinalModel != "" {
+	// A response that reported no usage leaves every count at zero, and a
+	// priced zero would claim the request was free. The attempt rows below
+	// follow the same rule.
+	burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
+		rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
+		rec.ReasoningTokens != 0
+	if rec.CostMicros == nil && burned && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
-			rec.CostMicros = m.Pricing.Cost(catalog.Tokens{
-				Input: rec.TokensIn, Output: rec.TokensOut, Reasoning: rec.ReasoningTokens,
+			tokens := catalog.Tokens{
+				Input: rec.TokensIn, Output: rec.TokensOut,
 				CacheRead: rec.CacheReadTokens, CacheWrite: rec.CacheWriteTokens,
 				CacheWrite5m: rec.CacheWrite5mTokens, CacheWrite1h: rec.CacheWrite1hTokens,
-			})
+			}
+			rec.CostMicros = m.Pricing.Cost(tokens)
 			// Stamped with the cost rather than looked up when the total is
 			// read: a sync re-stamps the catalog row, and a request must keep
 			// reporting the authority it was actually billed on.
 			if rec.CostMicros != nil {
-				rec.PriceGrade = string(m.Pricing.Grade())
+				rec.PriceGrade = string(m.Pricing.GradeFor(tokens))
 			}
 		}
 	}
@@ -866,9 +1081,6 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 			// agreeing. Guarded on the record's own burn, not the attempt's
 			// copied in/out tokens, so a fully cached prompt still carries its
 			// cost even though the attempt row has nowhere to show it came from.
-			burned := rec.TokensIn != 0 || rec.TokensOut != 0 ||
-				rec.CacheReadTokens != 0 || rec.CacheWriteTokens != 0 ||
-				rec.ReasoningTokens != 0
 			if rec.CostMicros != nil && burned {
 				c := *rec.CostMicros
 				a.CostMicros = &c
@@ -992,14 +1204,27 @@ func applyAuthorizer(ctx context.Context, hr *http.Request, a auth.Authorizer) e
 // credentialFor returns the target's authorizer and the api key the adapter
 // should write. Exactly one of them is ever non-zero: a non-static style leaves
 // the key empty so no adapter writes a token document into its own header.
+//
+// A style that names where the key goes — x-api-key, a header of its own, a
+// query parameter — is written by an authorizer too, not by the adapter: an
+// adapter knows only its kind's usual header, and a provider that declares
+// another rejects the key sent there. Bearer and its keyless variants keep the
+// adapter's default, because bearer is also the column default every row
+// without a declared style carries, and an Anthropic or Gemini row created
+// that way authenticates with its adapter's own header.
 func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 	c router.Candidate) (string, auth.Authorizer, error) {
 
-	style := p.AuthStyle
-	if style == "" {
-		style = presetStyle(p.Preset)
-	}
+	style := styleOf(p)
 	secret := secretOf(p, c.KeyID, style)
+	switch style {
+	case auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam:
+		pa := presetAuth(p.Preset)
+		return "", func(_ context.Context, hr *http.Request) error {
+			catalog.ApplyStaticAuth(hr, style, pa.Header, pa.QueryParam, secret)
+			return nil
+		}, nil
+	}
 	if auth.IsStatic(style) {
 		return secret, nil, nil
 	}
@@ -1042,6 +1267,14 @@ func credentialKind(p provider.Provider, keyID string) string {
 // override it. It mirrors rerankPath, which already reaches presets from here.
 func presetStyle(preset string) string {
 	return presetAuth(preset).Style
+}
+
+// styleOf is the provider's effective auth style: the row's, else its preset's.
+func styleOf(p provider.Provider) string {
+	if p.AuthStyle != "" {
+		return p.AuthStyle
+	}
+	return presetStyle(p.Preset)
 }
 
 // secretOf resolves the bare credential for one candidate. The style is the
@@ -1111,14 +1344,52 @@ func routerError(err error) *ir.Error {
 	}
 }
 
-// outcomeForParseError separates "this provider is broken" from "this provider
-// answered, and the answer was a refusal". Only the first is a health signal.
+// outcomeForParseError classifies an error the provider reported inside a 2xx
+// body — a unary error envelope or an in-stream error event — the way the
+// same error under its own status line would have been. An adapter that typed
+// it has already read the provider's vocabulary; discarding that here would
+// skip a provider's healthy credentials over one rejected key, and fail over
+// a refusal every model in the chain will repeat. Anything untyped is a body
+// the provider could not deliver, which is a provider fault.
 func outcomeForParseError(err error) adapter.Outcome {
 	var e *ir.Error
-	if errors.As(err, &e) && e.Type == ir.ErrContentFilter {
-		return adapter.OutcomeFatal
+	if !errors.As(err, &e) {
+		return adapter.OutcomeRetryableProvider
 	}
-	return adapter.OutcomeRetryableProvider
+	switch e.Type {
+	case ir.ErrContentFilter, ir.ErrInvalidRequest, ir.ErrPayloadTooLarge, ir.ErrUnsupportedMedia:
+		return adapter.OutcomeFatal
+	case ir.ErrAuthentication, ir.ErrPermission:
+		return adapter.OutcomeRetryableCredential
+	case ir.ErrNotFound:
+		return adapter.OutcomeRetryableModel
+	default:
+		return adapter.OutcomeRetryableProvider
+	}
+}
+
+// statusForParseError is the status line a typed in-body error stands for,
+// where the breaker and the advance rule read one. Only a rate limit needs it:
+// it is the one provider outcome that cools at once and steps to the next
+// credential instead of skipping the provider. Zero means the real status.
+func statusForParseError(err error) int {
+	var e *ir.Error
+	if errors.As(err, &e) && e.Type == ir.ErrRateLimit {
+		return http.StatusTooManyRequests
+	}
+	return 0
+}
+
+// withStatus is resp as a breaker signal should read it when a body error
+// stands for another status. The copy is shallow: the signal reads only the
+// status and the Retry-After header.
+func withStatus(resp *http.Response, status int) *http.Response {
+	if resp == nil || status == 0 {
+		return resp
+	}
+	cp := *resp
+	cp.StatusCode = status
+	return &cp
 }
 
 func errorFor(o adapter.Outcome, err error) *ir.Error {

@@ -337,4 +337,90 @@ func TestAManualPresetGetsNoListener(t *testing.T) {
 	}
 }
 
-var _ = config.Config{}
+func TestCompleteGivesUpOnATokenEndpointThatNeverAnswers(t *testing.T) {
+	// The paste request carries no deadline of its own, so the client is the
+	// only thing that can end an exchange the token endpoint accepted and then
+	// never answered.
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(hung.Close)
+	// Runs before Close, which would otherwise wait on the parked handler.
+	t.Cleanup(func() { close(release) })
+
+	db := storetest.Migrated(t)
+	key, err := store.OpenKeyring(context.Background(), db, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Deps{
+		DB: db, Key: key,
+		Config: configStoreWith(t, nil, func(c *config.Config) {
+			c.Catalog.Discovery.Timeout = 100 * time.Millisecond
+		}),
+		Presets: oauthPresets(hung.URL, catalog.Redirect{Style: "manual"}),
+		Src:     provider.NewSQLSource(db, key),
+		Breaker: health.New(3, time.Minute),
+		Flows:   auth.NewFlowStore(time.Minute),
+		HTTP:    &http.Client{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, token := login(t, s)
+	id := oauthProvider(t, s, cookie, token)
+	start := startFlow(t, s, cookie, token, id, `{}`)
+	body, _ := json.Marshal(map[string]string{
+		"redirected_url": "http://localhost/callback?code=c&state=" + url.QueryEscape(start.State)})
+
+	done := make(chan int, 1)
+	go func() {
+		done <- do(t, s, cookie, token, "POST", "/api/providers/"+id+"/oauth/complete", string(body)).Code
+	}()
+	select {
+	case code := <-done:
+		if code != http.StatusBadGateway {
+			t.Errorf("status = %d, want 502 for an unreachable token endpoint", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the completion is still waiting on a token endpoint that will never answer")
+	}
+}
+
+// An OAuth completion that stored its credential and then could not reload
+// must still hand back the credential: reported as a failure, the operator
+// reconnects and a second credential is stored for the same account.
+func TestACompletionTheRouterDidNotLoadReturnsTheCredential(t *testing.T) {
+	s, cookie, token, _ := serverWithFakeAuthServer(t)
+	id := oauthProvider(t, s, cookie, token)
+	breakNextReload(t, s, cookie, token)
+	start := startFlow(t, s, cookie, token, id, `{"label":"personal"}`)
+
+	pasted := "http://localhost/callback?code=the-code&state=" + url.QueryEscape(start.State)
+	body, _ := json.Marshal(map[string]string{"redirected_url": pasted})
+	w := do(t, s, cookie, token, "POST", "/api/providers/"+id+"/oauth/complete", string(body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("complete = %d %s; the credential was stored", w.Code, w.Body.String())
+	}
+	got := decodeRouting(t, w.Body.Bytes())
+	if got.CredentialID == "" {
+		t.Error("no credential id in the reply")
+	}
+	if got.RoutingUpdated == nil || *got.RoutingUpdated {
+		t.Errorf("routing_updated = %v, want false", got.RoutingUpdated)
+	}
+	if !strings.Contains(got.Warning, "saved") {
+		t.Errorf("warning = %q; it must say the change was saved but not loaded", got.Warning)
+	}
+	creds, err := s.deps.DB.CredentialSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds[id]) != 1 {
+		t.Errorf("credentials = %+v, want the one stored", creds[id])
+	}
+}

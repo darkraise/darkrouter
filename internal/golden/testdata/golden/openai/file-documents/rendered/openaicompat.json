@@ -1,0 +1,42 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Summarise these files.",
+          "type": "text"
+        },
+        {
+          "file": {
+            "file_data": "data:text/plain;base64,cGxhaW4gbm90ZXMK",
+            "filename": "document.txt"
+          },
+          "type": "file"
+        },
+        {
+          "file": {
+            "file_data": "data:text/markdown;base64,IyBIZWFkaW5nCgpib2R5Cg==",
+            "filename": "document.md"
+          },
+          "type": "file"
+        },
+        {
+          "file": {
+            "file_data": "data:application/pdf;base64,JVBERi0xLjQK",
+            "filename": "document.pdf"
+          },
+          "type": "file"
+        },
+        {
+          "file": {
+            "file_data": "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,UEsDBBQAAAA=",
+            "filename": "document"
+          },
+          "type": "file"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

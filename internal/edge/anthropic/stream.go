@@ -30,7 +30,9 @@ func blockStartBody(d *ir.Delta) map[string]any {
 	case ir.BlockThinking:
 		return map[string]any{"type": "thinking", "thinking": "", "signature": ""}
 	case ir.BlockRedactedThinking:
-		return map[string]any{"type": "redacted_thinking", "data": ""}
+		// Bedrock's payload arrives in the delta that opens the block, and
+		// the start is the only place Anthropic's wire can carry it.
+		return map[string]any{"type": "redacted_thinking", "data": d.Thinking}
 	case ir.BlockToolUse:
 		return map[string]any{
 			"type": "tool_use", "id": d.ToolID, "name": d.ToolName, "input": map[string]any{},
@@ -74,6 +76,7 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		usage     ir.Usage
 		started   bool
 		wireOf    = map[int]int{}
+		nextWire  int
 		stop      = ir.StopEndTurn
 	)
 
@@ -100,7 +103,10 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 		if err := start(); err != nil {
 			return 0, err
 		}
-		wire := len(wireOf)
+		// A wire index is a position in the final content array, so a closed
+		// block keeps its slot.
+		wire := nextWire
+		nextWire++
 		wireOf[irIdx] = wire
 		body := blockStartBody(d)
 		return wire, send("content_block_start", map[string]any{
@@ -204,6 +210,9 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			}
 
 		case ir.EventMessageStop:
+			// The message is not ended here: OpenAI-compatible and Bedrock
+			// upstreams report usage after their stop, and message_delta has
+			// to carry it.
 			if ev.StopReason != "" {
 				stop = ev.StopReason
 			}
@@ -213,18 +222,11 @@ func WriteStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error])
 			if err := closeAll(); err != nil {
 				return err
 			}
-			if err := send("message_delta", map[string]any{
-				"delta": map[string]any{"stop_reason": stopReasonWire(stop), "stop_sequence": nil},
-				"usage": usageBody(usage),
-			}); err != nil {
-				return err
-			}
-			return send("message_stop", map[string]any{})
 		}
 	}
 
-	// The sequence ended without a message_stop. Close what is open and end the
-	// message anyway, or the client waits forever.
+	// The message ends once the sequence does, whether or not a message_stop
+	// arrived: without one the client would wait forever.
 	if err := start(); err != nil {
 		return err
 	}

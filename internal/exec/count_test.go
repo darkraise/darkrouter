@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -211,6 +213,61 @@ func TestHandleCountAppliesTheAuthorizer(t *testing.T) {
 	}
 	if got != "Bearer resolved" {
 		t.Errorf("Authorization = %q; the resolved credential must be applied", got)
+	}
+}
+
+// classifySpy is an anthropic adapter that keeps the text of every error it
+// is asked to classify.
+type classifySpy struct {
+	*anthropic.Adapter
+	texts *[]string
+}
+
+func (s classifySpy) Classify(resp *http.Response, err error) adapter.Outcome {
+	if err != nil {
+		*s.texts = append(*s.texts, err.Error())
+	}
+	return s.Adapter.Classify(resp, err)
+}
+
+// A count send that fails in transport quotes its URL, and a query-param key
+// is in that URL. The text goes wherever the send's error goes, so it is
+// cleared of the key before anything reads it, as the attempt loop's is.
+func TestACountTransportFailureDoesNotCarryAQueryParamKey(t *testing.T) {
+	const secret = "sk-live/secret+value="
+	var sawKey atomic.Bool
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("key") == secret {
+			sawKey.Store(true)
+		}
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer up.Close()
+
+	p := providertest.Keyed("fake", "anthropic", up.URL, secret, "m")
+	p.AuthStyle = "query-param"
+	var texts []string
+	e := New(config.NewStoreOf(testConfig(t, nil)), providertest.NewSource(p),
+		map[string]adapter.Adapter{"anthropic": classifySpy{Adapter: anthropic.New(), texts: &texts}}, Deps{})
+	postCount(t, e, "anthropic", `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+
+	if !sawKey.Load() {
+		t.Fatal("the key was not sent as a query parameter, so this proves nothing")
+	}
+	if !strings.Contains(strings.Join(texts, "\n"), "EOF") {
+		t.Fatalf("classified errors = %q, want the transport failure", texts)
+	}
+	for _, text := range texts {
+		for _, form := range []string{secret, url.QueryEscape(secret), "secret"} {
+			if strings.Contains(text, form) {
+				t.Errorf("%q carries the key as %q", text, form)
+			}
+		}
 	}
 }
 

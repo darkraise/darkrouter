@@ -115,6 +115,9 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return nil, fmt.Errorf("parse bedrock response: %w", err)
 	}
+	if w.StopReason == "" && w.Output.Message.Role == "" && len(w.Output.Message.Content) == 0 {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no output message"}
+	}
 
 	out := &ir.Response{
 		StopReason: stopReason(w.StopReason),

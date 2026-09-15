@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -171,6 +172,34 @@ func TestWriteStreamReassemblesAFunctionCall(t *testing.T) {
 	}
 }
 
+func TestWriteStreamEndsATruncatedFunctionCallAsValidJSON(t *testing.T) {
+	cases := []struct {
+		stop ir.StopReason
+		want string
+	}{
+		{ir.StopMaxTokens, "MAX_TOKENS"},
+		{ir.StopToolUse, "MALFORMED_FUNCTION_CALL"},
+	}
+	for _, tc := range cases {
+		got := arrayChunks(t, []ir.StreamEvent{
+			{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+			{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{
+				Type: ir.BlockToolUse, ToolID: "call_a", ToolName: "weather"}},
+			{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{
+				Type: ir.BlockToolUse, ToolInput: `{"city":`}},
+			{Type: ir.EventMessageStop, StopReason: tc.stop},
+		}, nil)
+		last := got[len(got)-1]["candidates"].([]any)[0].(map[string]any)
+		if last["finishReason"] != tc.want {
+			t.Errorf("stop %s: final chunk = %v, want finishReason %s", tc.stop, last, tc.want)
+		}
+		if strings.Contains(fmt.Sprint(got), "functionCall") {
+			t.Errorf("stop %s: chunks = %v; a call with unparseable args must not reach the client",
+				tc.stop, got)
+		}
+	}
+}
+
 func TestWriteStreamCarriesThoughtSignatures(t *testing.T) {
 	got := sseChunks(t, []ir.StreamEvent{
 		{Type: ir.EventMessageStart, ID: "r", Model: "m"},
@@ -198,6 +227,58 @@ func TestWriteStreamCarriesThoughtSignatures(t *testing.T) {
 	}
 	if !sawThought || !sawSig {
 		t.Fatalf("chunks = %v", got)
+	}
+}
+
+// Gemini requires a signature back in the exact part it arrived on. The IR
+// splits a thought's text from its signature, so a Gemini client must get
+// them rejoined rather than a separate empty thought part carrying the
+// signature.
+func TestWriteStreamKeepsASignatureOnItsThoughtPart(t *testing.T) {
+	thoughtParts := func(chunks []map[string]any) []map[string]any {
+		var out []map[string]any
+		for _, c := range chunks {
+			cands, _ := c["candidates"].([]any)
+			if len(cands) == 0 {
+				continue
+			}
+			parts, _ := cands[0].(map[string]any)["content"].(map[string]any)["parts"].([]any)
+			for _, p := range parts {
+				if m := p.(map[string]any); m["thought"] == true {
+					out = append(out, m)
+				}
+			}
+		}
+		return out
+	}
+
+	got := thoughtParts(sseChunks(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: "weigh"}},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: "ing"}},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockThinking, Signature: "sig-1"}},
+		{Type: ir.EventContentDelta, Index: 1, Delta: &ir.Delta{Type: ir.BlockText, Text: "No."}},
+		{Type: ir.EventContentDelta, Index: 2, Delta: &ir.Delta{Type: ir.BlockThinking, Signature: "sig-2"}},
+		{Type: ir.EventContentDelta, Index: 3, Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: "unsigned"}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil))
+	want := []struct{ text, sig string }{{"weigh", ""}, {"ing", "sig-1"}, {"", "sig-2"}, {"unsigned", ""}}
+	if len(got) != len(want) {
+		t.Fatalf("thought parts = %v, want %v", got, want)
+	}
+	for i, w := range want {
+		sig, _ := got[i]["thoughtSignature"].(string)
+		if got[i]["text"] != w.text || sig != w.sig {
+			t.Errorf("thought part %d = %v, want text %q signature %q", i, got[i], w.text, w.sig)
+		}
+	}
+
+	errored := thoughtParts(sseChunks(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "r", Model: "m"},
+		{Type: ir.EventContentDelta, Delta: &ir.Delta{Type: ir.BlockThinking, Thinking: "partial"}},
+	}, &ir.Error{Type: ir.ErrAPI, Message: "boom"}))
+	if len(errored) != 1 || errored[0]["text"] != "partial" {
+		t.Errorf("thought parts = %v; a held thought is still delivered before the error chunk", errored)
 	}
 }
 

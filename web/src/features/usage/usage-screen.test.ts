@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   chartSeries,
   costTick,
+  keyLabel,
   rankingHeading,
   readDimension,
   readRange,
@@ -41,7 +42,7 @@ describe("the Total view's series", () => {
     const rows = [row({ requests: 3 }), row({ requests: 4, day: "2026-08-25" })]
     const series = chartSeries(rows, "day")
     expect(series.keys).toEqual(["total"])
-    expect(stackByDay(series.rows, series.keys, (r) => r.requests)).toEqual([
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests, ["2026-08-25", "2026-08-26"])).toEqual([
       { day: "2026-08-25", total: 4 },
       { day: "2026-08-26", total: 3 },
     ])
@@ -50,6 +51,20 @@ describe("the Total view's series", () => {
   it("keeps a dimension's own keys", () => {
     const series = chartSeries([row({ key: "groq" }), row({ key: "nebius" })], "provider")
     expect(series.keys).toEqual(["groq", "nebius"])
+  })
+
+  it("plots requests with no alias as their own series", () => {
+    const rows = [row({ key: "", requests: 5 }), row({ key: "fast", requests: 2 })]
+    const series = chartSeries(rows, "alias")
+    expect(series.keys).toEqual(["", "fast"])
+    expect(stackByDay(series.rows, series.keys, (r) => r.requests, ["2026-08-26"])).toEqual([
+      { day: "2026-08-26", "": 5, fast: 2 },
+    ])
+  })
+
+  it("names the no-alias series instead of leaving it blank", () => {
+    expect(keyLabel("")).toBe("(none)")
+    expect(keyLabel("fast")).toBe("fast")
   })
 })
 
@@ -74,40 +89,55 @@ describe("the ranking heading", () => {
 
 describe("summarise", () => {
   it("sums a key across days", () => {
-    const got = summarise([
-      row({ key: "groq", requests: 3, tokens_in: 10 }),
-      row({ key: "groq", requests: 4, tokens_in: 5, day: "2026-08-25" }),
-    ])
+    const got = summarise(
+      [
+        row({ key: "groq", requests: 3, tokens_in: 10 }),
+        row({ key: "groq", requests: 4, tokens_in: 5, day: "2026-08-25" }),
+      ],
+      "provider",
+    )
     expect(got).toHaveLength(1)
     expect(got[0]?.requests).toBe(7)
     expect(got[0]?.tokensIn).toBe(15)
   })
 
   it("keeps a total unpriced only while every row is", () => {
-    expect(summarise([row({ key: "a" }), row({ key: "a" })])[0]?.cost).toBeNull()
+    expect(summarise([row({ key: "a" }), row({ key: "a" })], "provider")[0]?.cost).toBeNull()
     // One priced row makes the total real, if partial: reporting it as unknown
     // would hide money that was actually spent.
     expect(
-      summarise([row({ key: "a" }), row({ key: "a", cost_micros: 500 })])[0]?.cost,
+      summarise([row({ key: "a" }), row({ key: "a", cost_micros: 500 })], "provider")[0]?.cost,
     ).toBe(500)
   })
 
-  it("falls back to the day when a dimension has no key", () => {
-    expect(summarise([row({ requests: 2 })])[0]?.key).toBe("2026-08-26")
+  it("keys the Total view by day", () => {
+    expect(summarise([row({ requests: 2 })], "day")[0]?.key).toBe("2026-08-26")
+  })
+
+  it("keeps requests with no alias under an empty key rather than a date", () => {
+    // A request for a model by name resolves no alias. Keying it by its day
+    // listed dates as alias names and linked them to Requests as filters.
+    const got = summarise(
+      [row({ key: "", requests: 2 }), row({ key: "", requests: 1, day: "2026-08-25" })],
+      "alias",
+    )
+    expect(got).toHaveLength(1)
+    expect(got[0]?.key).toBe("")
+    expect(got[0]?.requests).toBe(3)
   })
 
   it("orders by volume so the busiest key leads", () => {
-    const got = summarise([
-      row({ key: "quiet", requests: 1 }),
-      row({ key: "busy", requests: 9 }),
-    ])
+    const got = summarise(
+      [row({ key: "quiet", requests: 1 }), row({ key: "busy", requests: 9 })],
+      "provider",
+    )
     expect(got.map((r) => r.key)).toEqual(["busy", "quiet"])
   })
 
   it("carries attempts separately from requests", () => {
     // Attempts exceed requests exactly when something failed over, which is
     // what explains a cost the request count alone does not.
-    const got = summarise([row({ key: "a", requests: 1, attempts: 3 })])
+    const got = summarise([row({ key: "a", requests: 1, attempts: 3 })], "provider")
     expect(got[0]?.attempts).toBe(3)
   })
 })
@@ -123,6 +153,7 @@ describe("stackByDay", () => {
         [at("2026-08-25", "groq", 3), at("2026-08-25", "nebius", 1), at("2026-08-26", "groq", 2)],
         ["groq", "nebius"],
         (r) => r.requests,
+        ["2026-08-25", "2026-08-26"],
       ),
     ).toEqual([
       { day: "2026-08-25", groq: 3, nebius: 1 },
@@ -133,8 +164,27 @@ describe("stackByDay", () => {
   it("zero-fills a key absent on a day rather than leaving a gap", () => {
     // A stacked area with a missing key renders a hole through the stack,
     // which reads as traffic stopping everywhere rather than at one provider.
-    const out = stackByDay([at("2026-08-25", "groq", 3)], ["groq", "nebius"], (r) => r.requests)
+    const out = stackByDay([at("2026-08-25", "groq", 3)], ["groq", "nebius"], (r) => r.requests, [
+      "2026-08-25",
+    ])
     expect(out[0]?.nebius).toBe(0)
+  })
+
+  it("zero-fills a day with no traffic at all rather than dropping it", () => {
+    // The x-axis is categorical, so a missing day is not a gap: its
+    // neighbours close up and idle days vanish from the timeline.
+    const out = stackByDay(
+      [at("2026-08-24", "groq", 3), at("2026-08-27", "groq", 5)],
+      ["groq"],
+      (r) => r.cost_micros,
+      ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"],
+    )
+    expect(out).toEqual([
+      { day: "2026-08-24", groq: null },
+      { day: "2026-08-25", groq: 0 },
+      { day: "2026-08-26", groq: 0 },
+      { day: "2026-08-27", groq: null },
+    ])
   })
 
   it("ignores a key not in the series list", () => {
@@ -142,6 +192,7 @@ describe("stackByDay", () => {
       [at("2026-08-25", "groq", 3), at("2026-08-25", "other", 9)],
       ["groq"],
       (r) => r.requests,
+      ["2026-08-25"],
     )
     expect(out[0]).toEqual({ day: "2026-08-25", groq: 3 })
   })
@@ -155,6 +206,7 @@ describe("stackByDay with a nullable value", () => {
       [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, null)],
       ["groq"],
       (r) => r.cost_micros,
+      ["2026-08-25"],
     )
     expect(out[0]?.groq).toBeNull()
   })
@@ -166,6 +218,7 @@ describe("stackByDay with a nullable value", () => {
       [at("2026-08-25", "groq", 1, null), at("2026-08-25", "groq", 1, 500)],
       ["groq"],
       (r) => r.cost_micros,
+      ["2026-08-25"],
     )
     expect(out[0]?.groq).toBe(500)
   })
@@ -185,24 +238,30 @@ describe("row click-through", () => {
     // requestsSearch feeds a TanStack <Link search={...}>, not a URL string:
     // `to="/requests?..."` does not typecheck against the router's registered
     // route union, and no Link in this codebase builds a query that way.
-    const search = requestsSearch("provider", "groq", 7)
+    const search = requestsSearch("provider", "groq", "2026-08-20", 7)
     expect(search.provider).toBe("groq")
-    expect(search.since_ms).toBeDefined()
-    expect(Number(search.since_ms)).toBeLessThan(Date.now())
+  })
+
+  it("starts where the chart's window starts, not a rolling span back from now", () => {
+    // The charts cover whole UTC days from the served first_day. A rolling
+    // now-minus-7-days boundary cut part of that first day out of the
+    // drilldown, or let in part of the day before it.
+    expect(requestsSearch("provider", "groq", "2026-08-20", 7).since_ms).toBe(
+      String(Date.UTC(2026, 7, 20)),
+    )
   })
 
   it("filters by alias when the alias dimension is showing", () => {
-    expect(requestsSearch("alias", "fast", 30).alias).toBe("fast")
+    expect(requestsSearch("alias", "fast", "2026-08-20", 30).alias).toBe("fast")
   })
 
   it("carries a time window Requests' own picker can echo truthfully", () => {
-    // Requests' range pills are 1h/24h/7d; a bare since_ms with no matching
-    // pill renders that control as "All" while a filter is still active.
-    // "7d" lines up with Requests' own "7d" pill exactly; wider spans (this
-    // screen goes to 365d, Requests does not) land on no pill rather than a
-    // false "All" -- still true, just less specific.
-    expect(requestsSearch("provider", "groq", 7).range).toBe("7d")
-    expect(requestsSearch("provider", "groq", 90).range).toBe("90d")
+    // Requests' pills are rolling 1h/24h/7d. Calendar days match none of them,
+    // so the range names no pill -- lighting "7d" would claim a rolling window
+    // the filter is not, and an empty range would show a false "All".
+    const range = requestsSearch("provider", "groq", "2026-08-20", 7).range
+    expect(range).toBeTruthy()
+    expect(["1h", "24h", "7d", "all"]).not.toContain(range)
   })
 })
 

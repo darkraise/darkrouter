@@ -17,13 +17,14 @@ type pendingCall struct {
 }
 
 // renderContents converts the IR conversation to Gemini's contents array.
-func (f *Fetcher) renderContents(ctx context.Context, req *ir.Request) ([]any, []ir.Warning) {
+func (f *Fetcher) renderContents(ctx context.Context, req *ir.Request) ([]any, []ir.Warning, error) {
 	var (
 		out     []any
 		warns   []ir.Warning
 		curRole string
 		curPart []any
 		pending []pendingCall
+		budget  = &inlineBudget{left: f.MaxBytes}
 	)
 	flush := func() {
 		if curRole == "" {
@@ -38,8 +39,11 @@ func (f *Fetcher) renderContents(ctx context.Context, req *ir.Request) ([]any, [
 		if m.Role == ir.RoleAssistant {
 			role = "model"
 		}
-		ps, calls, w := f.renderParts(ctx, turn, m.Content, pending)
+		ps, calls, w, err := f.renderParts(ctx, turn, m.Content, pending, budget)
 		warns = append(warns, w...)
+		if err != nil {
+			return nil, warns, err
+		}
 		if len(calls) > 0 {
 			pending = calls
 		}
@@ -53,13 +57,67 @@ func (f *Fetcher) renderContents(ctx context.Context, req *ir.Request) ([]any, [
 		curPart = append(curPart, ps...)
 	}
 	flush()
-	return out, warns
+	return out, warns, nil
+}
+
+// skipSignatureValidator is the placeholder signature Google documents, in both
+// the Gemini API and Vertex thought-signature guides, for a function call that
+// has no real signature, such as one from another provider's history.
+const skipSignatureValidator = "skip_thought_signature_validator"
+
+// signCurrentTurn gives the first function call of each model step in the
+// current turn the placeholder signature when it has none, and reports whether
+// it did.
+//
+// Gemini 3 answers 400 at every thinking level when that call lacks its
+// signature. Only the current turn is validated, and it begins at the latest
+// user content that is not only function responses.
+func signCurrentTurn(contents []any) bool {
+	start := 0
+	for i := len(contents) - 1; i >= 0; i-- {
+		c, _ := contents[i].(map[string]any)
+		if c["role"] == "user" && !onlyFunctionResponses(c) {
+			start = i + 1
+			break
+		}
+	}
+	signed := false
+	for _, raw := range contents[start:] {
+		c, _ := raw.(map[string]any)
+		if c["role"] != "model" {
+			continue
+		}
+		parts, _ := c["parts"].([]any)
+		for _, raw := range parts {
+			p, _ := raw.(map[string]any)
+			if _, call := p["functionCall"]; !call {
+				continue
+			}
+			if _, ok := p["thoughtSignature"]; !ok {
+				p["thoughtSignature"] = skipSignatureValidator
+				signed = true
+			}
+			break
+		}
+	}
+	return signed
+}
+
+func onlyFunctionResponses(content map[string]any) bool {
+	parts, _ := content["parts"].([]any)
+	for _, raw := range parts {
+		p, _ := raw.(map[string]any)
+		if _, ok := p["functionResponse"]; !ok {
+			return false
+		}
+	}
+	return len(parts) > 0
 }
 
 // renderParts converts one turn. It returns the parts, and the function calls
 // this turn made so the next turn's responses can be matched to them.
 func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.ContentBlock,
-	pending []pendingCall) ([]any, []pendingCall, []ir.Warning) {
+	pending []pendingCall, budget *inlineBudget) ([]any, []pendingCall, []ir.Warning, error) {
 
 	var (
 		out   []any
@@ -112,8 +170,11 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 			})
 
 		case ir.BlockImage, ir.BlockDocument, ir.BlockAudio:
-			p, w := f.part(ctx, b.Media, string(b.Type))
+			p, w, err := f.part(ctx, b.Media, string(b.Type), budget)
 			warns = append(warns, w...)
+			if err != nil {
+				return nil, nil, warns, err
+			}
 			if p != nil {
 				out = append(out, p)
 			}
@@ -175,8 +236,11 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 				}
 				// Spec §7: functionResponse.response is a struct, so media is
 				// hoisted into the same turn as its own part rather than lost.
-				p, w := f.part(ctx, inner.Media, "tool_result."+string(inner.Type))
+				p, w, err := f.part(ctx, inner.Media, "tool_result."+string(inner.Type), budget)
 				warns = append(warns, w...)
+				if err != nil {
+					return nil, nil, warns, err
+				}
 				if p != nil {
 					out = append(out, p)
 					warns = append(warns, ir.Warning{
@@ -193,7 +257,7 @@ func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.Content
 			})
 		}
 	}
-	return out, calls, warns
+	return out, calls, warns, nil
 }
 
 func callByID(pending []pendingCall, id string) (pendingCall, bool) {

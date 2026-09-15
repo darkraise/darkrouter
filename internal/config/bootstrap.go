@@ -29,7 +29,7 @@ func BootstrapFrom(lookup func(string) (string, bool)) Bootstrap {
 		return v
 	}
 	// The secret is exempt from the trim above, and read raw. Under that rule
-	// a whitespace-only token read as unset, and an unset token turns the
+	// a whitespace-only token read as unset, and an unset token can turn the
 	// proxy's authentication off entirely: the one variable here whose
 	// empty-means-unset reading fails open rather than loudly.
 	token, _ := lookup("DARKROUTER_PROXY_TOKEN")

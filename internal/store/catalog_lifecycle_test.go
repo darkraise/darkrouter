@@ -396,7 +396,7 @@ func cacheColumns(t *testing.T, db *DB, id string) (sql.NullInt64, sql.NullInt64
 	return read, write
 }
 
-func TestSuccessLeavesAnUnquotedCacheRateAlone(t *testing.T) {
+func TestSuccessStoresOnlyTheCacheRatesItQuoted(t *testing.T) {
 	db, ctx := lifecycleDB(t)
 	if err := db.RecordDiscoverySuccess(ctx, "p",
 		[]DiscoveredModel{{ModelID: "naga"}, {ModelID: "indexed"}}, nil, t0); err != nil {
@@ -435,9 +435,11 @@ func TestSuccessLeavesAnUnquotedCacheRateAlone(t *testing.T) {
 		t.Errorf("naga cache write = %d, want NULL", write.Int64)
 	}
 
-	// The index knew a cache-write rate this listing does not mention, so the
-	// listing must not flatten it.
-	if _, write = cacheColumns(t, db, "indexed"); !write.Valid || write.Int64 != 3_750_000 {
-		t.Errorf("indexed cache write = %+v, want models.dev's 3750000 kept", write)
+	// The index knew a cache-write rate this listing does not mention. The row
+	// is stamped discovered now and syncs keep its cache columns, so the
+	// index's figure left in the column would never be refreshed; the merge
+	// fills the NULL from the index's current rate instead.
+	if _, write = cacheColumns(t, db, "indexed"); write.Valid {
+		t.Errorf("indexed cache write = %d, want NULL for a rate the listing did not quote", write.Int64)
 	}
 }

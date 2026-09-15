@@ -3,9 +3,187 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+// heldRefresh is a token endpoint that holds each refresh until released and
+// then answers with body, so a test can act while a refresh is in flight.
+func heldRefresh(t *testing.T, body string) (m *Manager, tokens *memTokens, arrived, release chan struct{}) {
+	t.Helper()
+	arrived, release = make(chan struct{}, 1), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		<-release
+		if body == `{"error":"invalid_grant"}` {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	tokens = newMemTokens()
+	return oauthManager(t, srv, tokens), tokens, arrived, release
+}
+
+func replacementSecret(t *testing.T) string {
+	t.Helper()
+	raw, err := Token{AccessToken: "at-replaced", RefreshToken: "rt-replaced",
+		ExpiresAt: time.Now().Add(time.Hour)}.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// An operator replaces the credential while a refresh of the old one is in
+// flight. The refresh answers afterwards with tokens descended from the old
+// secret, and writing them over the replacement undid the operator's save.
+func TestARefreshInFlightDoesNotOverwriteAReplacement(t *testing.T) {
+	m, tokens, arrived, release := heldRefresh(t,
+		`{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
+	old := expiring(t, -time.Minute)
+	az := oauthAz(t, m, old)
+
+	done := make(chan error, 1)
+	go func() { done <- az(context.Background(), blank(t)) }()
+	<-arrived
+
+	replaced := replacementSecret(t)
+	tokens.seed("cred-1", replaced)
+	m.Forget("cred-1")
+	close(release)
+	<-done
+
+	if got := tokens.stored("cred-1"); got != replaced {
+		t.Fatalf("stored = %s; the refresh of the replaced secret overwrote the replacement", got)
+	}
+	r := blank(t)
+	if err := resolveOAuth(t, m, old)(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-replaced" {
+		t.Errorf("Authorization = %q, want the replacement's token", got)
+	}
+}
+
+// A refusal that arrives for the secret an operator has just replaced says
+// nothing about the replacement, and must not disable it.
+func TestARefusalOfAReplacedSecretDoesNotDisableTheReplacement(t *testing.T) {
+	m, tokens, arrived, release := heldRefresh(t, `{"error":"invalid_grant"}`)
+	old := expiring(t, -time.Minute)
+	az := oauthAz(t, m, old)
+
+	done := make(chan error, 1)
+	go func() { done <- az(context.Background(), blank(t)) }()
+	<-arrived
+
+	tokens.seed("cred-1", replacementSecret(t))
+	m.Forget("cred-1")
+	close(release)
+	<-done
+
+	if _, disabled := tokens.disabledReason("cred-1"); disabled {
+		t.Fatal("the replacement was disabled for the old secret's refusal")
+	}
+	r := blank(t)
+	if err := resolveOAuth(t, m, old)(context.Background(), r); err != nil {
+		t.Fatalf("after the replacement: %v", err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-replaced" {
+		t.Errorf("Authorization = %q, want the replacement's token", got)
+	}
+}
+
+// The vendor rotates as soon as it reads the refresh request. A caller that
+// hangs up before the answer arrives cancelled the exchange, discarding rt-1
+// while rt-0 was already dead — and the next call's invalid_grant disabled the
+// account.
+func TestACallerHangingUpDoesNotLoseTheRotation(t *testing.T) {
+	m, tokens, arrived, release := heldRefresh(t,
+		`{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- az(ctx, blank(t)) }()
+	<-arrived
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the caller was held until the exchange finished after it hung up")
+	}
+	close(release)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if tok, err := ParseToken([]byte(tokens.stored("cred-1"))); err == nil && tok.RefreshToken == "rt-1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stored = %s; the rotation the vendor issued was never persisted",
+				tokens.stored("cred-1"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A caller waiting behind a refresh in flight must be able to give up when its
+// own deadline passes, rather than for as long as the token endpoint stalls.
+func TestAWaiterStopsWaitingAtItsDeadline(t *testing.T) {
+	m, _, arrived, release := heldRefresh(t,
+		`{"access_token":"at-1","refresh_token":"rt-1","token_type":"Bearer","expires_in":3600}`)
+	defer close(release)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	go func() { _ = az(context.Background(), blank(t)) }()
+	<-arrived
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- az(ctx, blank(t)) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiter error = %v, want its deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter was held past its deadline by another caller's refresh")
+	}
+}
+
+// A refresh is persisted without reloading the router, so the provider set a
+// request carries can still hold the pair the refresh rotated away. An account
+// rebuilt from that after Forget presented the dead refresh token, which a
+// vendor that rotates treats as reuse — and the credential was disabled.
+func TestForgetDoesNotReplayARotatedRefreshToken(t *testing.T) {
+	a, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	m := oauthManager(t, srv, tokens)
+	snapshot := expiring(t, -time.Minute)
+
+	if err := oauthAz(t, m, snapshot)(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	m.Forget("cred-1")
+
+	r := blank(t)
+	if err := resolveOAuth(t, m, snapshot)(context.Background(), r); err != nil {
+		t.Fatalf("after Forget: %v", err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-1" {
+		t.Errorf("Authorization = %q, want the persisted rotation's token", got)
+	}
+	if a.count() != 1 {
+		t.Errorf("refreshed %d times, want 1: the rotated-away token was replayed", a.count())
+	}
+	if _, disabled := tokens.disabledReason("cred-1"); disabled {
+		t.Error("the credential was disabled after Forget")
+	}
+}
 
 // A terminal refusal marks the account dead so the endpoint is not called
 // again. The mark is process-lifetime, and nothing outside the manager could
@@ -61,5 +239,92 @@ func TestForgetDropsACachedToken(t *testing.T) {
 	}
 	if got := r.Header.Get("Authorization"); got != "Bearer at-replaced" {
 		t.Errorf("Authorization = %q, want the replaced credential's token", got)
+	}
+}
+
+// The vendor rotated the pair and the database refused the write, and then an
+// operator disabled the credential. While the write keeps failing the rotated
+// token is the only copy, and it went on serving past the disable because the
+// unsaved rotation took priority over re-reading the row.
+func TestForgetStopsAnUnpersistedRotationServing(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	m := oauthManager(t, srv, tokens)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1000
+	tokens.mu.Unlock()
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+
+	// An operator's disable leaves the sealed secret as it was, so the
+	// rotation's compare-and-swap still matches once writes succeed.
+	tokens.mu.Lock()
+	tokens.disabled["cred-1"] = "disabled by an operator"
+	tokens.mu.Unlock()
+	m.Forget("cred-1")
+	r := blank(t)
+	if err := az(context.Background(), r); err == nil {
+		t.Errorf("a forgotten credential authorized with %q while its row could not be reconciled",
+			r.Header.Get("Authorization"))
+	}
+
+	// The row still holds the predecessor, so once the database answers the
+	// rotation is saved rather than lost.
+	tokens.mu.Lock()
+	tokens.failWrites = 0
+	tokens.mu.Unlock()
+	r = blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatalf("after the database recovered: %v", err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-1" {
+		t.Errorf("Authorization = %q, want the saved rotation's token", got)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-1" {
+		t.Errorf("stored refresh token = %q, want rt-1", stored.RefreshToken)
+	}
+}
+
+// The same unsaved rotation, but the operator replaced the secret. While the
+// write keeps failing the rotation must not serve, and once the database
+// answers the write finds the row moved on and the replacement serves: the
+// rotation descends from a secret the operator discarded.
+func TestForgetAfterAReplacementDropsAnUnpersistedRotation(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	m := oauthManager(t, srv, tokens)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1000
+	tokens.mu.Unlock()
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+
+	tokens.seed("cred-1", replacementSecret(t))
+	m.Forget("cred-1")
+	r := blank(t)
+	if err := az(context.Background(), r); err == nil {
+		t.Errorf("the rotation of a replaced secret authorized with %q before its write settled",
+			r.Header.Get("Authorization"))
+	}
+
+	tokens.mu.Lock()
+	tokens.failWrites = 0
+	tokens.mu.Unlock()
+	r = blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-replaced" {
+		t.Errorf("Authorization = %q, want the replacement's token", got)
 	}
 }

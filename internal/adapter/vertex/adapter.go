@@ -77,12 +77,16 @@ func (a *Adapter) Surfaces() adapter.SurfaceSet {
 
 // EndpointFor builds the regional host and project path. Location appears
 // twice: once in the hostname and once in the path, which is Vertex's shape and
-// not a mistake. The global endpoint is the exception: its host carries no
-// location prefix, and only the path names it.
+// not a mistake. Two kinds of location are exceptions: the global endpoint's
+// host carries no location, and the us and eu multi-regions answer only on
+// representative hosts of the form aiplatform.<location>.rep.googleapis.com.
 func EndpointFor(project, location string) string {
 	host := location + "-aiplatform.googleapis.com"
-	if location == "global" {
+	switch location {
+	case "global":
 		host = "aiplatform.googleapis.com"
+	case "us", "eu":
+		host = "aiplatform." + location + ".rep.googleapis.com"
 	}
 	return fmt.Sprintf("https://%s/v1/projects/%s/locations/%s", host, project, location)
 }
@@ -110,8 +114,8 @@ func publisherOf(t *adapter.Target) string {
 }
 
 func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
-	if t.Project == "" || t.Location == "" {
-		return nil, nil, fmt.Errorf("vertex target needs a project and a location")
+	if err := CheckEndpoint(t.Project, t.Location); err != nil {
+		return nil, nil, err
 	}
 	switch publisherOf(t) {
 	case PublisherGoogle:

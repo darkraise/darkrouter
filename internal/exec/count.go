@@ -15,6 +15,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 	"github.com/darkraise/darkrouter/internal/tokenize"
@@ -76,7 +77,13 @@ func (e *Executor) HandleCount(w http.ResponseWriter, r *http.Request, d edge.Co
 
 	// The body cannot carry a marker: clients parse these responses strictly.
 	w.Header().Set("X-Darkrouter-Estimated", "true")
-	tokens := tokenize.Count(req, model)
+	tokens, err := tokenize.Count(r.Context(), req, model)
+	if err != nil {
+		// Only cancellation fails an estimate, and a client that went away
+		// has no one to read an answer.
+		rec.Status = "cancelled"
+		return
+	}
 	rec.Status = "success"
 	rec.TokensIn = int64(tokens)
 	rec.Warnings = []string{"count -> " + d.Name() + ": estimated locally"}
@@ -164,6 +171,8 @@ func (e *Executor) countOnce(ctx context.Context, req *ir.Request, c router.Cand
 	}
 
 	resp, doErr := e.client.Do(hr)
+	// A query-param key is in the URL a transport error quotes.
+	doErr = redact.Error(doErr, secretOf(p, c.KeyID, styleOf(p)))
 	outcome = e.classify(ad, ctx, ctx, resp, doErr)
 	if outcome != adapter.OutcomeSuccess {
 		if resp != nil {

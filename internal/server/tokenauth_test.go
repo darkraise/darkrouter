@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/darkraise/darkrouter/internal/store"
 )
 
 type countingTokens struct {
@@ -14,6 +12,9 @@ type countingTokens struct {
 	checks  int
 	listing int
 	listErr error
+	// revokedAll reports "never issued" even with tokens in valid, to prove
+	// a latched answer is not re-read.
+	revokedAll bool
 }
 
 func (c *countingTokens) ProxyTokenValid(_ context.Context, secret string) (bool, error) {
@@ -21,16 +22,12 @@ func (c *countingTokens) ProxyTokenValid(_ context.Context, secret string) (bool
 	return c.valid[secret], nil
 }
 
-func (c *countingTokens) ProxyTokens(context.Context) ([]store.ProxyToken, error) {
+func (c *countingTokens) ProxyTokensIssued(context.Context) (bool, error) {
 	c.listing++
 	if c.listErr != nil {
-		return nil, c.listErr
+		return false, c.listErr
 	}
-	out := make([]store.ProxyToken, 0, len(c.valid))
-	for range c.valid {
-		out = append(out, store.ProxyToken{})
-	}
-	return out, nil
+	return len(c.valid) > 0 && !c.revokedAll, nil
 }
 
 func TestAValidTokenIsCheckedOncePerWindow(t *testing.T) {
@@ -88,9 +85,37 @@ func TestWhetherTokensExistIsCached(t *testing.T) {
 	if src.listing != 1 {
 		t.Errorf("store listed %d times for 100 requests, want 1", src.listing)
 	}
-	now = now.Add(tokenCacheTTL + time.Millisecond)
-	src.listErr = errors.New("down")
+}
+
+func TestAStoreThatCannotAnswerRefusesWithoutLatching(t *testing.T) {
+	src := &countingTokens{valid: map[string]bool{}, listErr: errors.New("down")}
+	now := time.Now()
+	ta := newTokenAuth(src)
+	ta.now = func() time.Time { return now }
 	if !ta.configured(context.Background()) {
 		t.Error("a store that cannot answer must be treated as configured")
+	}
+	now = now.Add(tokenCacheTTL + time.Millisecond)
+	src.listErr = nil
+	if ta.configured(context.Background()) {
+		t.Error("a recovered store that never issued a token still reads as configured")
+	}
+}
+
+func TestIssuanceOnceSeenIsNeverForgotten(t *testing.T) {
+	src := &countingTokens{valid: map[string]bool{"good": true}}
+	now := time.Now()
+	ta := newTokenAuth(src)
+	ta.now = func() time.Time { return now }
+	if !ta.configured(context.Background()) {
+		t.Fatal("an issued token was not reported")
+	}
+	now = now.Add(tokenCacheTTL + time.Millisecond)
+	src.revokedAll = true
+	if !ta.configured(context.Background()) {
+		t.Error("past the cache window, authentication was turned back off")
+	}
+	if src.listing != 1 {
+		t.Errorf("store asked %d times, want 1: issuance is permanent", src.listing)
 	}
 }

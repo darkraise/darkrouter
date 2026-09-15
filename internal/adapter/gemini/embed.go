@@ -115,6 +115,9 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 		// The index is ours to assign: the batch response carries order only.
 		out.Embeddings = append(out.Embeddings, ir.Embedding{Index: i, Float: e.Values})
 	}
+	if err := adapter.ValidateEmbeddings(out.Embeddings); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 

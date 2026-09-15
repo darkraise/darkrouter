@@ -240,6 +240,307 @@ describe("Chat mode", () => {
     expect(creates).toHaveLength(1)
   })
 
+  it("saves a second exchange only after the whole first one", async () => {
+    // seq is assigned in arrival order, and one exchange is two writes. A
+    // second exchange finishing while the first user turn is still saving
+    // used to queue its user turn between the first exchange's two.
+    let releaseFirst = () => {}
+    const held = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const order: string[] = []
+    postMock.mockImplementation(async (path: string, body: { content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      order.push(body.content ?? "")
+      if (body.content === "first") await held
+      return { seq: order.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(order).toEqual(["first"]))
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument())
+
+    releaseFirst()
+    await waitFor(() => expect(order).toHaveLength(4))
+    expect(order).toEqual(["first", "an answer", "second", "an answer"])
+  })
+
+  it("resumes an exchange whose save failed part-way before saving the next", async () => {
+    // The user turn was stored and the answer was not. Abandoned, reopening
+    // the conversation shows a question with no reply; retried whole, it
+    // stores the question twice.
+    let answers = 0
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && answers++ === 0) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    await send("second")
+    expect(await screen.findByText(/2 exchanges were not saved/i)).toBeInTheDocument()
+    expect(posts).toEqual(["user:first", "assistant:an answer"])
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(posts).toHaveLength(5))
+    expect(posts).toEqual([
+      "user:first",
+      "assistant:an answer",
+      "assistant:an answer",
+      "user:second",
+      "assistant:an answer",
+    ])
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+  })
+
+  it("holds an exchange sent before its thread's id arrived behind that thread's failed save", async () => {
+    // The second send starts while the create is still out, so it leaves
+    // without an id, and ends after the first exchange has one. Keyed apart,
+    // it was saved past the first exchange's held answer.
+    let releaseCreate = () => {}
+    const created = new Promise<void>((resolve) => {
+      releaseCreate = resolve
+    })
+    let releaseSecondStream = () => {}
+    const secondStream = new Promise<void>((resolve) => {
+      releaseSecondStream = resolve
+    })
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        await created
+        return { ...stored, id: "new1", title: "first" }
+      }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && body.content === "an answer") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    let streams = 0
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+    ) {
+      const second = streams++ === 1
+      onStart?.({ requestId: "01NEW" })
+      if (second) await secondStream
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: second ? "later" : "an answer" } }] })}\n\n`
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+
+    releaseCreate()
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+    releaseSecondStream()
+
+    expect(await screen.findByText(/2 exchanges were not saved/i)).toBeInTheDocument()
+    expect(posts).not.toContain("user:second")
+  })
+
+  it("retries an unsaved exchange on request", async () => {
+    let failing = true
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && failing) throw new TypeError("Failed to fetch")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    failing = false
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+    expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
+  })
+
+  it("saves another conversation's exchanges while one conversation's save keeps failing", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: body.title === "stuck" ? "stuck1" : "next1", title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      if (path.includes("stuck1")) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("stuck")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("next")
+    await waitFor(() =>
+      expect(posts).toContain("/api/playground/conversations/next1/messages:assistant:an answer"),
+    )
+    expect(posts.filter((p) => p.includes("next1"))).toEqual([
+      "/api/playground/conversations/next1/messages:user:next",
+      "/api/playground/conversations/next1/messages:assistant:an answer",
+    ])
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+  })
+
+  it("discards an exchange whose save keeps failing so the next one can be saved", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.content === "first") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+
+    await send("second")
+    await waitFor(() => expect(posts).toHaveLength(3))
+    expect(posts).toEqual(["user:first", "user:second", "assistant:an answer"])
+    expect(screen.queryByText(/was not saved/i)).toBeNull()
+  })
+
+  it("does not discard an exchange whose question is already stored", async () => {
+    // Dropping it would leave the stored conversation with a question and no
+    // answer, and the next exchange's question straight after it.
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    const banner = await screen.findByRole("alert")
+    expect(within(banner).getByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    expect(within(banner).queryByRole("button", { name: "Discard" })).toBeNull()
+    expect(within(banner).getByText(/question is already stored/i)).toBeInTheDocument()
+
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument())
+    expect(posts).not.toContain("user:second")
+  })
+
+  it("clears a deleted conversation's unsaved exchanges", async () => {
+    // The banner offers deleting the conversation as the way out for a
+    // question already stored; following that advice must end the hold rather
+    // than leave a Retry aimed at a conversation that no longer exists.
+    postMock.mockImplementation(async (path: string, body: { role?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored }
+      if (body.role === "assistant") throw new ApiError(503, "store is busy")
+      return { seq: 0 }
+    })
+    delMock.mockResolvedValue(null)
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete conversation" }))
+
+    await waitFor(() => expect(delMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/exchange was not saved/i)).toBeNull())
+  })
+
+  it("discards only the failed exchanges of the conversation on screen", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: `${body.title}1`, title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      throw new ApiError(503, "store is busy")
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("elsewhere")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("here")
+    await screen.findByText(/2 exchanges were not saved/i)
+    expect(screen.getByText(/1 of them is in another conversation/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+    expect(screen.getByText(/it is in another conversation/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull()
+
+    const before = posts.length
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(posts.length).toBe(before + 1))
+    expect(posts.at(-1)).toBe("/api/playground/conversations/elsewhere1/messages:user:elsewhere")
+  })
+
+  it("does not retry a held conversation when another conversation's exchange is saved", async () => {
+    // Every retry of a save that keeps failing is another failing request and
+    // another error toast, and nothing the operator did asked for it.
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: body.title === "stuck" ? "stuck1" : "next1", title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      if (path.includes("stuck1")) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("stuck")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("next")
+    await waitFor(() =>
+      expect(posts).toContain("/api/playground/conversations/next1/messages:assistant:an answer"),
+    )
+    await send("again")
+    await waitFor(() => expect(posts.filter((p) => p.includes("next1"))).toHaveLength(4))
+    expect(posts.filter((p) => p.includes("stuck1"))).toHaveLength(1)
+  })
+
+  it.each([408, 429])("holds an exchange refused with %i for another try", async (status) => {
+    let failing = true
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && failing) throw new ApiError(status, "try again later")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    failing = false
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+    expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
+  })
+
   it("reopens a conversation with its system prompt intact", async () => {
     mounted()
     await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
@@ -355,6 +656,127 @@ describe("Chat mode", () => {
     )
   })
 
+  it("saves a half answer to its own conversation when another one is opened mid-stream", async () => {
+    // Opening a conversation whose detail is at hand replaces the transcript
+    // and ends the request in flight, the way leaving the screen does. The
+    // exchange already paid for still belongs to the thread that sent it.
+    postMock.mockImplementation((path: string) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: "first" })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+
+    let signal: AbortSignal | undefined
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+      requestSignal?: AbortSignal,
+    ) {
+      signal = requestSignal
+      onStart?.({ requestId: "01HALF" })
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: "half an" } }] })}\n\n`
+      await new Promise<void>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+    })
+    await send("second")
+    expect(await screen.findByText("half an")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+    expect(signal?.aborted).toBe(true)
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(5))
+    const turns = postMock.mock.calls
+      .slice(3)
+      .map((c) => [c[0], c[1]] as [string, unknown])
+    expect(turns).toEqual([
+      ["/api/playground/conversations/new1/messages", { role: "user", content: "second", request_id: "" }],
+      ["/api/playground/conversations/new1/messages", { role: "assistant", content: "half an", request_id: "01HALF" }],
+    ])
+    expect(screen.queryByText("half an")).toBeNull()
+  })
+
+  it("creates a new thread under its own title and settings when another is opened before its trace", async () => {
+    // The answer is whole and the run is waiting on its trace. Nothing has
+    // been stored yet, so the conversation is created now -- after the
+    // screen has already taken the opened conversation's title and model.
+    traceMock.mockImplementation(
+      (_id: string, signal?: AbortSignal) =>
+        new Promise((resolve) => signal?.addEventListener("abort", () => resolve(null))),
+    )
+    postMock.mockImplementation((path: string) =>
+      path === "/api/playground/conversations"
+        ? Promise.resolve({ ...stored, id: "new1", title: "left before its trace" })
+        : Promise.resolve({ seq: 0 }),
+    )
+    mounted()
+    await chooseModel("gpt")
+    await send("left before its trace")
+    expect(await screen.findByText("an answer")).toBeInTheDocument()
+    await waitFor(() => expect(traceMock).toHaveBeenCalled())
+    expect(postMock).not.toHaveBeenCalled()
+
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    expect(postMock.mock.calls[0]![0]).toBe("/api/playground/conversations")
+    expect(postMock.mock.calls[0]![1]).toMatchObject({ title: "left before its trace", model: "gpt" })
+    expect(postMock.mock.calls.slice(1).map((c) => [c[0], c[1]])).toEqual([
+      ["/api/playground/conversations/new1/messages", { role: "user", content: "left before its trace", request_id: "" }],
+      ["/api/playground/conversations/new1/messages", { role: "assistant", content: "an answer", request_id: "01NEW" }],
+    ])
+    expect(screen.getByLabelText("Conversation title")).toHaveValue(stored.title)
+  })
+
+  it("keeps a new thread's first turn out of the unsaved thread it replaced", async () => {
+    // The thread left mid-answer creates its conversation after New
+    // conversation has already started the next one; the next one's first
+    // turn must make its own rather than share the one being created.
+    postMock.mockImplementation((path: string, body: unknown) => {
+      if (path !== "/api/playground/conversations") return Promise.resolve({ seq: 0 })
+      const title = (body as { title: string }).title
+      return Promise.resolve({ ...stored, id: title === "left thread" ? "left1" : "next1", title })
+    })
+    streamMock.mockImplementationOnce(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+      requestSignal?: AbortSignal,
+    ) {
+      onStart?.({ requestId: "01LEFT" })
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: "half" } }] })}\n\n`
+      await new Promise<void>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("left thread")
+    expect(await screen.findByText("half")).toBeInTheDocument()
+
+    await chooseModel("gpt")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(3))
+    await send("next thread")
+
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(6))
+    const byPath = (p: string) =>
+      postMock.mock.calls.filter((c) => c[0] === p).map((c) => (c[1] as { content: string }).content)
+    expect(byPath("/api/playground/conversations/left1/messages")).toEqual(["left thread", "half"])
+    expect(byPath("/api/playground/conversations/next1/messages")).toEqual(["next thread", "an answer"])
+    expect(screen.getByLabelText("Conversation title")).toHaveValue("next thread")
+  })
+
   it("aborts the live request when Chat becomes inactive", async () => {
     let signal: AbortSignal | undefined
     streamMock.mockImplementation(async function* (
@@ -453,6 +875,23 @@ describe("Chat mode", () => {
     await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
     expect(screen.getByText(/set by the first message/i)).toBeInTheDocument()
     expect(screen.getByLabelText("System prompt")).toBeDisabled()
+  })
+
+  it("leaves the settings open after a first message that failed", async () => {
+    // Nothing was answered and nothing stored, so no exchange was produced
+    // under these settings; fixing them would leave the operator to start
+    // over to correct the setting that most likely caused the failure.
+    streamMock.mockImplementation(async function* () {
+      throw new Error("upstream refused")
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("hello")
+    expect(await screen.findByText("upstream refused")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByLabelText("System prompt")).toBeEnabled()
   })
 
   it("sends what was typed into the pane beside the transcript", async () => {

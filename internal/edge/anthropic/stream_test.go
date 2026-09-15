@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -150,6 +151,25 @@ func TestWriteStreamOpensABlockForAnOrphanDelta(t *testing.T) {
 	}
 }
 
+// Bedrock ships a redacted payload in a delta, but Anthropic has no delta for
+// it: the payload must land in the block start or the next turn cannot replay it.
+func TestWriteStreamPutsAnIncrementalRedactedPayloadInTheStart(t *testing.T) {
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventContentDelta, Delta: &ir.Delta{Type: ir.BlockRedactedThinking, Thinking: "EmwKAhgB"}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	want := []string{"message_start", "content_block_start", "content_block_stop",
+		"message_delta", "message_stop"}
+	if strings.Join(names(got), ",") != strings.Join(want, ",") {
+		t.Fatalf("events = %v, want %v", names(got), want)
+	}
+	cb := got[1].body["content_block"].(map[string]any)
+	if cb["type"] != "redacted_thinking" || cb["data"] != "EmwKAhgB" {
+		t.Errorf("content_block = %v, want the redacted payload", cb)
+	}
+}
+
 func TestWriteStreamClosesOpenBlocksBeforeTheEnd(t *testing.T) {
 	got := streamed(t, []ir.StreamEvent{
 		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
@@ -244,5 +264,32 @@ func TestWriteStreamStartsOnTheFirstUsageOrContent(t *testing.T) {
 	}
 	if got[0].body["message"].(map[string]any)["usage"].(map[string]any)["input_tokens"] != float64(10) {
 		t.Errorf("message_start = %v; the usage that arrived before it must be inside it", got[0].body)
+	}
+}
+
+func TestWriteStreamNeverReusesAClosedBlockIndex(t *testing.T) {
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventBlockStart, Index: 0, Delta: &ir.Delta{Type: ir.BlockText}},
+		{Type: ir.EventContentDelta, Index: 0, Delta: &ir.Delta{Type: ir.BlockText, Text: "hi"}},
+		{Type: ir.EventBlockStop, Index: 0},
+		{Type: ir.EventBlockStart, Index: 1, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolID: "call_a", ToolName: "f"}},
+		{Type: ir.EventContentDelta, Index: 1, Delta: &ir.Delta{
+			Type: ir.BlockToolUse, ToolInput: `{}`}},
+		{Type: ir.EventBlockStop, Index: 1},
+		{Type: ir.EventMessageStop, StopReason: ir.StopToolUse},
+	}, nil)
+
+	var indices []float64
+	for _, e := range got {
+		if strings.HasPrefix(e.name, "content_block_") {
+			indices = append(indices, e.body["index"].(float64))
+		}
+	}
+	want := []float64{0, 0, 0, 1, 1, 1}
+	if fmt.Sprint(indices) != fmt.Sprint(want) {
+		t.Fatalf("block indices = %v, want %v; an index names a position in the final content array",
+			indices, want)
 	}
 }

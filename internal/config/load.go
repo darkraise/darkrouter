@@ -240,6 +240,30 @@ func validate(c *Config) error {
 	return nil
 }
 
+// composeStopGracePeriod is the stop_grace_period compose.yml and
+// compose.prod.yml give the process between SIGTERM and SIGKILL, and
+// shutdownTail what shutdown needs after shutdown_grace runs out: the forced
+// close of streams still open and the request log's final flush.
+const (
+	composeStopGracePeriod = 30 * time.Second
+	shutdownTail           = 5 * time.Second
+)
+
+// Advisories are findings about a valid configuration that an operator should
+// still hear about. Unlike a Validate failure they revert nothing.
+func Advisories(c *Config) []string {
+	var out []string
+	// The process cannot see how long its supervisor waits before SIGKILL,
+	// so the check is against the value the shipped compose files set.
+	if g := c.Server.ShutdownGrace; g+shutdownTail > composeStopGracePeriod {
+		out = append(out, fmt.Sprintf("server.shutdown_grace (%s) leaves less than %s of the %s "+
+			"stop_grace_period the shipped compose files set, so the container is killed before "+
+			"shutdown finishes; raise stop_grace_period to at least %s",
+			g, shutdownTail, composeStopGracePeriod, g+shutdownTail))
+	}
+	return out
+}
+
 // ValidateAliases applies the shape rules an alias chain must satisfy wherever
 // it arrives from. Exported so the admin API enforces the same rules the
 // loader does rather than a second, drifting copy of them.

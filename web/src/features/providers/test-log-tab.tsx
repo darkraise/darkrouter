@@ -7,6 +7,7 @@ import {
 import { useRequests } from "../../lib/queries"
 import { duration } from "@/lib/format"
 import { relativeTime } from "../../lib/time"
+import { LoadError } from "../shell/screen-state"
 import type { RequestRow } from "../../lib/api-types"
 
 /** The fields an expanded row shows, in the order an operator reads them. */
@@ -29,6 +30,14 @@ export function detailRows(r: RequestRow): { label: string; value: string; mono?
   ]
 }
 
+/** A cancelled run was stopped by whoever sent it, so it is neither served nor
+ *  failed, and wears the same neutral tone RequestStatus gives it. */
+function outcomeOf(r: RequestRow): { word: string; tone: string } {
+  if (r.status === "success") return { word: "ok", tone: "text-[hsl(var(--success))]" }
+  if (r.status === "cancelled") return { word: "cancelled", tone: "text-[hsl(var(--muted-foreground))]" }
+  return { word: r.error_code ?? "error", tone: "text-[hsl(var(--destructive))]" }
+}
+
 /**
  * This provider's requests, from the log the gateway already keeps.
  *
@@ -44,11 +53,24 @@ export function TestLogTab({ providerId }: { providerId: string }) {
   // executor and lands in the same log a client's request does, so without the
   // filter this panel would fill with production traffic an operator did not
   // come here to read — and the one test they just sent would be buried in it.
-  const page = useRequests({ provider: providerId, source: "console", limit: "20" })
+  // Any attempt on the provider rather than the one that served: a test that
+  // failed on every attempt names no serving provider at all.
+  const page = useRequests({ attempted_provider: providerId, source: "console", limit: "20" })
   const rows = page.data?.requests ?? []
 
   if (page.isPending) {
     return <p className="p-4 text-sm text-[hsl(var(--muted-foreground))]">Loading the log…</p>
+  }
+
+  if (page.isError && !page.data) {
+    return (
+      <LoadError
+        what="The log"
+        error={page.error}
+        onRetry={() => void page.refetch()}
+        className="m-4"
+      />
+    )
   }
 
   if (rows.length === 0) {
@@ -91,27 +113,35 @@ export function TestLogTab({ providerId }: { providerId: string }) {
         className="min-h-0 flex-1 divide-y overflow-y-auto"
       >
         {rows.map((r) => {
-          const failed = r.status !== "success"
+          const outcome = outcomeOf(r)
+          const when = relativeTime(r.ts_ms)
+          const latency = r.total_ms === null ? "—" : duration(r.total_ms)
           return (
             <AccordionItem key={r.id} value={r.id}>
               <AccordionTrigger className="gap-3 px-4 py-2 hover:bg-[hsl(var(--muted))]">
+                {/* Widths in ch, not rem: the font-size axis grows the text
+                    without growing the root, so a rem column spills into
+                    its neighbour at the larger steps. */}
                 <span
-                  className={
-                    failed
-                      ? "w-16 shrink-0 text-left font-mono text-[hsl(var(--destructive))]"
-                      : "w-16 shrink-0 text-left font-mono text-[hsl(var(--success))]"
-                  }
+                  className={`w-[12ch] shrink-0 truncate text-left font-mono ${outcome.tone}`}
+                  title={outcome.word}
                 >
-                  {failed ? r.error_code ?? "error" : "ok"}
+                  {outcome.word}
                 </span>
-                <span className="w-20 shrink-0 text-left font-mono text-[hsl(var(--legend))]">
-                  {relativeTime(r.ts_ms)}
+                <span
+                  className="w-[10ch] shrink-0 truncate text-left font-mono text-[hsl(var(--legend))]"
+                  title={when}
+                >
+                  {when}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-left font-mono" title={r.model}>
                   {r.model}
                 </span>
-                <span className="w-16 shrink-0 text-right font-mono tabular-nums text-[hsl(var(--legend))]">
-                  {r.total_ms === null ? "—" : duration(r.total_ms)}
+                <span
+                  className="w-[7ch] shrink-0 truncate text-right font-mono tabular-nums text-[hsl(var(--legend))]"
+                  title={latency}
+                >
+                  {latency}
                 </span>
               </AccordionTrigger>
 

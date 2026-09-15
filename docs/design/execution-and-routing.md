@@ -75,6 +75,14 @@ An ambiguous 400 is re-read under a bounded cap and reclassified as
 **fatal**, not retryable: a refusal is the provider answering, not the
 provider being broken.
 
+An error the provider reports inside a 2xx — a unary error envelope or an
+in-stream error event — is classified from the type the adapter gave it, as
+its status line would have been: authentication and permission are
+*retryable credential*, not-found is *retryable model*, a rate limit is a
+*retryable provider* 429, a content filter or invalid request is *fatal*. An
+untyped one is *retryable provider*. A body read cancelled by the client is
+*client cancelled*, exactly as a cancelled send is.
+
 ### Advancement
 
 - **Success** finishes. **Fatal** and **client-cancelled** return.
@@ -140,10 +148,15 @@ computed alongside the snapshot, so a probe is never burned on a candidate the
 router may never reach.
 
 Every attempt emits exactly one health signal, and the first caller wins. A
-2xx is not recorded from the status line: success is reported once the body is
-read or the stream commits, because the loop claimed the probe on the way in
-and an exit that skipped the recorder would leave the entry shut forever with
-nothing testing it.
+2xx is not recorded from the status line: the outcome is reported once the
+body has been read or the stream has ended, because the loop claimed the probe
+on the way in and an exit that skipped the recorder would leave the entry shut
+forever with nothing testing it. A stream that fails after commit cannot fail
+over, but its failure is still the signal — recorded at commit, a success
+would reset the count that a provider dying after its first token needs in
+order to cool. Commit only gives back the half-open probe, so a long response
+does not keep the entry shut. The attempt row keeps its success, since it did
+serve, and the request row carries the error code.
 
 ## The fast path
 

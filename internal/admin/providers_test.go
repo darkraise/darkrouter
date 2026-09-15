@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +114,248 @@ func TestCreatingAProviderWithNeitherPresetNorKindIsRejected(t *testing.T) {
 	w := do(t, s, cookie, token, "POST", "/api/providers", `{"id":"p1"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestEveryShippedEndpointShapeCanBeCreatedFromItsPreset(t *testing.T) {
+	cases := map[string]string{
+		// Region and project are endpoint properties: the URL is derived.
+		"bedrock":          `{"id":"bedrock","preset":"bedrock","region":"us-east-1"}`,
+		"vertex":           `{"id":"vertex","preset":"vertex","project":"p","location":"us-central1"}`,
+		"vertex-anthropic": `{"id":"va","preset":"vertex-anthropic","project":"p","location":"us-east5"}`,
+		// A local program served by its own transport.
+		"auggie": `{"id":"auggie","preset":"auggie"}`,
+		// The account identifier lands in the hostname.
+		"snowflake": `{"id":"snowflake","preset":"snowflake"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAnAuggieProviderCanBePatched(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	// Written as an import leaves it, so the patch is the only thing on trial.
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "auggie", Name: "Auggie", Preset: "auggie", Kind: "openaicompat",
+		BaseURL: "auggie://cli/v1", AuthStyle: "optional", Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/auggie", `{"priority":3}`); w.Code != http.StatusOK {
+		t.Errorf("patch: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A Vertex row written before project and location were required has no
+// location. Turning it off or reordering it does not
+// touch its endpoint, so the endpoint rule it predates must not refuse that.
+func TestALegacyVertexProviderCanBePatchedOutsideItsEndpoint(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		BaseURL: "https://us-central1-aiplatform.googleapis.com", AuthStyle: "gcp-sa",
+		Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"enabled":false}`, `{"priority":4}`, `{"name":"Old Vertex"}`} {
+		if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx", body); w.Code != http.StatusOK {
+			t.Errorf("patch %s: %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx", `{"base_url":"nope"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a patch to the endpoint itself is still checked: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAPatchCannotPointAnEndpointAtAnotherHost(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		AuthStyle: "gcp-sa", Project: "proj", Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"id":"vy","preset":"vertex","project":"proj","location":"us-central1"}`,
+		`{"id":"b","preset":"bedrock","region":"us-east-1"}`,
+	} {
+		if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", w.Code, w.Body.String())
+		}
+	}
+	for _, tc := range []struct{ id, body string }{
+		{"vx", `{"location":"evil.example/"}`},
+		{"vy", `{"project":"proj#"}`},
+		{"b", `{"region":"evil.example/"}`},
+	} {
+		if w := do(t, s, cookie, token, "PATCH", "/api/providers/"+tc.id, tc.body); w.Code != http.StatusBadRequest {
+			t.Errorf("patch %s %s: status = %d, want 400: %s", tc.id, tc.body, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestALegacyVertexProviderCanBeGivenALocation(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		BaseURL: "https://us-central1-aiplatform.googleapis.com", AuthStyle: "gcp-sa",
+		Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"us-central1"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a location without a project is still no endpoint: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"project":"proj","location":"us-central1"}`); w.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Project != "proj" || row.Location != "us-central1" {
+		t.Errorf("project, location = %q, %q", row.Project, row.Location)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"us-central1"}`); w.Code != http.StatusOK {
+		t.Errorf("restating the location: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestASetLocationCannotBeMoved(t *testing.T) {
+	// Moving a location moves every catalogued model to another host, which
+	// is a new provider rather than an edit to this one.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"vx","preset":"vertex","project":"proj","location":"us-central1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"europe-west4"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != "us-central1" {
+		t.Errorf("location = %q; a refused patch moved it", row.Location)
+	}
+}
+
+func TestConcurrentLocationFillsCannotMoveIt(t *testing.T) {
+	// Both patches can read the row before either writes, so the handler's own
+	// check passes twice. The loser must be refused, not silently win.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	for i := 0; i < 30; i++ {
+		id := "vx" + strconv.Itoa(i)
+		if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+			ID: id, Name: "Vertex", Preset: "vertex", Kind: "vertex",
+			AuthStyle: "gcp-sa", Project: "proj", Priority: 1, Enabled: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		locations := []string{"us-central1", "europe-west4"}
+		codes := make([]int, len(locations))
+		var start, done sync.WaitGroup
+		start.Add(1)
+		for j, loc := range locations {
+			done.Add(1)
+			go func() {
+				defer done.Done()
+				start.Wait()
+				codes[j] = do(t, s, cookie, token, "PATCH", "/api/providers/"+id,
+					`{"location":"`+loc+`"}`).Code
+			}()
+		}
+		start.Done()
+		done.Wait()
+
+		row, err := s.deps.DB.ProviderByID(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j, loc := range locations {
+			switch codes[j] {
+			case http.StatusOK:
+				if row.Location != loc {
+					t.Fatalf("%s: the patch to %s answered 200, but the location is %q", id, loc, row.Location)
+				}
+			case http.StatusBadRequest:
+			default:
+				t.Fatalf("%s: the patch to %s answered %d, want 200 or 400", id, loc, codes[j])
+			}
+		}
+	}
+}
+
+func TestALocationIsRefusedOnAProviderThatIsNotVertex(t *testing.T) {
+	// Only Vertex has a regional endpoint named this way; anywhere else the
+	// value is stored, never validated and never read.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1","location":"evil.example/"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("create: status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p2","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p2",
+		`{"location":"us-central1"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("patch: status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "p2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != "" {
+		t.Errorf("location = %q; a refused patch wrote it", row.Location)
+	}
+}
+
+func TestAnEndpointThatCannotBeReachedIsRejected(t *testing.T) {
+	cases := map[string]string{
+		"bedrock with no region":  `{"id":"b","preset":"bedrock"}`,
+		"vertex with no project":  `{"id":"v","preset":"vertex","location":"us-central1"}`,
+		"vertex with no location": `{"id":"v","preset":"vertex","project":"p"}`,
+		"custom with no base url": `{"id":"c","kind":"openaicompat"}`,
+		"an unserved scheme":      `{"id":"c","kind":"openaicompat","base_url":"ftp://x/v1"}`,
+		"a broken templated host": `{"id":"c","kind":"openaicompat","base_url":"https://{account_id} x.example"}`,
+		"an unknown placeholder":  `{"id":"c","kind":"openaicompat","base_url":"https://{tenant}.example"}`,
+		// Vertex builds its host from the location and Bedrock from the
+		// region, so either could send a credential to another host.
+		"a vertex location naming a host": `{"id":"v","preset":"vertex","project":"p","location":"evil.example/"}`,
+		"a vertex location with userinfo": `{"id":"v","preset":"vertex","project":"p","location":"x@evil.example"}`,
+		"a vertex project with a slash":   `{"id":"v","preset":"vertex","project":"p/../q","location":"us-central1"}`,
+		"a bedrock region naming a host":  `{"id":"b","preset":"bedrock","region":"evil.example/"}`,
+		"a bedrock region with a dot":     `{"id":"b","preset":"bedrock","region":"us-east-1.evil.example"}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

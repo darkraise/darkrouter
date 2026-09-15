@@ -45,7 +45,7 @@ itself.
 | `proxy_tokens` | Per-client proxy tokens, stored as SHA-256 digests. |
 | `users` | The named accounts that can sign in to the console, their role and their bcrypt password hash. |
 | `sessions` | Admin sessions, stored as digests, each owned by the `users` row it authenticated; the owner column cascades, so removing an account signs it out everywhere. |
-| `settings` | Every configuration key the registry names, on its compiled default until something writes it; plus a few non-configuration rows — the keyring salt and iteration count, the key verifier, the CSRF secret. |
+| `settings` | Every configuration key the registry names, on its compiled default until something writes it; plus a few non-configuration rows — the keyring salt and iteration count, the key verifier, the CSRF secret, and whether a proxy token was ever issued. |
 | `playground_presets` | Saved console playground configurations. |
 | `playground_conversations`, `playground_messages` | Saved playground conversations. |
 
@@ -64,9 +64,9 @@ Numbered SQL files, embedded, forward-only, each in its own transaction.
 must be contiguous from 1 — a skipped number is a startup error — and a
 database newer than the binary refuses to start rather than half-applying.
 
-Twenty-three migrations exist. Two of them rebuild a table rather than altering
+Twenty-five migrations exist. Two of them rebuild a table rather than altering
 it, so the migration files mention two transient `*_new` names that are not
-part of the schema. Three are worth knowing about because their names
+part of the schema. Four are worth knowing about because their names
 do not say what they do:
 
 - **0013** is data-only: it rewrites four presets' authentication style.
@@ -76,6 +76,8 @@ do not say what they do:
   reason: a session now names its owner, and SQLite cannot add that NOT NULL
   column to a populated table. It also deletes the retired shared-password
   settings rows.
+- **0025** is data-only: it clears the truncated base URL the vertex preset
+  once shipped from any vertex provider row that still carries it.
 
 Because migrations are forward-only, restoring and downgrading are the same
 operation: restore the data directory and the master key that was current when

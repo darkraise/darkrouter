@@ -89,3 +89,24 @@ func TestProxyTokenRecordsItsUse(t *testing.T) {
 		t.Error("last_used_at is unset after a successful check")
 	}
 }
+
+func TestIssuanceOutlivesTheLastToken(t *testing.T) {
+	ctx := context.Background()
+	db := migrated(t)
+	if issued, err := db.ProxyTokensIssued(ctx); err != nil || issued {
+		t.Fatalf("a fresh database reports issued=%v err=%v", issued, err)
+	}
+	tok, err := db.CreateProxyToken(ctx, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued, err := db.ProxyTokensIssued(ctx); err != nil || !issued {
+		t.Fatalf("after creating a token, issued=%v err=%v", issued, err)
+	}
+	if _, err := db.DeleteProxyToken(ctx, tok.ID); err != nil {
+		t.Fatal(err)
+	}
+	if issued, err := db.ProxyTokensIssued(ctx); err != nil || !issued {
+		t.Errorf("after revoking the last token, issued=%v err=%v", issued, err)
+	}
+}

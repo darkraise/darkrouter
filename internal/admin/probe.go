@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,14 +11,18 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -25,10 +30,6 @@ import (
 // is the case the button exists for — but finite, because a hung probe holds the
 // per-provider mutex and the operator's click looks ignored.
 const probeTimeout = 30 * time.Second
-
-// maxProbeBody bounds the listing read, matching what discovery uses. A listing
-// endpoint that streams unbounded data must not exhaust memory here either.
-const maxProbeBody = 8 << 20
 
 func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -102,8 +103,19 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		// 200 with ok:false. A rejected key is an answer, not a server error,
 		// and a 500 would make the settings screen show "something broke" for
 		// the one outcome the button exists to discover.
+		//
+		// rejected separates a refusal of the credential from a probe that
+		// could not finish — a timeout, a rate limit, an outage — so a caller
+		// deciding whether to discard the key does not discard a good one.
+		//
+		// auth_style is the style resolved above, which a caller cannot
+		// derive from the provider row alone: an empty one means the
+		// preset's. It tells the caller whether a rejected secret is one the
+		// operator can download again.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "probe": kind, "latency_ms": latency, "error": perr.Error(),
+			"ok": false, "probe": kind, "latency_ms": latency, "auth_style": style,
+			"error":    redact.Error(perr, probeSecrets(style, cred.Secret)...).Error(),
+			"rejected": errors.As(perr, new(rejectedCredential)),
 		})
 		return
 	}
@@ -119,6 +131,38 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "probe": kind, "latency_ms": latency, "model_count": count,
 	})
 }
+
+// probeSecrets is what to redact from a probe's error for a credential of this
+// style. A sigv4 or service-account secret is stored as one JSON document, and
+// an upstream that echoes a credential echoes one field of it, which redacting
+// the document as a whole never matches. Identifiers — the access key id, the
+// client email — are left in: they name the key without granting anything, and
+// the operator needs them to tell which key failed.
+func probeSecrets(style, secret string) []string {
+	out := []string{secret}
+	switch style {
+	case auth.StyleSigV4:
+		var c auth.AWSCredentials
+		if json.Unmarshal([]byte(secret), &c) == nil {
+			out = append(out, c.SecretAccessKey, c.SessionToken)
+		}
+	case auth.StyleGCPSA:
+		var c struct {
+			PrivateKey   string `json:"private_key"`
+			PrivateKeyID string `json:"private_key_id"`
+		}
+		if json.Unmarshal([]byte(secret), &c) == nil {
+			out = append(out, c.PrivateKey, c.PrivateKeyID)
+		}
+	}
+	return out
+}
+
+// rejectedCredential marks a probe failure in which the provider answered and
+// refused the credential itself.
+type rejectedCredential struct{ error }
+
+func (e rejectedCredential) Unwrap() error { return e.error }
 
 // clearCooldowns resets the ladder after a successful probe.
 //
@@ -186,7 +230,7 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 		return "listing", 0, err
 	}
 	pr, err := catalog.ProbeFor(provider.Provider{
-		ID: row.ID, Kind: row.Kind, BaseURL: base, Preset: row.Preset,
+		ID: row.ID, Kind: row.Kind, BaseURL: base, Preset: row.Preset, AuthStyle: style,
 	}, preset, preset.Auth.Secret(cred.Secret))
 	if err != nil {
 		// No listing endpoint for this kind. Spec §4.3's fallback is a
@@ -197,41 +241,96 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 			"this provider kind has no listing endpoint: %w", err)
 	}
 
-	req, err := catalog.BuildListRequest(ctx, pr)
+	count, err := s.countListing(ctx, pr)
 	if err != nil {
-		return "listing", 0, err
+		return listingProbeKind(err), count, err
 	}
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return "listing", 0, err
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
+	return "listing", count, nil
+}
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "listing", 0, errors.New("the provider rejected this credential: " + resp.Status)
+// countListing reads every page of a listing through discovery's own loop, so
+// the count is the number of models discovery will import rather than one page
+// of them.
+func (s *Server) countListing(ctx context.Context, pr catalog.Probe) (int, error) {
+	models, err := catalog.ListPages(ctx, s.httpClient(), pr, classifyProbeListing)
+	return len(models), err
+}
+
+// refusedPermission marks a probe the provider refused without refusing the
+// credential: the key authenticated, or may have, and something about the
+// account, project or key restrictions stopped the call.
+type refusedPermission struct{ error }
+
+func (e refusedPermission) Unwrap() error { return e.error }
+
+// unauthorizedWithoutBadKey reports whether a 401's message blames something
+// other than the key itself.
+func unauthorizedWithoutBadKey(message string) bool {
+	m := strings.ToLower(message)
+	return strings.Contains(m, "ip not authorized") || strings.Contains(m, "allowlist") ||
+		strings.Contains(m, "member of an organization") ||
+		strings.Contains(m, "insufficient permissions") || strings.Contains(m, "missing scopes")
+}
+
+// listingProbeKind names what a failed listing probe found.
+func listingProbeKind(err error) string {
+	if errors.As(err, new(refusedPermission)) {
+		return "permission"
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// The status alone is a poor answer when the provider said something
-		// specific: "Bad Gateway" for a local CLI that is merely logged out
-		// sends the operator looking for a network problem, when the reply
-		// already said to run auggie login.
-		if why := upstreamMessage(resp.Body); why != "" {
-			return "listing", 0, errors.New(resp.Status + ": " + why)
+	return "listing"
+}
+
+func classifyProbeListing(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode == http.StatusUnauthorized {
+		why := upstreamMessage(bytes.NewReader(raw))
+		// OpenAI also answers 401 for a key that is fine: a request from
+		// outside the project's IP allowlist, an account with no
+		// organization, or a restricted key missing a permission. Its
+		// documentation gives those no error code, so the message is all
+		// there is to tell them from a bad key.
+		if unauthorizedWithoutBadKey(why) {
+			return refusedPermission{errors.New("the provider refused this call: " + resp.Status +
+				": " + why + "; the credential was not refused, so check the key's " +
+				"permissions, the account's organization and the IP allowlist")}
 		}
-		return "listing", 0, errors.New("the provider returned " + resp.Status)
+		msg := "the provider rejected this credential: " + resp.Status
+		if why != "" {
+			msg += ": " + why
+		}
+		return rejectedCredential{errors.New(msg)}
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxProbeBody))
-	if err != nil {
-		return "listing", 0, err
+	// Google refuses an unknown or expired API key with a 400, naming the
+	// refusal only in the ErrorInfo reason.
+	if geminiadapter.APIKeyInvalid(raw) {
+		return rejectedCredential{errors.New(
+			"the provider rejected this credential: " + resp.Status + ": " +
+				upstreamMessage(bytes.NewReader(raw)))}
 	}
-	models, err := catalog.ParseList(pr.Kind, body)
-	if err != nil {
-		return "listing", 0, err
+	// A 403 is not a bad key. OpenAI sends one for an unsupported country,
+	// Anthropic for a key without a permission, and Gemini for a disabled API,
+	// a key restriction, or a key it reports as leaked — a flag Google has
+	// raised on working keys. A new key would meet every one of them again.
+	if resp.StatusCode == http.StatusForbidden {
+		msg := "the provider refused this call: " + resp.Status
+		if why := upstreamMessage(bytes.NewReader(raw)); why != "" {
+			msg += ": " + why
+		}
+		return refusedPermission{errors.New(msg +
+			"; the credential was not refused, so check the account's permissions, " +
+			"region and any restrictions on the key")}
 	}
-	return "listing", len(models), nil
+	// The status alone is a poor answer when the provider said something
+	// specific: "Bad Gateway" for a local CLI that is merely logged out
+	// sends the operator looking for a network problem, when the reply
+	// already said to run auggie login.
+	if why := upstreamMessage(bytes.NewReader(raw)); why != "" {
+		return errors.New(resp.Status + ": " + why)
+	}
+	return errors.New("the provider returned " + resp.Status)
 }
 
 // upstreamMessage reads the message out of an OpenAI-shaped error body, which
@@ -282,26 +381,60 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 		Region: row.Region, Authorize: az,
 	})
 	if err != nil {
-		return classifyAWSProbe(err), 0, err
+		kind, rejected := classifyAWSProbe(err)
+		if rejected {
+			err = rejectedCredential{err}
+		}
+		return kind, 0, err
 	}
 	return "listing", len(models), nil
 }
 
-// classifyAWSProbe names what failed. A 403 is permission, not signature: the
-// signature validated and the policy did not allow the call, which is a
-// different fix from a wrong region or a revoked key.
-func classifyAWSProbe(err error) string {
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "403"), strings.Contains(text, "accessdenied"):
-		return "permission"
-	case strings.Contains(text, "401"), strings.Contains(text, "unrecognizedclient"),
-		strings.Contains(text, "invalidsignature"):
-		return "signature"
-	case strings.Contains(text, "no such host"), strings.Contains(text, "region"):
-		return "region"
+// classifyAWSProbe names what failed and whether AWS refused the key itself. A
+// 403 is permission, not signature: the signature validated and the policy did
+// not allow the call, which is a different fix from a wrong region or a revoked
+// key.
+//
+// The error type is read first where AWS sent one: an unrecognised key and a
+// bad signature both arrive as a 403, so the status alone would call them
+// permission failures. Past the type only the status counts. Message text is
+// free-form — a request id, a throttle or an outage can carry "401" — so it
+// never marks a key rejected on its own. The InvalidSignatureException
+// wordings matched below are the templates in the IAM user guide's SigV4
+// troubleshooting page.
+func classifyAWSProbe(err error) (kind string, rejected bool) {
+	var le *bedrock.ListError
+	if !errors.As(err, &le) {
+		text := strings.ToLower(err.Error())
+		if strings.Contains(text, "no such host") || strings.Contains(text, "region") {
+			return "region", false
+		}
+		return "reachability", false
 	}
-	return "reachability"
+	switch le.Type {
+	case "UnrecognizedClientException":
+		return "signature", true
+	case "InvalidSignatureException":
+		m := strings.ToLower(le.Message)
+		switch {
+		case strings.Contains(m, "credential should be scoped"):
+			// Scoped to a region or service the endpoint does not serve.
+			return "region", false
+		case strings.Contains(m, "signature expired"), strings.Contains(m, "signature not yet current"):
+			// The host clock is outside AWS's five-minute window, either way.
+			return "signature", false
+		}
+		return "signature", true
+	case "AccessDeniedException":
+		return "permission", false
+	}
+	switch le.StatusCode {
+	case http.StatusUnauthorized:
+		return "signature", true
+	case http.StatusForbidden:
+		return "permission", false
+	}
+	return "reachability", false
 }
 
 // probeGCP exchanges a token and then generates a single token against one
@@ -337,6 +470,13 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 	}
 	if err := az(ctx, req); err != nil {
 		// The token exchange failed, not the endpoint. Different fix.
+		//
+		// Only one invalid_grant is the key itself: Google documents "Invalid
+		// JWT Signature." as a key not associated with the account, or deleted,
+		// disabled or expired. The same code also names a skewed host clock.
+		if gcpKeySignatureRefused(err) {
+			err = rejectedCredential{err}
+		}
 		return "expiry", 0, err
 	}
 	resp, err := s.httpClient().Do(req)
@@ -347,13 +487,42 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return "permission", 0, errors.New("vertex rejected this credential: " + resp.Status)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "permission", 0, rejectedCredential{
+			errors.New("vertex rejected this credential: " + resp.Status)}
+	}
+	// Not rejected: Google answers 403 to a key that authenticated but whose
+	// project has the Vertex AI API disabled, lacks the IAM role, or has not
+	// enabled the model. Discarding the key would not fix any of those.
+	if resp.StatusCode == http.StatusForbidden {
+		return "permission", 0, errors.New("vertex refused this call: " + resp.Status +
+			"; check that the Vertex AI API is enabled, the service account has an IAM role " +
+			"allowing it, and the model is enabled in the project")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "reachability", 0, errors.New("vertex returned " + resp.Status)
 	}
 	return "completion", 1, nil
+}
+
+func gcpKeySignatureRefused(err error) bool {
+	var re *oauth2.RetrieveError
+	if !errors.As(err, &re) {
+		return false
+	}
+	code, desc := re.ErrorCode, re.ErrorDescription
+	// The JWT flow returns the body without parsing RFC 6749's fields.
+	if code == "" {
+		var body struct {
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		if json.Unmarshal(re.Body, &body) != nil {
+			return false
+		}
+		code, desc = body.Error, body.Description
+	}
+	return code == "invalid_grant" && strings.HasPrefix(desc, "Invalid JWT Signature")
 }
 
 // oneTokenProbe is the cheapest generation that still exercises the endpoint.
@@ -398,16 +567,36 @@ func (s *Server) probeOAuth(ctx context.Context, row store.ProviderRow,
 	if err != nil {
 		return "refresh", 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://refresh.invalid", nil)
+	pr, err := catalog.ProbeFor(provider.Provider{
+		ID: row.ID, Kind: row.Kind, BaseURL: row.BaseURL, Preset: row.Preset,
+		AuthStyle: auth.StyleOAuth,
+	}, s.deps.Presets[row.Preset], "")
 	if err != nil {
-		return "refresh", 0, err
+		return "completion", 0, fmt.Errorf(
+			"this provider kind has no listing endpoint: %w", err)
 	}
-	if err := az(ctx, req); err != nil {
+	// Authorized here rather than inside the listing, so a refused refresh is
+	// reported as one. A cached, unexpired token refreshes nothing, which is
+	// why the listing still has to be sent: only the provider can say whether
+	// that token was revoked.
+	refreshed := false
+	pr.Authorize = func(ctx context.Context, req *http.Request) error {
+		if err := az(ctx, req); err != nil {
+			return err
+		}
+		refreshed = true
+		return nil
+	}
+	count, err := s.countListing(ctx, pr)
+	if err != nil && !refreshed {
 		if errors.Is(err, auth.ErrNeedsReconnect) {
-			return "refresh", 0, fmt.Errorf(
-				"this account must be reconnected: the provider refused the refresh")
+			return "refresh", 0, rejectedCredential{fmt.Errorf(
+				"this account must be reconnected: the provider refused the refresh")}
 		}
 		return "refresh", 0, err
 	}
-	return "refresh", 1, nil
+	if err != nil {
+		return listingProbeKind(err), count, err
+	}
+	return "listing", count, nil
 }

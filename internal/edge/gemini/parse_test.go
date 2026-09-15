@@ -147,10 +147,63 @@ func TestParseRequestReadsConfigAndTools(t *testing.T) {
 	}
 }
 
+func TestParseRequestRecordsWhichSchemaFormTheClientUsed(t *testing.T) {
+	req := parsed(t, "m:generateContent", "", `{"contents":[],"tools":[{"functionDeclarations":[
+		{"name":"a","parameters":{"type":"OBJECT"}},
+		{"name":"b","parametersJsonSchema":{"type":"object","additionalProperties":false}}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"STRING"}}}`)
+	if len(req.Tools) != 2 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	if a := req.Tools[0]; string(a.Schema) != `{"type":"OBJECT"}` || a.SchemaDialect != ir.SchemaOpenAPI {
+		t.Errorf("tools[0] = %+v", a)
+	}
+	if b := req.Tools[1]; string(b.Schema) != `{"type":"object","additionalProperties":false}` || b.SchemaDialect != "" {
+		t.Errorf("tools[1] = %+v; parametersJsonSchema is the declaration's schema", b)
+	}
+	if rf := req.ResponseFormat; rf == nil || rf.SchemaDialect != ir.SchemaOpenAPI {
+		t.Errorf("response format = %+v", rf)
+	}
+}
+
+func TestParseRequestReadsSnakeCaseParametersJSONSchema(t *testing.T) {
+	req := parsed(t, "m:generateContent", "", `{"contents":[],"tools":[{"function_declarations":[
+		{"name":"b","parameters_json_schema":{"type":"object","additionalProperties":false}}]}]}`)
+	if len(req.Tools) != 1 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	if b := req.Tools[0]; string(b.Schema) != `{"type":"object","additionalProperties":false}` || b.SchemaDialect != "" {
+		t.Errorf("tools[0] = %+v; parameters_json_schema is the declaration's schema", b)
+	}
+}
+
 func TestParseRequestModeAnyWithoutNamesIsAny(t *testing.T) {
 	req := parsed(t, "m:generateContent", "", `{"contents":[],"toolConfig":{"functionCallingConfig":{"mode":"ANY"}}}`)
 	if req.ToolChoice == nil || req.ToolChoice.Mode != "any" {
 		t.Errorf("tool_choice = %+v", req.ToolChoice)
+	}
+}
+
+func TestParseRequestKeepsAnAllowlistOfSeveralFunctions(t *testing.T) {
+	for _, mode := range []string{"ANY", "VALIDATED"} {
+		req := parsed(t, "m:generateContent", "", `{"contents":[],
+		  "tools":[{"functionDeclarations":[{"name":"a"},{"name":"b"},{"name":"c"}]},{"googleSearch":{}}],
+		  "toolConfig":{"functionCallingConfig":{"mode":"`+mode+`","allowedFunctionNames":["a","b"]}}}`)
+		var names []string
+		builtin := false
+		for _, tool := range req.Tools {
+			if tool.Extra != nil {
+				builtin = true
+				continue
+			}
+			names = append(names, tool.Name)
+		}
+		if strings.Join(names, ",") != "a,b" {
+			t.Errorf("%s: functions = %v; a function outside allowedFunctionNames stays callable", mode, names)
+		}
+		if !builtin {
+			t.Errorf("%s: tools = %+v; a built-in tool is not a function declaration", mode, req.Tools)
+		}
 	}
 }
 

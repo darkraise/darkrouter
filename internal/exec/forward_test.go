@@ -103,14 +103,16 @@ func TestForwardStreamFailsOverOnAPreCommitError(t *testing.T) {
 }
 
 func TestForwardStreamPassesAPostCommitErrorThrough(t *testing.T) {
-	// After commit the recognizer's opinion no longer matters: the client
+	// After commit the error event is forwarded like any other: the client
 	// already has bytes and a second attempt would concatenate two halves.
+	// The failure is still reported, for the breaker and the row; the loop
+	// ends the chain because the writer committed, whatever is returned.
 	cw, ac := forwardFixture(t)
 	body := "data: c-first\n\ndata: e-overloaded\n\n"
 	out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
 
-	if out != adapter.OutcomeSuccess || ierr != nil {
-		t.Fatalf("outcome = %v err = %v", out, ierr)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the post-commit failure reported", out, ierr)
 	}
 	if got := recorderBody(cw); got != body {
 		t.Errorf("client saw %q", got)
@@ -187,6 +189,32 @@ func TestForwardStreamCopiesTheUnreadRemainderAfterAPostCommitOverflow(t *testin
 	}
 }
 
+func TestForwardStreamReportsARawTailThatWasCut(t *testing.T) {
+	// The raw copy is the rest of a committed response, and a connection
+	// that dies inside it fails that response exactly as it would have before
+	// the overflow. Reporting success would reset the breaker for a provider
+	// that cut the client off.
+	cw, ac := forwardFixture(t)
+	ac.Cfg.Server.SSE.MaxLineBytes = 16
+
+	first := "data: c-first\n\ndata: " + strings.Repeat("x", 40)
+	second := strings.Repeat("y", 30)
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(&flakyBody{r: &chunkedBody{chunks: []string{first, second}},
+			err: errors.New("connection reset")}),
+	}
+
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, noStreamError{}, false)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the cut reported against the provider", out, ierr)
+	}
+	if got, want := recorderBody(cw), first+second; got != want {
+		t.Errorf("client did not receive the bytes that did arrive\n got: %q\nwant: %q", got, want)
+	}
+}
+
 // flakyBody reads through to r, then reports err instead of io.EOF — a
 // connection that dies mid-stream rather than closing cleanly.
 type flakyBody struct {
@@ -214,8 +242,8 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	}
 	se := &recordedStreamError{}
 	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
-	if out != adapter.OutcomeSuccess || ierr != nil {
-		t.Fatalf("outcome = %v err = %v", out, ierr)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the post-commit failure reported", out, ierr)
 	}
 	if !cw.Committed() {
 		t.Fatal("the content event should have committed")
@@ -231,6 +259,108 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	}
 	if len(ac.Rec.Warnings) == 0 {
 		t.Error("no warning recorded for the post-commit transport failure")
+	}
+}
+
+// At shutdown the server cancels every request context while the clients are
+// still connected and reading, and the upstream read fails with that
+// cancellation. Nothing has failed at the client, so the stream still owes it
+// a terminal error event rather than simply stopping.
+func TestForwardStreamStillEndsWithAnErrorEventWhenTheRequestIsCancelled(t *testing.T) {
+	cw, ac := forwardFixture(t)
+	inbound, cancel := context.WithCancel(context.Background())
+	cancel()
+	ac.inbound = inbound
+	body := "data: c-first\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: context.Canceled}),
+	}
+	se := &recordedStreamError{}
+	out, _ := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
+	if out != adapter.OutcomeClientCancelled {
+		t.Errorf("outcome = %v, want %v", out, adapter.OutcomeClientCancelled)
+	}
+	want := body + "data: {\"error\":\"" + msgUpstreamReadFailed + "\"}\n\n"
+	if got := recorderBody(cw); got != want {
+		t.Errorf("client saw %q, want %q", got, want)
+	}
+}
+
+// failsOn is a client whose connection breaks on the write carrying marker.
+type failsOn struct {
+	*httptest.ResponseRecorder
+	marker string
+	broken bool
+}
+
+func (f *failsOn) Write(p []byte) (int, error) {
+	if f.broken || strings.Contains(string(p), f.marker) {
+		f.broken = true
+		return 0, errors.New("broken pipe")
+	}
+	return f.ResponseRecorder.Write(p)
+}
+
+// The provider's error event came first. A client that went away while it or
+// a later event was being written must not hide that failure from the breaker.
+func TestForwardStreamReportsTheProvidersErrorOverAFailedClientWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, marker string
+		maxLine            int
+	}{
+		{name: "on the error event", body: "data: c-first\n\ndata: e-overloaded\n\n", marker: "e-overloaded"},
+		{name: "on an unterminated tail", body: "data: c-first\n\ndata: e-overloaded\n\ndata: x-tail",
+			marker: "x-tail"},
+		{name: "on the raw copy after an overflow", marker: "xxxx", maxLine: 24,
+			body: "data: c-first\n\ndata: e-overloaded\n\ndata: " + strings.Repeat("x", 40)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ac := forwardFixture(t)
+			if tc.maxLine > 0 {
+				ac.Cfg.Server.SSE.MaxLineBytes = tc.maxLine
+			}
+			body := tc.body
+			cw := NewCommitWriter(&failsOn{ResponseRecorder: httptest.NewRecorder(), marker: tc.marker})
+			out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
+			if cw.Err() == nil {
+				t.Fatal("the client write never failed; the fixture is not exercising anything")
+			}
+			if out != adapter.OutcomeRetryableProvider {
+				t.Errorf("outcome = %v, want %v", out, adapter.OutcomeRetryableProvider)
+			}
+			if ierr == nil || !strings.Contains(ierr.Message, "e-overloaded") {
+				t.Errorf("error = %v, want the provider's error event", ierr)
+			}
+		})
+	}
+}
+
+func TestForwardStreamEndsWithOneErrorEventWhenTheProviderSentOne(t *testing.T) {
+	// A provider can announce its failure in an error event and then drop the
+	// connection, as a local CLI does. The client has its error already; a
+	// synthesized second one would end the stream twice.
+	cw, ac := forwardFixture(t)
+	body := "data: c-first\n\ndata: e-overloaded\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: errors.New("exit status 1")}),
+	}
+	se := &recordedStreamError{}
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the provider's failure reported", out, ierr)
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw %q, want exactly the provider's events %q", got, body)
+	}
+	if len(se.errs) != 0 {
+		t.Errorf("stream errors = %+v, want none after the provider's own error event", se.errs)
+	}
+	if ierr != nil && strings.Contains(ierr.Message, "exit status") {
+		t.Errorf("error = %q, want the provider's error event rather than the close that followed it", ierr.Message)
 	}
 }
 

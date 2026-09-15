@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import {
   AddAccountsDialog,
   filterPresets,
@@ -18,7 +19,12 @@ function mount(ui: React.ReactNode) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
 }
 
-function stub(presets: Preset[], providers: Provider[] = [], probeOk = true) {
+function stub(
+  presets: Preset[],
+  providers: Provider[] = [],
+  probeOk = true,
+  rejected = !probeOk,
+) {
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -31,7 +37,13 @@ function stub(presets: Preset[], providers: Provider[] = [], probeOk = true) {
     }
     if (url === "/api/providers") return json({ id: "groq" }, 201)
     if (String(url).includes("/test")) {
-      return json({ ok: probeOk, probe: "models", latency_ms: 12, error: probeOk ? "" : "401" })
+      return json({
+        ok: probeOk,
+        probe: "models",
+        latency_ms: 12,
+        error: probeOk ? "" : rejected ? "401" : "the provider returned 503 Service Unavailable",
+        rejected: probeOk ? undefined : rejected,
+      })
     }
     if (String(url).endsWith("/keys")) return json({ id: "cred-1", label: "x" }, 201)
     return json({})
@@ -190,6 +202,83 @@ describe("the wizard", () => {
     })
   })
 
+  it("keeps a key whose check could not complete", async () => {
+    // A rate limit or an outage says nothing about the key, and deleting it
+    // would lose a secret the operator may not have anywhere else.
+    const fetchMock = stub(
+      [preset({ id: "groq", name: "Groq" })],
+      [provider("groq", [cred("k1")])],
+      false,
+      false,
+    )
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-good")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/test"))).toBe(true),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /adding/i })).not.toBeInTheDocument(),
+    )
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "DELETE"),
+    ).toHaveLength(0)
+  })
+
+  it("stays open with the form and the reason when nothing could be added", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys")) {
+        return new Response(JSON.stringify({ error: "no keyring" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    const onOpenChange = vi.fn()
+    mount(<AddAccountsDialog open onOpenChange={onOpenChange} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-kept")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    expect(await screen.findByText(/no keyring/i)).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByLabelText(/api key/i)).toHaveValue("sk-kept")
+  })
+
+  it("keeps only the pasted lines that did not make it for another try", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) => {
+      const body = (init as RequestInit)?.body
+      if (String(url).endsWith("/keys") && String(body).includes("sk-bbb")) {
+        return new Response(JSON.stringify({ error: "duplicate label" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    const onOpenChange = vi.fn()
+    mount(<AddAccountsDialog open onOpenChange={onOpenChange} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.click(screen.getByRole("checkbox", { name: /check every key/i }))
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-aaa\nspare|sk-bbb")
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
+
+    expect(await screen.findByText(/duplicate label/i)).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect(screen.getByLabelText(/one per line/i)).toHaveValue("spare|sk-bbb")
+  })
+
   it("keeps every key when the check is turned off", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])], false)
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
@@ -251,6 +340,26 @@ describe("the wizard", () => {
     release?.()
   })
 
+  it("does not carry one provider's secrets to another picked after Back", async () => {
+    stub([preset({ id: "groq", name: "Groq" }), preset({ id: "cerebras", name: "Cerebras" })])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} />)
+
+    await userEvent.click(await screen.findByRole("option", { name: /groq/i }))
+    await userEvent.type(screen.getByLabelText("Label"), "work")
+    await userEvent.type(screen.getByLabelText(/api key/i), "gsk-groq-secret")
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "gsk-bulk")
+    await userEvent.click(screen.getByRole("radio", { name: /single credential/i }))
+    await userEvent.click(screen.getByRole("button", { name: /back/i }))
+    await userEvent.click(await screen.findByRole("option", { name: /cerebras/i }))
+
+    expect(screen.getByLabelText(/api key/i)).toHaveValue("")
+    expect(screen.getByLabelText("Label")).toHaveValue("")
+    await userEvent.click(screen.getByRole("radio", { name: /bulk import/i }))
+    expect(screen.getByLabelText(/one per line/i)).toHaveValue("")
+    expect(screen.getByRole("button", { name: /add credential/i })).toBeDisabled()
+  })
+
   it("names each pasted account from its own line", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(<AddAccountsDialog open onOpenChange={() => {}} />)
@@ -292,6 +401,14 @@ describe("the wizard opened from an unconfigured preset", () => {
     expect(screen.queryByPlaceholderText(/search providers/i)).not.toBeInTheDocument()
   })
 
+  it("asks for the credential its auth style takes, not an API key", async () => {
+    const vertex = preset({ id: "vertex", name: "Vertex", auth_kind: "gcp-sa" })
+    stub([vertex])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={vertex} />)
+    expect(await screen.findByLabelText(/service account/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument()
+  })
+
   it("creates the provider row with the first account", async () => {
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     mount(
@@ -314,6 +431,123 @@ describe("the wizard opened from an unconfigured preset", () => {
         "/api/providers/groq/keys",
         "/api/providers/groq/test?key=cred-1",
       ])
+    })
+  })
+
+  it("does not create the provider again when retrying keys it could not add", async () => {
+    // The provider list still predates the row this run created, which is
+    // what it looks like until the refetch lands. A second POST would 409 and
+    // abandon the keys the retry was for.
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) {
+        return new Response(JSON.stringify({ error: "database is locked" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    mount(
+      <AddAccountsDialog
+        open
+        onOpenChange={() => {}}
+        preset={preset({ id: "groq", name: "Groq" })}
+      />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(keyPosts).toBe(2))
+    const creates = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+    )
+    expect(creates).toHaveLength(1)
+  })
+
+  it("writes a free-models change made before retrying keys on the row it created", async () => {
+    // The provider list still predates the created row, so there is no
+    // provider to compare the box against -- only what the create sent.
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) {
+        return new Response(JSON.stringify({ error: "database is locked" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} preset={preset({ id: "groq", name: "Groq" })} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(keyPosts).toBe(2))
+    const patches = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/providers/groq" && (init as RequestInit)?.method === "PATCH",
+    )
+    expect(patches.map(([, init]) => JSON.parse((init as RequestInit).body as string))).toEqual([
+      { free_models_only: true },
+    ])
+  })
+
+  it("asks a Bedrock provider it creates for its region, and sends it", async () => {
+    const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
+    const fetchMock = stub([bedrock])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={bedrock} />)
+
+    await userEvent.type(await screen.findByLabelText(/aws access key/i), "doc")
+    const add = screen.getByRole("button", { name: /add credential/i })
+    // No endpoint exists without one, so the row cannot be created yet.
+    expect(add).toBeDisabled()
+    await userEvent.type(screen.getByLabelText(/region/i), "us-east-1")
+    await userEvent.click(add)
+
+    await waitFor(() => {
+      const create = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+      )
+      expect(JSON.parse(String((create?.[1] as RequestInit).body))).toMatchObject({
+        id: "bedrock",
+        preset: "bedrock",
+        region: "us-east-1",
+      })
+    })
+  })
+
+  it("asks a Vertex provider it creates for its project and location", async () => {
+    const vertex = preset({ id: "vertex", name: "Vertex", kind: "vertex", base_url: "", auth_kind: "gcp-sa" })
+    const fetchMock = stub([vertex])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={vertex} />)
+
+    await userEvent.type(await screen.findByLabelText(/service account/i), "doc")
+    const add = screen.getByRole("button", { name: /add credential/i })
+    await userEvent.type(screen.getByLabelText(/project/i), "my-project")
+    expect(add).toBeDisabled()
+    await userEvent.type(screen.getByLabelText(/location/i), "us-central1")
+    await userEvent.click(add)
+
+    await waitFor(() => {
+      const create = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+      )
+      expect(JSON.parse(String((create?.[1] as RequestInit).body))).toMatchObject({
+        project: "my-project",
+        location: "us-central1",
+      })
     })
   })
 
@@ -439,6 +673,37 @@ describe("the wizard opened from a provider", () => {
         free_models_only: true,
       })
     })
+  })
+
+  it("adds the keys when the setting saved but did not reach routing", async () => {
+    // That 500 is a committed write: stopping there would abandon the keys
+    // over a change that happened.
+    const warning = vi.spyOn(toast, "warning")
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })], [provider("groq", [cred("k1")])])
+    const inner = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) =>
+      (init as RequestInit)?.method === "PATCH"
+        ? new Response(
+            JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          )
+        : inner(url, init),
+    )
+    const onDone = vi.fn()
+    mount(
+      <AddAccountsDialog open onOpenChange={() => {}} onDone={onDone} provider={provider("groq", [cred("k1")])} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-cccc")
+    await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("groq"))
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url) === "/api/providers/groq/keys"),
+    ).toBe(true)
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/))
+    warning.mockRestore()
   })
 
   it("leaves the setting alone when the box was not touched", async () => {

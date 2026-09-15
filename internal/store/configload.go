@@ -29,6 +29,7 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 		return nil, err
 	}
 	c.Warnings = append(c.Warnings, warnings...)
+	c.Warnings = append(c.Warnings, config.Advisories(c)...)
 	c.Skipped = append(c.Skipped, skipped...)
 	return c, nil
 }

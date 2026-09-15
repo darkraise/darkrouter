@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	geminiedge "github.com/darkraise/darkrouter/internal/edge/gemini"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
@@ -79,6 +82,111 @@ func TestThinkingConfigDisabledSendsAZeroBudget(t *testing.T) {
 	}
 }
 
+// Google's per-model ranges: 2.5 Pro takes 128 to 32768 and cannot turn
+// thinking off; 2.5 Flash-Lite takes 512 to 24576 or 0. A budget outside
+// the range is a 400, not a clamp.
+func TestThinkingConfigHonorsTheFamilyFloor(t *testing.T) {
+	cases := []struct {
+		model  string
+		budget int
+		want   float64
+		warned bool
+	}{
+		{"gemini-2.5-pro", 64, 128, true},
+		{"gemini-2.5-flash-lite", 100, 512, true},
+		{"gemini-2.5-flash-lite", 600, 600, false},
+		{"gemini-2.5-flash", 64, 64, false},
+	}
+	for _, tc := range cases {
+		body, warns := builtFor(t, tc.model, &ir.Request{Reasoning: &ir.Reasoning{Budget: tc.budget}})
+		if got := thinking(body)["thinkingBudget"]; got != tc.want {
+			t.Errorf("%s budget %d: thinkingBudget = %v, want %v", tc.model, tc.budget, got, tc.want)
+		}
+		if (len(warns) > 0) != tc.warned {
+			t.Errorf("%s budget %d: warnings = %v", tc.model, tc.budget, warns)
+		}
+	}
+}
+
+func TestThinkingConfigDisabledOnAModelThatAlwaysThinks(t *testing.T) {
+	body, warns := builtFor(t, "gemini-2.5-pro", &ir.Request{Reasoning: &ir.Reasoning{Disabled: true}})
+	if tc := thinking(body); tc["thinkingBudget"] != float64(128) {
+		t.Errorf("thinkingConfig = %v; 2.5 Pro rejects zero, and its floor is the nearest to off", tc)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %v; the client's off switch was not honored", warns)
+	}
+
+	body, warns = builtFor(t, "gemini-3.1-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Disabled: true}})
+	if tc := thinking(body); tc["thinkingLevel"] != "low" {
+		t.Errorf("thinkingConfig = %v; Gemini 3 Pro cannot turn thinking off and has no minimal level", tc)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %v", warns)
+	}
+
+	body, _ = builtFor(t, "gemini-3-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Effort: "minimal"}})
+	if tc := thinking(body); tc["thinkingLevel"] != "low" {
+		t.Errorf("thinkingConfig = %v; minimal is an error on Gemini 3 Pro", tc)
+	}
+}
+
+// Google's per-model thinking levels (Gemini API and Vertex thinking guides):
+// 3 Pro takes low and high; 3.1 Pro has no minimal; 3.7 and 3.8 Flash reject
+// minimal; the Flash image models take minimal and high, 3 Pro Image high
+// only. No Gemini 3 model turns thinking fully off, and thinkingLevel is an
+// error before Gemini 3, whose non-thinking generations take no thinking
+// config at all.
+func TestThinkingConfigFollowsEachModelsLevels(t *testing.T) {
+	cases := []struct {
+		model     string
+		reasoning ir.Reasoning
+		level     any
+		budget    any
+		warned    bool
+	}{
+		{"gemini-3-pro-preview", ir.Reasoning{Effort: "medium"}, "high", nil, true},
+		{"gemini-3-pro-preview", ir.Reasoning{Effort: "low"}, "low", nil, false},
+		{"gemini-3.1-pro-preview", ir.Reasoning{Effort: "medium"}, "medium", nil, false},
+		{"gemini-3.1-pro-preview", ir.Reasoning{Effort: "minimal"}, "low", nil, true},
+		{"gemini-3.8-flash", ir.Reasoning{Effort: "minimal"}, "low", nil, true},
+		{"gemini-3-flash-preview", ir.Reasoning{Effort: "minimal"}, "minimal", nil, false},
+		{"gemini-3.1-flash-lite-preview", ir.Reasoning{Effort: "minimal"}, "minimal", nil, false},
+		{"gemini-3.1-flash-image-preview", ir.Reasoning{Effort: "low"}, "minimal", nil, true},
+		{"gemini-3-pro-image-preview", ir.Reasoning{Effort: "low"}, "high", nil, true},
+
+		{"gemini-3-flash-preview", ir.Reasoning{Disabled: true}, "minimal", nil, true},
+		{"gemini-3.8-flash", ir.Reasoning{Disabled: true}, "low", nil, true},
+		{"gemini-3-pro-preview", ir.Reasoning{Disabled: true}, "low", nil, true},
+		{"gemini-2.5-flash", ir.Reasoning{Disabled: true}, nil, float64(0), false},
+		{"gemini-2.5-pro", ir.Reasoning{Disabled: true}, nil, float64(128), true},
+		{"gemini-1.5-pro", ir.Reasoning{Disabled: true}, nil, nil, false},
+		{"gemini-2.0-pro-exp-02-05", ir.Reasoning{Disabled: true}, nil, nil, false},
+
+		// Google documents thinking for the 2.5 and 3 generations only, so an
+		// older model is sent no thinking config and the client is told.
+		{"gemini-1.5-pro", ir.Reasoning{Budget: 64}, nil, nil, true},
+		{"gemini-1.5-flash-002", ir.Reasoning{Effort: "high"}, nil, nil, true},
+		{"gemini-2.0-flash", ir.Reasoning{Effort: "low"}, nil, nil, true},
+		// The one 2.0 model that did think.
+		{"gemini-2.0-flash-thinking-exp-01-21", ir.Reasoning{Budget: 2048}, nil, float64(2048), false},
+	}
+	for _, c := range cases {
+		r := c.reasoning
+		body, warns := builtFor(t, c.model, &ir.Request{Reasoning: &r})
+		tc := thinking(body)
+		if tc["thinkingLevel"] != c.level || tc["thinkingBudget"] != c.budget {
+			t.Errorf("%s %+v: thinkingConfig = %v, want level %v budget %v", c.model, c.reasoning, tc, c.level, c.budget)
+		}
+		if c.level == nil && c.budget == nil && tc != nil {
+			t.Errorf("%s %+v: thinkingConfig = %v, want none", c.model, c.reasoning, tc)
+		}
+		if (len(warns) > 0) != c.warned {
+			t.Errorf("%s %+v: warnings = %v", c.model, c.reasoning, warns)
+		}
+	}
+}
+
 func TestThinkingConfigSendsALevelToGemini3(t *testing.T) {
 	body, warns := builtFor(t, "gemini-3-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Effort: "xhigh"}})
 	tc := thinking(body)
@@ -100,8 +208,33 @@ func TestBuildRequestSendsJSONObjectModeWithoutASchema(t *testing.T) {
 	if cfg["responseMimeType"] != "application/json" {
 		t.Fatalf("generationConfig = %v", cfg)
 	}
-	if _, ok := cfg["responseSchema"]; ok {
+	if _, ok := cfg["responseJsonSchema"]; ok {
 		t.Fatalf("generationConfig = %v; json_object carries no schema", cfg)
+	}
+}
+
+// responseSchema and parameters take Gemini's OpenAPI subset, which has no
+// $defs, $ref or additionalProperties. A client's JSON Schema belongs in the
+// fields that accept one.
+func TestBuildRequestSendsJSONSchemaThroughTheJSONSchemaFields(t *testing.T) {
+	schema := json.RawMessage(`{"$defs":{"city":{"type":"string"}},"type":"object","properties":{"city":{"$ref":"#/$defs/city"}},"additionalProperties":false}`)
+	body, _ := builtFor(t, "gemini-2.5-flash", &ir.Request{
+		Tools:          []ir.Tool{{Name: "lookup", Schema: schema}},
+		ResponseFormat: &ir.ResponseFormat{Type: "json_schema", Schema: schema},
+	})
+	cfg := body["generationConfig"].(map[string]any)
+	if _, ok := cfg["responseSchema"]; ok {
+		t.Errorf("generationConfig = %v; responseSchema is the OpenAPI subset", cfg)
+	}
+	if got, _ := cfg["responseJsonSchema"].(map[string]any); got["$defs"] == nil {
+		t.Errorf("generationConfig = %v", cfg)
+	}
+	decl := body["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)
+	if _, ok := decl["parameters"]; ok {
+		t.Errorf("declaration = %v; parameters is the OpenAPI subset", decl)
+	}
+	if got, _ := decl["parametersJsonSchema"].(map[string]any); got["$defs"] == nil {
+		t.Errorf("declaration = %v", decl)
 	}
 }
 
@@ -145,6 +278,86 @@ func TestBuildRequestDeclaresBuiltInToolsSeparately(t *testing.T) {
 	}})
 	if tools := only["tools"].([]any); len(tools) != 1 {
 		t.Fatalf("tools = %v; no empty functionDeclarations entry", tools)
+	}
+}
+
+// A Gemini client's responseSchema and function parameters are Google's
+// OpenAPI subset — uppercase types, nullable — which is not JSON Schema, so
+// they go back out in the fields that take that subset. What the client sent
+// as JSON Schema goes back out as JSON Schema.
+func TestGeminiClientSchemasKeepTheirOwnFields(t *testing.T) {
+	const openAPI = `{"type":"OBJECT","properties":{"city":{"type":"STRING","nullable":true}},"required":["city"]}`
+	const jsonSchema = `{"type":"object","properties":{"q":{"type":"string"}},"additionalProperties":false}`
+	parse := func(body string) *ir.Request {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/v1beta/models/m:generateContent", strings.NewReader(body))
+		r.SetPathValue("model", "m:generateContent")
+		req, _, err := geminiedge.ParseRequest(r, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	raw := func(v any) string {
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+	canon := func(s string) string {
+		var v any
+		_ = json.Unmarshal([]byte(s), &v)
+		return raw(v)
+	}
+
+	req := parse(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[
+			{"name":"lookup","description":"d","parameters":` + openAPI + `},
+			{"name":"search","description":"d","parametersJsonSchema":` + jsonSchema + `}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseSchema":` + openAPI + `}}`)
+	body, _ := builtFor(t, "gemini-2.5-flash", req)
+	cfg := body["generationConfig"].(map[string]any)
+	if got := raw(cfg["responseSchema"]); got != canon(openAPI) {
+		t.Errorf("responseSchema = %s, want the client's %s", got, openAPI)
+	}
+	if v, ok := cfg["responseJsonSchema"]; ok {
+		t.Errorf("responseJsonSchema = %v; an OpenAPI-subset schema is not JSON Schema", v)
+	}
+	decls := body["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	lookup, search := decls[0].(map[string]any), decls[1].(map[string]any)
+	if got := raw(lookup["parameters"]); got != canon(openAPI) {
+		t.Errorf("lookup = %v, want parameters %s", lookup, openAPI)
+	}
+	if _, ok := lookup["parametersJsonSchema"]; ok {
+		t.Errorf("lookup = %v; an OpenAPI-subset schema is not JSON Schema", lookup)
+	}
+	if got := raw(search["parametersJsonSchema"]); got != canon(jsonSchema) {
+		t.Errorf("search = %v, want parametersJsonSchema %s", search, jsonSchema)
+	}
+	if _, ok := search["parameters"]; ok {
+		t.Errorf("search = %v", search)
+	}
+
+	req = parse(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"generationConfig":{"responseMimeType":"application/json","responseJsonSchema":` + jsonSchema + `}}`)
+	body, _ = builtFor(t, "gemini-2.5-flash", req)
+	cfg = body["generationConfig"].(map[string]any)
+	if got := raw(cfg["responseJsonSchema"]); got != canon(jsonSchema) {
+		t.Errorf("responseJsonSchema = %s, want %s", got, jsonSchema)
+	}
+	if v, ok := cfg["responseSchema"]; ok {
+		t.Errorf("responseSchema = %v", v)
+	}
+}
+
+func TestBuildRequestDropsANamelessTypedTool(t *testing.T) {
+	body, warns := builtFor(t, "gemini-2.5-flash", &ir.Request{Tools: []ir.Tool{
+		{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}},
+	}})
+	if tools, ok := body["tools"]; ok {
+		t.Errorf("tools = %v; an Anthropic typed tool is not a Gemini built-in", tools)
+	}
+	if len(warns) != 1 || warns[0].Field != "tools[].type" {
+		t.Errorf("warnings = %v", warns)
 	}
 }
 
@@ -250,29 +463,44 @@ func TestParseStreamRemembersACallAcrossChunks(t *testing.T) {
 	}
 }
 
+// Anthropic's event model has no delta carrying thinking text and a signature
+// together, so its writer keeps only one of the two from a combined delta.
+// Gemini puts both on one part; the parser splits them the way Anthropic
+// streams them, text first.
 func TestParseStreamKeepsThoughtTextNextToItsSignature(t *testing.T) {
-	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true,"thoughtSignature":"sig-1"},{"text":"No.","thoughtSignature":"sig-2"}]}}]}`)
+	body := data(`{"candidates":[{"content":{"parts":[{"text":"weighing","thought":true,"thoughtSignature":"sig-1"},{"text":"No.","thoughtSignature":"sig-2"}]},"finishReason":"STOP"}]}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var thought, text ir.Delta
+	var thoughts []ir.Delta
+	var text ir.Delta
 	for _, ev := range evs {
 		if ev.Type != ir.EventContentDelta {
 			continue
 		}
 		switch ev.Delta.Type {
 		case ir.BlockThinking:
-			thought = *ev.Delta
+			thoughts = append(thoughts, *ev.Delta)
 		case ir.BlockText:
 			text = *ev.Delta
 		}
 	}
-	if thought.Thinking != "weighing" || thought.Signature != "sig-1" {
-		t.Fatalf("thought delta = %+v; the text must not be lost to the signature", thought)
+	if len(thoughts) != 2 || thoughts[0].Thinking != "weighing" || thoughts[0].Signature != "" ||
+		thoughts[1].Thinking != "" || thoughts[1].Signature != "sig-1" {
+		t.Fatalf("thought deltas = %+v; want the text, then the signature alone", thoughts)
 	}
 	if text.Text != "No." || text.Signature != "sig-2" {
 		t.Fatalf("text delta = %+v", text)
+	}
+
+	rec := httptest.NewRecorder()
+	if err := anthropicedge.WriteStream(rec, ParseStream(strings.NewReader(body), 1<<20)); err != nil {
+		t.Fatal(err)
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"thinking":"weighing"`) || !strings.Contains(out, `"signature":"sig-1"`) {
+		t.Errorf("an Anthropic client lost the thought text or its signature:\n%s", out)
 	}
 }
 

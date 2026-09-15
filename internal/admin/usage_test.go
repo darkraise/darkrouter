@@ -105,6 +105,104 @@ func TestManyCoolingTriplesReadAsOneDegradedProvider(t *testing.T) {
 	}
 }
 
+// The router keys a keyless provider's attempt on an empty credential id, so
+// that is where its cooldowns are.
+func TestAKeylessProvidersCooldownsReachTheOverview(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"free","name":"Free","kind":"openaicompat","base_url":"https://x/v1","auth_style":"none"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	for i := 0; i < 5; i++ {
+		k := health.Key{ProviderID: "free", KeyID: "", Model: "m" + strconv.Itoa(i)}
+		for j := 0; j < 5; j++ {
+			s.deps.Breaker.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500})
+		}
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 {
+		t.Fatalf("tiles = %+v", body.Providers)
+	}
+	if got := body.Providers[0]; got.Cooling != 5 || got.State != "degraded" {
+		t.Errorf("tile = %+v, want degraded with 5 cooling", got)
+	}
+}
+
+// An optional-key provider with a key routes through the key, so a cooldown
+// left under the empty id from before the key was added is not in use.
+func TestAKeylessCooldownDoesNotCountOnceAKeyIsInUse(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"opt","name":"Opt","kind":"openaicompat","base_url":"https://x/v1","auth_style":"optional"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers/opt/keys",
+		`{"label":"k","secret":"sk-optional-1234"}`); w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	for j := 0; j < 5; j++ {
+		s.deps.Breaker.Record(health.Key{ProviderID: "opt", KeyID: "", Model: "m"},
+			health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500})
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if got := body.Providers[0]; got.Cooling != 0 || got.State != "healthy" {
+		t.Errorf("tile = %+v, want healthy with nothing cooling", got)
+	}
+}
+
+// The Providers screen judges health by enabled credentials only, because the
+// router drops a disabled one. The overview must reach the same verdict.
+func TestAProviderWhoseCredentialsAreAllDisabledIsDegraded(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p1", "https://x/v1")
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p1/keys/"+keyID, `{"enabled":false}`); w.Code != http.StatusOK {
+		t.Fatalf("disable credential: %d %s", w.Code, w.Body.String())
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 || body.Providers[0].State != "degraded" {
+		t.Errorf("tiles = %+v, want one degraded provider", body.Providers)
+	}
+}
+
+func TestACooldownOnADisabledCredentialDoesNotDegradeTheProvider(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "p1", "https://x/v1")
+	w := do(t, s, cookie, token, "POST", "/api/providers/p1/keys",
+		`{"label":"spare","secret":"sk-seed-spare-5678"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("second credential: %d %s", w.Code, w.Body.String())
+	}
+	var spare struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &spare); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p1/keys/"+spare.ID, `{"enabled":false}`); w.Code != http.StatusOK {
+		t.Fatalf("disable credential: %d %s", w.Code, w.Body.String())
+	}
+	for j := 0; j < 5; j++ {
+		s.deps.Breaker.Record(health.Key{ProviderID: "p1", KeyID: spare.ID, Model: "m"}, health.Signal{
+			Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500,
+		})
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 {
+		t.Fatalf("tiles = %+v", body.Providers)
+	}
+	if got := body.Providers[0]; got.State != "healthy" || got.Cooling != 0 {
+		t.Errorf("tile = %+v, want healthy with nothing cooling", got)
+	}
+}
+
 func TestTodaysSpendSaysPricingIsNotWired(t *testing.T) {
 	// CostMicros is nil on every row: nothing computes cost, and phase 5
 	// recorded why. A confident zero would read as "today was free".
@@ -152,10 +250,11 @@ func TestAnEmptyLogReportsZeroRatherThanFailing(t *testing.T) {
 
 func TestUsageRollsUpByDay(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
-		 VALUES ('2026-08-21','a','m',5,10,20), ('2026-08-22','a','m',7,14,28)`); err != nil {
+		 VALUES (?,'a','m',5,10,20), (?,'a','m',7,14,28)`, daysAgo(1), daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,13 +289,63 @@ func TestUsageRollsUpByDay(t *testing.T) {
 	}
 }
 
+// usageClock is the instant a pinned server windows usage by. Fixed rather
+// than read from the wall clock, so a test run spanning UTC midnight cannot put
+// a seeded day on the other side of the handler's window.
+var usageClock = time.Date(2026, time.March, 14, 12, 0, 0, 0, time.UTC)
+
+func pinClock(s *Server) {
+	s.now = func() time.Time { return usageClock }
+}
+
+// daysAgo is a usage_daily day relative to usageClock.
+func daysAgo(n int) string {
+	return usageClock.AddDate(0, 0, -n).Format(time.DateOnly)
+}
+
+// The chart and its Requests drilldown must share one window, so the handler
+// serves the calendar days it covered rather than leaving the console to
+// guess them from its own clock.
+func TestUsageServesTheCalendarWindowItCovered(t *testing.T) {
+	s, db := testServerFull(t)
+	pinClock(s)
+	cookie, token := login(t, s)
+	if _, err := db.Write.Exec(
+		`INSERT INTO usage_daily (day, provider_id, model, requests)
+		 VALUES (?,'a','m',1), (?,'a','m',1)`, daysAgo(7), daysAgo(6)); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(t, s, cookie, token, "GET", "/api/usage?days=7", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Days []struct {
+			Day string `json:"day"`
+		} `json:"days"`
+		FirstDay string `json:"first_day"`
+		LastDay  string `json:"last_day"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.FirstDay != daysAgo(6) || body.LastDay != daysAgo(0) {
+		t.Errorf("window = %s..%s, want %s..%s", body.FirstDay, body.LastDay, daysAgo(6), daysAgo(0))
+	}
+	if len(body.Days) != 1 || body.Days[0].Day != daysAgo(6) {
+		t.Errorf("days = %+v, want only %s", body.Days, daysAgo(6))
+	}
+}
+
 func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
 	// A failed attempt's cost lands in usage_daily via the rollup but, before
 	// this, never reached today_spend -- the tile and the chart answered a
 	// different question about the same day.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now()
+	now := usageClock
 	failedCost := int64(500)
 	servedCost := int64(1200)
 	storetest.WriteBatch(t, db, []*store.RequestRecord{{
@@ -244,8 +393,9 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	// window makes it report a few minutes and read as "today was nearly
 	// free".
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now().UTC()
+	now := usageClock
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	c := int64(4200)
@@ -259,14 +409,6 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	}})
 
 	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
-
-	// The handler computes its own start-of-today a moment after this test
-	// did; a UTC midnight landing between the two would put the seeded row
-	// in what the handler now considers yesterday. That is a clock race, not
-	// a bug the assertion below should absorb, so detect it and skip.
-	if end := time.Now().UTC(); end.Year() != now.Year() || end.YearDay() != now.YearDay() {
-		t.Skip("UTC day boundary crossed during the test")
-	}
 
 	var got struct {
 		TodaySpend struct {
@@ -316,10 +458,11 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 	// name slipping into the same payload as "requests_per_min" would
 	// fossilize an inconsistency no consumer asked for.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
-		 VALUES ('2026-08-25','groq','m',5,7,10,20)`); err != nil {
+		 VALUES (?,'groq','m',5,7,10,20)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 	storetest.WriteBatch(t, db, []*store.RequestRecord{{
@@ -380,10 +523,11 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 
 func TestUsageGroupByAlias(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
-		 VALUES ('2026-08-25','groq','m','fast-coder',7)`); err != nil {
+		 VALUES (?,'groq','m','fast-coder',7)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,10 +559,11 @@ func TestUsageGroupByCarriesAttemptsAlongsideRequests(t *testing.T) {
 	// looks like the provider did nothing rather than having burned tokens on
 	// every failed try.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
-		 VALUES ('2026-08-25','flaky','m',0,7,140,0)`); err != nil {
+		 VALUES (?,'flaky','m',0,7,140,0)`, daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -457,11 +602,12 @@ func TestUsageRejectsAnUnknownGroupBy(t *testing.T) {
 
 func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
-		 VALUES ('2026-08-25','groq','m','fast-coder',7),
-		        ('2026-08-25','groq','m','cheap',3)`); err != nil {
+		 VALUES (?,'groq','m','fast-coder',7),
+		        (?,'groq','m','cheap',3)`, daysAgo(0), daysAgo(0)); err != nil {
 		t.Fatal(err)
 	}
 	rr := do(t, s, cookie, token, "GET", "/api/usage", "")
@@ -480,8 +626,9 @@ func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 
 func TestTodaySpendReportsWhetherAnEstimateContributed(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now()
+	now := usageClock
 	measured, indexed := int64(1200), int64(300)
 	write := func(id, grade string, cost *int64) {
 		storetest.WriteBatch(t, db, []*store.RequestRecord{{

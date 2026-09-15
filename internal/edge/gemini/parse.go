@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -97,9 +98,17 @@ type wireRequest struct {
 }
 
 type wireFunctionDeclaration struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	Parameters           json.RawMessage `json:"parameters"`
+	ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema"`
+	// Proto JSON parsers accept a field's original snake_case name too, and
+	// function_declarations is already read that way.
+	ParametersJSONSchemaSnake json.RawMessage `json:"parameters_json_schema"`
+}
+
+func present(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
 }
 
 func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthrough, error) {
@@ -168,6 +177,12 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		default:
 			req.ToolChoice = &ir.ToolChoice{Mode: "auto"}
 		}
+		// The IR's tool choice holds at most one name, so an allowlist is
+		// kept by forwarding only the functions it permits. Gemini reads it
+		// under ANY and VALIDATED alone.
+		if len(cfg.AllowedFunctionNames) > 0 && (cfg.Mode == "ANY" || cfg.Mode == "VALIDATED") {
+			req.Tools = allowedTools(req.Tools, cfg.AllowedFunctionNames)
+		}
 	}
 	for _, s := range w.SafetySettings {
 		req.Safety = append(req.Safety, ir.SafetySetting{Category: s.Category, Threshold: s.Threshold})
@@ -180,10 +195,12 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 		req.MaxTokens = g.MaxOutputTokens
 		req.StopSequences = g.StopSequences
 		switch {
-		case len(g.ResponseJSONSchema) > 0:
+		case present(g.ResponseJSONSchema):
 			req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: g.ResponseJSONSchema}
-		case len(g.ResponseSchema) > 0:
-			req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: g.ResponseSchema}
+		case present(g.ResponseSchema):
+			req.ResponseFormat = &ir.ResponseFormat{
+				Type: "json_schema", Schema: g.ResponseSchema, SchemaDialect: ir.SchemaOpenAPI,
+			}
 		case g.ResponseMimeType == "application/json":
 			req.ResponseFormat = &ir.ResponseFormat{Type: "json_object"}
 		}
@@ -213,6 +230,18 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 
 // parseToolEntry reads one tools entry: its function declarations become
 // named tools, and any other key is a provider built-in carried whole.
+// allowedTools drops the function declarations an allowlist excludes. A
+// built-in tool carried as an extra is not a function and is kept.
+func allowedTools(tools []ir.Tool, allowed []string) []ir.Tool {
+	out := tools[:0:0]
+	for _, t := range tools {
+		if t.Extra != nil || slices.Contains(allowed, t.Name) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func parseToolEntry(entry map[string]json.RawMessage) ([]ir.Tool, error) {
 	var out []ir.Tool
 	keys := make([]string, 0, len(entry))
@@ -228,7 +257,16 @@ func parseToolEntry(entry map[string]json.RawMessage) ([]ir.Tool, error) {
 				return nil, fmt.Errorf("invalid functionDeclarations: %w", err)
 			}
 			for _, d := range decls {
-				out = append(out, ir.Tool{Name: d.Name, Description: d.Description, Schema: d.Parameters})
+				tool := ir.Tool{Name: d.Name, Description: d.Description}
+				switch {
+				case present(d.ParametersJSONSchema):
+					tool.Schema = d.ParametersJSONSchema
+				case present(d.ParametersJSONSchemaSnake):
+					tool.Schema = d.ParametersJSONSchemaSnake
+				case present(d.Parameters):
+					tool.Schema, tool.SchemaDialect = d.Parameters, ir.SchemaOpenAPI
+				}
+				out = append(out, tool)
 			}
 			continue
 		}

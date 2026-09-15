@@ -289,6 +289,52 @@ func TestBuildRequestDropsThinkingForAForcedToolChoice(t *testing.T) {
 	}
 }
 
+// A choice among no tools means nothing to send, and cannot conflict with
+// thinking.
+func TestToolChoiceIsOmittedWhenNoToolWasRendered(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
+		Messages:   []ir.Message{userMsg("hi")},
+		Tools:      []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}},
+		ToolChoice: &ir.ToolChoice{Mode: "any"},
+		Reasoning:  &ir.Reasoning{Budget: 2048},
+	})
+	if tc, ok := body["tool_choice"]; ok {
+		t.Errorf("tool_choice = %v with no tools declared", tc)
+	}
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "enabled" {
+		t.Errorf("thinking = %v; no tool is forced when none is declared", body["thinking"])
+	}
+	if !hasWarning(warns, "tool_choice") || hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	_, body, _ = built(t, &ir.Request{
+		Messages:          []ir.Message{userMsg("hi")},
+		ParallelToolCalls: new(bool),
+	})
+	if tc, ok := body["tool_choice"]; ok {
+		t.Errorf("tool_choice = %v with no tools declared", tc)
+	}
+}
+
+func TestManualThinkingSurvivesAForcedChoiceDowngradedToAuto(t *testing.T) {
+	_, body, warns := builtWith(t, "claude-x", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true, NoForcedToolChoice: true}, &ir.Request{
+		Messages:   []ir.Message{userMsg("hi")},
+		Tools:      []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}},
+		ToolChoice: &ir.ToolChoice{Mode: "any"},
+		Reasoning:  &ir.Reasoning{Budget: 2048},
+	})
+	if tc, _ := body["tool_choice"].(map[string]any); tc["type"] != "auto" {
+		t.Errorf("tool_choice = %v", body["tool_choice"])
+	}
+	if th, _ := body["thinking"].(map[string]any); th["type"] != "enabled" {
+		t.Errorf("thinking = %v; the choice sent was auto", body["thinking"])
+	}
+	if hasWarning(warns, "reasoning") {
+		t.Errorf("warnings = %+v", warns)
+	}
+}
+
 func TestBuildRequestDropsAPrefillWhenThinkingIsOn(t *testing.T) {
 	_, body, warns := builtWith(t, "claude-sonnet-4-5", adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true}, &ir.Request{
 		Messages: []ir.Message{
@@ -353,6 +399,21 @@ func TestBuildRequestRendersToolsAndChoice(t *testing.T) {
 	}
 	if tc["disable_parallel_tool_use"] != true {
 		t.Errorf("tool_choice = %v; parallel_tool_calls inverts", tc)
+	}
+}
+
+// Anthropic structured output takes a schema and has no schema-free JSON
+// mode, so a json_object request cannot be honored and must not pass silently.
+func TestBuildRequestWarnsOnJSONObjectMode(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages:       []ir.Message{userMsg("hi")},
+		ResponseFormat: &ir.ResponseFormat{Type: "json_object"},
+	})
+	if !hasWarning(warns, "response_format") {
+		t.Errorf("warnings = %+v", warns)
+	}
+	if oc, ok := body["output_config"]; ok {
+		t.Errorf("output_config = %v; there is no schema to constrain with", oc)
 	}
 }
 
@@ -611,6 +672,59 @@ func TestRenderToolsReEmitsServerToolsAndCacheControl(t *testing.T) {
 	}
 	if hasWarning(warns, "cache_control") || hasWarning(warns, "tools[].web_search") {
 		t.Errorf("warnings = %+v", warns)
+	}
+}
+
+// A Gemini built-in has no name; rendered as a client tool it would be a
+// nameless function carrying a field Anthropic rejects.
+func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{
+			{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}},
+			{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+		},
+	})
+	tools := body["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %v", tools)
+	}
+	if !hasWarning(warns, "tools[].googleSearch") {
+		t.Errorf("warnings = %+v", warns)
+	}
+
+	_, body, _ = built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools:    []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}},
+	})
+	if _, ok := body["tools"]; ok {
+		t.Errorf("tools = %v; nothing was left to declare", body["tools"])
+	}
+}
+
+func TestNamelessTypedToolIsRenderedNotDropped(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}}},
+	})
+	tools, _ := body["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %v; an mcp_toolset is Anthropic's own tool", body["tools"])
+	}
+	got := tools[0].(map[string]any)
+	if got["type"] != "mcp_toolset" || got["mcp_server_name"] != "srv" {
+		t.Errorf("tool = %v", got)
+	}
+	for _, k := range []string{"name", "input_schema"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("tool = %v; a typed tool takes no %s", got, k)
+		}
+	}
+	for _, w := range warns {
+		if strings.HasPrefix(w.Field, "tools[]") {
+			t.Errorf("warnings = %+v", warns)
+		}
 	}
 }
 

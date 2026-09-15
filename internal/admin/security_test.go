@@ -31,6 +31,27 @@ func TestEveryResponseCarriesSecurityHeaders(t *testing.T) {
 	}
 }
 
+// The policy is spelled out rather than compared with the constant, so a
+// loosened or tightened directive has to change this test too.
+func TestTheConsolePolicyNamesEachDirectiveExactly(t *testing.T) {
+	s, _ := testServer(t)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/api/auth/status", nil))
+	got := strings.Join(strings.Split(w.Header().Get("Content-Security-Policy"), "; "), "\n")
+	want := strings.Join([]string{
+		"default-src 'self'",
+		"img-src 'self' data: https:",
+		"media-src 'self' blob:",
+		"style-src 'self' 'unsafe-inline'",
+		"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com",
+		"font-src 'self' https://fonts.gstatic.com",
+		"connect-src 'self'",
+	}, "\n")
+	if got != want {
+		t.Errorf("Content-Security-Policy directives =\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestIndexIsRevalidatedAndAssetsAreImmutable(t *testing.T) {
 	s, _ := testServer(t)
 	w := httptest.NewRecorder()
@@ -68,6 +89,10 @@ func TestTheAssetDirectoryIsNotListed(t *testing.T) {
 
 func TestLoginIsRateLimitedPerAddress(t *testing.T) {
 	s, _ := testServer(t)
+	// Frozen: ten bcrypt checks take long enough under the race detector for
+	// the bucket to refill one token before the eleventh attempt.
+	frozen := time.Now()
+	s.logins.now = func() time.Time { return frozen }
 	attempt := func(addr string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"password":"wrong"}`))

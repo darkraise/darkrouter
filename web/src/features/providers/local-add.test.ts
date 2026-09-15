@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { ApiError } from "../../lib/api"
 import { addLocalRuntime, testLocalRuntime, type ProviderApi } from "./local-add"
 
 /** Records what reached the network, and answers from a script. The network is
@@ -104,6 +105,27 @@ describe("addLocalRuntime", () => {
     expect(api.calls.at(-1)).toBe("DELETE /api/providers/ollama")
   })
 
+  it("says the gateway did not load a provider it stored", async () => {
+    const warning = "the change was saved, but the gateway could not load it"
+    const api = fakeApi({ create: () => ({ id: "ollama", routing_updated: false, warning }) })
+    expect(await addLocalRuntime(api, draft)).toEqual({ ok: true, modelCount: undefined, routingNotUpdated: warning })
+  })
+
+  it("says the gateway did not load a key it stored", async () => {
+    const warning = "the change was saved, but the gateway could not load it"
+    const api: ProviderApi = {
+      post: async <T,>(path: string) =>
+        (path.endsWith("/keys")
+          ? { id: "k1", label: "default", routing_updated: false, warning }
+          : path.endsWith("/test")
+            ? { ok: true, probe: "listing", latency_ms: 1 }
+            : { id: "ollama", routing_updated: true }) as T,
+      del: async <T,>() => null as T,
+    }
+    const result = await addLocalRuntime(api, { ...draft, apiKey: "sk-local" })
+    expect(result).toMatchObject({ ok: true, routingNotUpdated: warning })
+  })
+
   it("still reports the probe failure when the rollback also fails", async () => {
     // The operator needs to know why the endpoint was rejected; that the
     // cleanup then failed is the lesser of the two facts.
@@ -112,6 +134,41 @@ describe("addLocalRuntime", () => {
       remove: () => {
         throw new Error("delete failed")
       },
+    })
+    expect(await addLocalRuntime(api, draft)).toMatchObject({
+      ok: false,
+      error: "connection refused",
+    })
+  })
+
+  it("says the rejected runtime is still configured when removing it failed", async () => {
+    const api = fakeApi({
+      probe: () => ({ ok: false, probe: "listing", latency_ms: 1, error: "connection refused" }),
+      remove: () => {
+        throw new Error("delete failed")
+      },
+    })
+    const result = await addLocalRuntime(api, draft)
+    expect(result).toMatchObject({ ok: false, error: "connection refused" })
+    expect(!result.ok && result.leftBehind).toMatch(/still configured.*delete failed/)
+  })
+
+  it("says the gateway still routes to a runtime whose removal did not load", async () => {
+    const warning = "the change was saved, but the gateway could not load it"
+    const api = fakeApi({
+      probe: () => ({ ok: false, probe: "listing", latency_ms: 1, error: "connection refused" }),
+      remove: () => {
+        throw new ApiError(500, warning, { error: warning, routing_updated: false })
+      },
+    })
+    const result = await addLocalRuntime(api, draft)
+    expect(result).toMatchObject({ ok: false, error: "connection refused" })
+    expect(!result.ok && result.leftBehind).toMatch(/removed.*still routing/)
+  })
+
+  it("leaves nothing to report when the rollback succeeded", async () => {
+    const api = fakeApi({
+      probe: () => ({ ok: false, probe: "listing", latency_ms: 1, error: "connection refused" }),
     })
     expect(await addLocalRuntime(api, draft)).toEqual({ ok: false, error: "connection refused" })
   })

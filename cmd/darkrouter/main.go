@@ -165,6 +165,10 @@ func warnUnclaimed(ctx context.Context, db *store.DB) {
 		"the admin port will become its administrator. Claim it now.")
 }
 
+// lockDatabase is store.Lock, replaceable so a test can stand in for a
+// filesystem without lock support.
+var lockDatabase = store.Lock
+
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("darkrouter", flag.ExitOnError)
 	dbPath, legacyConfig, err := parseFlags(fs, args)
@@ -192,6 +196,24 @@ func runServer(args []string) error {
 	// thing a container deployment can get wrong.
 	if err := store.CheckWritable(dbPath); err != nil {
 		return err
+	}
+	// Held until the process exits. rotate-key takes the same lock, and a
+	// rotation run beside this process would be undone by the next credential
+	// it writes under the key it started with.
+	//
+	// A filesystem that cannot lock at all does not stop the gateway: that
+	// would take it down for a check that cannot be made, and rotate-key
+	// refuses on its own there unless told the gateway is stopped.
+	unlock, err := lockDatabase(dbPath)
+	switch {
+	case errors.Is(err, store.ErrLockUnavailable):
+		slog.Warn("running without the database lock: neither rotate-key nor a second "+
+			"gateway on this data directory can be detected while this one runs",
+			"err", err)
+	case err != nil:
+		return err
+	default:
+		defer unlock()
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
@@ -297,6 +319,8 @@ func armSecondSignal(ctx context.Context, stop func()) {
 func runRotateKey(args []string) error {
 	fs := flag.NewFlagSet("rotate-key", flag.ExitOnError)
 	dbPath := fs.String("db", "darkrouter.db", "path to the database file")
+	stopped := fs.Bool("gateway-stopped", false,
+		"confirm the gateway is stopped; needed only where the data directory cannot be locked")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -304,6 +328,24 @@ func runRotateKey(args []string) error {
 	oldMaster := os.Getenv("DARKROUTER_MASTER_KEY")
 	if oldMaster == "" {
 		return errors.New("DARKROUTER_MASTER_KEY must hold the current master key")
+	}
+
+	// Before the prompt, so an operator is not asked for a key only to be
+	// turned away.
+	unlock, err := lockDatabase(*dbPath)
+	switch {
+	case errors.Is(err, store.ErrDatabaseInUse):
+		return fmt.Errorf("stop the gateway before rotating the key: %w", err)
+	case errors.Is(err, store.ErrLockUnavailable) && !*stopped:
+		return fmt.Errorf("a running gateway cannot be detected without the lock; stop it "+
+			"and run rotate-key again with -gateway-stopped: %w", err)
+	case errors.Is(err, store.ErrLockUnavailable):
+		slog.Warn("rotating without the database lock, on the operator's word that the gateway is stopped",
+			"err", err)
+	case err != nil:
+		return err
+	default:
+		defer unlock()
 	}
 
 	fmt.Fprint(os.Stderr, "New master key: ")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -36,6 +37,34 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 
 	outputConfig := map[string]any{}
 	traits := traitsOf(t.Info)
+
+	// Tools and the choice among them are settled before thinking, because
+	// manual thinking depends on the choice actually sent, not the one asked
+	// for. Their warnings keep their place further down.
+	var tools []any
+	var toolWarns []ir.Warning
+	if len(req.Tools) > 0 {
+		tools, toolWarns = renderTools(req.Tools, cb)
+	}
+	toolChoice := req.ToolChoice
+	switch {
+	// With no tools declared there is nothing to choose, and a forced mode
+	// would name a tool the request does not carry.
+	case len(tools) == 0:
+		if forcedChoice(toolChoice) {
+			toolWarns = append(toolWarns, ir.Warning{
+				Field: "tool_choice", Target: targetName,
+				Reason: "no tool was left to declare; the forced tool choice was dropped",
+			})
+		}
+		toolChoice = nil
+	case traits.noForcedToolChoice && forcedChoice(toolChoice):
+		toolWarns = append(toolWarns, ir.Warning{
+			Field: "tool_choice", Target: targetName,
+			Reason: "this model rejects a forced tool choice; downgraded to auto",
+		})
+		toolChoice = &ir.ToolChoice{Mode: "auto"}
+	}
 
 	// Thinking splits by model generation, and the two modes are mutually
 	// exclusive per generation: type "enabled" is a 400 on Claude 4.7 and
@@ -87,7 +116,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		// Forced tool use is incompatible with manual thinking, though not with
 		// adaptive. The forced tool is the client's explicit instruction and an
 		// agentic loop depends on it; the reasoning depth is the softer ask.
-		case req.ToolChoice != nil && (req.ToolChoice.Mode == "any" || req.ToolChoice.Mode == "tool"):
+		case forcedChoice(toolChoice):
 			warns = append(warns, ir.Warning{
 				Field: "reasoning", Target: targetName,
 				Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
@@ -162,27 +191,29 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if req.Stream {
 		body["stream"] = true
 	}
-	if len(req.Tools) > 0 {
-		tools, w := renderTools(req.Tools, cb)
-		warns = append(warns, w...)
+	warns = append(warns, toolWarns...)
+	if len(tools) > 0 {
 		body["tools"] = tools
-	}
-	toolChoice := req.ToolChoice
-	if toolChoice != nil && traits.noForcedToolChoice && (toolChoice.Mode == "any" || toolChoice.Mode == "tool") {
-		warns = append(warns, ir.Warning{
-			Field: "tool_choice", Target: targetName,
-			Reason: "this model rejects a forced tool choice; downgraded to auto",
-		})
-		toolChoice = &ir.ToolChoice{Mode: "auto"}
-	}
-	if tc := renderToolChoice(toolChoice, req.ParallelToolCalls); tc != nil {
-		body["tool_choice"] = tc
+		if tc := renderToolChoice(toolChoice, req.ParallelToolCalls); tc != nil {
+			body["tool_choice"] = tc
+		}
 	}
 	// Structured output is generally available: no beta header, and the schema
 	// lives under output_config.format.
-	if req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema" {
-		outputConfig["format"] = map[string]any{
-			"type": "json_schema", "schema": req.ResponseFormat.Schema,
+	if rf := req.ResponseFormat; rf != nil {
+		switch rf.Type {
+		case "json_schema":
+			outputConfig["format"] = map[string]any{
+				"type": "json_schema", "schema": xlate.JSONSchema(rf.Schema, rf.SchemaDialect),
+			}
+		case "json_object":
+			// Anthropic has no schema-free JSON mode, and a bare object schema
+			// is refused: every object must list its properties and set
+			// additionalProperties false.
+			warns = append(warns, ir.Warning{
+				Field: "response_format", Target: targetName,
+				Reason: "Anthropic has no JSON mode without a schema; the response is unconstrained",
+			})
 		}
 	}
 	if len(outputConfig) > 0 {
@@ -403,9 +434,13 @@ func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(tools))
 	for _, t := range tools {
+		if t.BuiltIn() {
+			warns = append(warns, builtInDropped(t)...)
+			continue
+		}
 		m := map[string]any{}
 		if _, typed := t.Extra["type"]; !typed {
-			schema := t.Schema
+			schema := xlate.JSONSchema(t.Schema, t.SchemaDialect)
 			// A tool with no schema still needs one: Anthropic rejects a
 			// null input_schema outright.
 			if len(schema) == 0 {
@@ -426,6 +461,28 @@ func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
 		out = append(out, m)
 	}
 	return out, warns
+}
+
+// builtInDropped reports another provider's built-in tool, such as Gemini's
+// googleSearch. It has no name and only its own dialect can declare it.
+func builtInDropped(t ir.Tool) []ir.Warning {
+	keys := make([]string, 0, len(t.Extra))
+	for k := range t.Extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	warns := make([]ir.Warning, 0, len(keys))
+	for _, k := range keys {
+		warns = append(warns, ir.Warning{
+			Field: "tools[]." + k, Target: targetName,
+			Reason: "another provider's built-in tool has no Anthropic equivalent; dropped",
+		})
+	}
+	return warns
+}
+
+func forcedChoice(tc *ir.ToolChoice) bool {
+	return tc != nil && (tc.Mode == "any" || tc.Mode == "tool")
 }
 
 // renderToolChoice maps the IR's four modes. disable_parallel_tool_use lives

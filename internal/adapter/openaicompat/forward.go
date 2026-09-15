@@ -46,7 +46,9 @@ type forwardChunk struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
-			ToolCalls        []struct {
+			// Reasoning is OpenRouter's spelling, which the IR parser also reads.
+			Reasoning string `json:"reasoning"`
+			ToolCalls []struct {
 				Function struct {
 					Arguments string `json:"arguments"`
 				} `json:"function"`
@@ -58,7 +60,10 @@ type forwardChunk struct {
 }
 
 func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
-	if ev.Data == "" || ev.Data == sse.Done {
+	if ev.Data == sse.Done {
+		return adapter.RawEvent{Terminal: true}
+	}
+	if ev.Data == "" {
 		return adapter.RawEvent{}
 	}
 	var c forwardChunk
@@ -86,7 +91,7 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 				break
 			}
 		}
-		if ch.Delta.Content != "" || ch.Delta.ReasoningContent != "" || toolContent {
+		if ch.Delta.Content != "" || ch.Delta.ReasoningContent != "" || ch.Delta.Reasoning != "" || toolContent {
 			out.Content = true
 			break
 		}

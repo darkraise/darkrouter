@@ -72,6 +72,8 @@ func TestRecognizeEventOnChunks(t *testing.T) {
 			`{"choices":[{"index":0,"delta":{"content":"He"}}]}`, true, false},
 		{"a reasoning delta commits",
 			`{"choices":[{"index":0,"delta":{"reasoning_content":"hm"}}]}`, true, false},
+		{"an OpenRouter reasoning delta commits",
+			`{"choices":[{"index":0,"delta":{"reasoning":"hm"}}]}`, true, false},
 		{"a name-only first tool_calls delta does not commit",
 			`{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"f"}}]}}]}`, false, false},
 		{"a tool call delta with arguments commits",
@@ -97,12 +99,26 @@ func TestRecognizeEventOnChunks(t *testing.T) {
 	}
 }
 
-func TestRecognizeEventIgnoresTheDoneSentinel(t *testing.T) {
+func TestRecognizeEventReadsTheDoneSentinelAsTheEndOnly(t *testing.T) {
 	// [DONE] is not JSON. Treating it as a parse failure would be harmless but
 	// would also mean the log could not tell it from a real one.
 	got := New().RecognizeEvent(sse.Event{Data: "[DONE]"})
 	if got.Content || got.ErrPayload != "" || got.Usage != nil {
 		t.Errorf("[DONE] recognized as %+v", got)
+	}
+	if !got.Terminal {
+		t.Error("[DONE] is the end of the stream, but was not recognized as terminal")
+	}
+}
+
+func TestRecognizeEventReadsOnlyTheDoneSentinelAsTerminal(t *testing.T) {
+	for _, data := range []string{
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`,
+	} {
+		if New().RecognizeEvent(sse.Event{Data: data}).Terminal {
+			t.Errorf("%s recognized as terminal; a usage chunk or [DONE] can still follow it", data)
+		}
 	}
 }
 

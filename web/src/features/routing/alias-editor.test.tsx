@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster, toast } from "darkraise-ui"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AliasEditor } from "./routing-screen"
 
@@ -79,6 +80,26 @@ describe("a chain at rest", () => {
     mount({ chain: [] })
     expect(screen.getByText("no targets yet")).toBeInTheDocument()
     expect(screen.getByText(/routes nowhere/i)).toBeInTheDocument()
+  })
+
+  it("keeps its actions in one group, apart from the targets", () => {
+    // A narrow row wraps the group as a unit. Loose buttons shared a line
+    // with a target list that had no width of its own, and painted over it.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor
+          aliases={{ chain: ["groq/a"] }}
+          knownProviders={["groq"]}
+          context={context}
+          onPreview={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    const group = screen.getByRole("button", { name: "Preview" }).parentElement
+    expect(screen.getByRole("button", { name: "Edit" }).parentElement).toBe(group)
+    expect(screen.getByRole("button", { name: "Remove" }).parentElement).toBe(group)
+    expect(group?.contains(screen.getByText("groq/a"))).toBe(false)
   })
 
   it("asks before dropping a whole chain", () => {
@@ -201,6 +222,94 @@ describe("an alias added somewhere else", () => {
   })
 })
 
+describe("a refetch that brings another admin's save", () => {
+  function mountRefetchable(initial: Record<string, string[]>) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (aliases: Record<string, string[]>) => (
+      <QueryClientProvider client={client}>
+        <AliasEditor aliases={aliases} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(initial))
+    return (next: Record<string, string[]>) => rerender(view(next))
+  }
+
+  function saveBody(): Record<string, string[]> {
+    const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][]
+    const last = calls.at(-1)
+    if (!last) throw new Error("expected a save")
+    return JSON.parse(last[1].body as string) as Record<string, string[]>
+  }
+
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    toast.dismiss()
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ valid: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ))
+  })
+
+  it("takes the server's value for a chain the operator never touched", async () => {
+    // PUT replaces the whole map. A stale copy of an untouched chain sent
+    // with a fresh If-Match would overwrite the other admin's edit.
+    const refetch = mountRefetchable({ chain: ["groq/a"], gone: ["groq/g"] })
+    refetch({ chain: ["groq/theirs"] })
+
+    expect(screen.getByText("groq/theirs")).toBeInTheDocument()
+    expect(screen.queryByText("gone")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(saveBody()).toEqual({ chain: ["groq/theirs"] }))
+  })
+
+  it("keeps the operator's own additions, deletions and edits", async () => {
+    const refetch = mountRefetchable({ chain: ["groq/a"], doomed: ["groq/d"] })
+    const user = userEvent.setup()
+
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[1] as HTMLElement)
+    await user.click(screen.getByRole("button", { name: "Remove chain" }))
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/a"], doomed: ["groq/d"], other: ["groq/o"] })
+
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/mine")
+    expect(screen.queryByText("doomed")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(saveBody()).toEqual({ chain: ["groq/mine"], other: ["groq/o"] }),
+    )
+  })
+
+  it("says which of the operator's chains the server also changed", () => {
+    // The operator's edit is kept, so the next Save overwrites the other
+    // admin's. That has to be a choice made knowing it, not a surprise.
+    const refetch = mountRefetchable({ chain: ["groq/a"], quiet: ["groq/q"] })
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0] as HTMLElement)
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/theirs"], quiet: ["groq/q"] })
+
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/mine")
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("chain")
+    expect(alert).not.toHaveTextContent("quiet")
+  })
+
+  it("does not report the operator's own save as someone else's change", () => {
+    const refetch = mountRefetchable({ chain: ["groq/a"] })
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/mine"] })
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+})
+
 describe("AliasEditor keyboard reorder", () => {
   it("moves a target with the buttons, for whoever cannot drag", async () => {
     // Drag and drop is pointer-only. The fallback order is the whole point
@@ -227,11 +336,20 @@ describe("AliasEditor keyboard reorder", () => {
 })
 
 describe("saving", () => {
-  beforeEach(() => vi.unstubAllGlobals())
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    // Sonner's store is module-level, so a toast an earlier test fired
+    // without mounting a Toaster is still queued and would render into the
+    // first Toaster any later test mounts.
+    toast.dismiss()
+  })
 
   it("refreshes the catalogue, whose alias column reads the same map", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ valid: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     ))
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidated = vi.spyOn(client, "invalidateQueries")
@@ -245,6 +363,108 @@ describe("saving", () => {
       const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
       expect(keys).toContain(JSON.stringify(["models"]))
     })
+  })
+
+  it("reports a write that persisted but did not take effect as a failure", async () => {
+    // commitConfig 200s with valid:false when the rows committed but the
+    // router could not republish -- the previous configuration is still
+    // serving. Treating that as "Aliases saved" would tell the operator the
+    // new chain is live when it never took effect.
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          valid: false,
+          error: "no provider named ghost",
+          serving: "the previous configuration is still serving",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /no provider named ghost/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    expect(
+      screen.queryAllByRole("status").some((s) => /^Aliases saved$/.test(s.textContent ?? "")),
+    ).toBe(false)
+  })
+
+  it("refreshes what it cached after a write that did not take effect", async () => {
+    // The rows committed, so the stored table and its revision moved even
+    // though the router did not. Settings' validity banner reads the config
+    // key, and a revision left stale 409s the operator's next save.
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          valid: false,
+          error: "no provider named ghost",
+          serving: "the previous configuration is still serving",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /previous configuration is still serving/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys).toEqual(expect.arrayContaining([
+      JSON.stringify(["aliases"]), JSON.stringify(["config"]), JSON.stringify(["models"]),
+    ]))
+  })
+
+  it("refuses a stale save and refetches rather than overwrite another admin's edit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({ error: "aliases changed since you loaded them; reload and try again" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor
+          aliases={{ chain: ["groq/a"] }}
+          revision="rev-1"
+          knownProviders={["groq"]}
+          context={context}
+        />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /reload and try again/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    expect(
+      invalidated.mock.calls.some(([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(["aliases"])),
+    ).toBe(true)
+    // The revision this draft was read against travelled as If-Match.
+    const call = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+    const headers = call[1].headers as Record<string, string>
+    expect(headers["If-Match"]).toBe("rev-1")
   })
 
   it("does not shout when it cannot save", () => {

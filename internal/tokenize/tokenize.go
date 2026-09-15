@@ -8,8 +8,12 @@
 package tokenize
 
 import (
+	"context"
+	"iter"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tiktoken-go/tokenizer"
 
@@ -65,8 +69,8 @@ func EncodingFor(model string) Encoding {
 // rules, and a number that is wrong in an unknowable direction is worse than one
 // that is obviously incomplete. The response carries X-Darkrouter-Estimated so
 // the client knows not to trust it to the token.
-func Count(req *ir.Request, model string) int {
-	count := counterFor(EncodingFor(model))
+func Count(ctx context.Context, req *ir.Request, model string) (int, error) {
+	count := counterFor(ctx, EncodingFor(model))
 
 	total := 0
 	total += count(blocksText(req.System))
@@ -81,7 +85,10 @@ func Count(req *ir.Request, model string) int {
 	for _, s := range req.StopSequences {
 		total += count(s)
 	}
-	return total
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 // getCodec is the codec constructor, a variable so a test can count calls.
@@ -117,7 +124,10 @@ func resetCodecs() {
 // counterFor returns a function counting one string. A tokenizer that fails to
 // load falls back to the heuristic rather than failing the request: an
 // approximate answer beats a 500 on an endpoint whose whole purpose is advisory.
-func counterFor(enc Encoding) func(string) int {
+//
+// Once ctx is done the function counts nothing, and Count reports the
+// cancellation instead of the partial total.
+func counterFor(ctx context.Context, enc Encoding) func(string) int {
 	var codec tokenizer.Codec
 	if c, ok := codecs[enc]; ok {
 		codec = c.get()
@@ -126,15 +136,73 @@ func counterFor(enc Encoding) func(string) int {
 		return heuristicCount
 	}
 	return func(s string) int {
-		if s == "" {
-			return 0
+		total := 0
+		for seg := range segments(s) {
+			if ctx.Err() != nil {
+				return 0
+			}
+			n, err := codec.Count(seg)
+			if err != nil {
+				n = heuristicCount(seg)
+			}
+			total += n
 		}
-		ids, _, err := codec.Encode(s)
-		if err != nil {
-			return heuristicCount(s)
-		}
-		return len(ids)
+		return total
 	}
+}
+
+// segmentBytes is roughly how much text one codec call receives, which is
+// how often a cancelled request is noticed.
+const segmentBytes = 32 << 10
+
+// maxRunBytes bounds a stretch of text with no clean cut. The codec merges
+// each regex piece in time quadratic in its length, and a run of letters,
+// spaces or unspaced CJK text is one piece however long it grows. Cutting such
+// a run changes the count by about a token per cut.
+const maxRunBytes = 256
+
+// segments splits s for the codec. Text is cut at a clean boundary once a
+// segment reaches segmentBytes, and hard-cut at a rune boundary wherever
+// maxRunBytes pass without one.
+func segments(s string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		start, clean := 0, 0
+		for i := 1; i < len(s); i++ {
+			if cleanCut(s, i) {
+				if i-start >= segmentBytes {
+					if !yield(s[start:i]) {
+						return
+					}
+					start = i
+				}
+				clean = i
+				continue
+			}
+			if i-clean >= maxRunBytes && utf8.RuneStart(s[i]) {
+				if !yield(s[start:i]) {
+					return
+				}
+				start, clean = i, i
+			}
+		}
+		if start < len(s) {
+			yield(s[start:])
+		}
+	}
+}
+
+// cleanCut reports whether no regex piece of either bundled encoding can span
+// position i, so counting the two sides separately gives the same total. That
+// holds before a space that follows a non-space, since no piece carries a
+// space after other text, and after a newline before anything but whitespace
+// or a slash, which o200k's punctuation piece absorbs along with newlines.
+func cleanCut(s string, i int) bool {
+	prev, _ := utf8.DecodeLastRuneInString(s[:i])
+	next, _ := utf8.DecodeRuneInString(s[i:])
+	if next == ' ' {
+		return !unicode.IsSpace(prev)
+	}
+	return prev == '\n' && next != '/' && !unicode.IsSpace(next)
 }
 
 func heuristicCount(s string) int { return (len(s) + 3) / 4 }

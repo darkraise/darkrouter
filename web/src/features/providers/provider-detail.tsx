@@ -12,20 +12,22 @@ import {
   TableHeader,
   TableRow,
 } from "darkraise-ui"
-import { POLL, api } from "../../lib/api"
+import { POLL, api, createdButNotRouted, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import {
   keys,
   useDiscoveryHealth,
-  useModels,
   usePresets,
+  useProviderModels,
   useProviderHealth,
   useProviders,
   useUsage,
 } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
+import { utcDays } from "../../lib/time"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostRows } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { AddAccountsDialog } from "./add-accounts-dialog"
 import { CredentialRow } from "./credential-row"
 import { DiscoveryPanel } from "./discovery-panel"
@@ -103,6 +105,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
         free_models_only: freeOnly,
       }),
     success: `${preset.name} added`,
+    warning: (reply) => createdButNotRouted(reply),
     invalidates: [keys.providers, keys.health, keys.overview, keys.models],
   })
 
@@ -282,7 +285,7 @@ export function ProviderDetail() {
   // they exist. The condition is read off the response itself, so the fast
   // poll stops the moment the first model arrives rather than running for as
   // long as the page is open.
-  const catalog = useModels({
+  const catalog = useProviderModels(id, {
     refetchInterval: (query) => {
       const served = (query.state.data?.models ?? []).some((m) => m.providers.includes(id))
       return awaitingModels(providers.data?.providers ?? [], id) && !served
@@ -297,20 +300,47 @@ export function ProviderDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const toggle = useApiMutation({
-    mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
+    mutationFn: (enabled: boolean) =>
+      routingNotUpdated(api.patch(`/api/providers/${id}`, { enabled })),
     success: "Provider updated",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.overview, keys.health, keys.discovery],
   })
   const allowUnsanctioned = useApiMutation({
     mutationFn: (allow: boolean) =>
-      api.patch(`/api/providers/${id}`, { allow_unsanctioned_free: allow }),
+      routingNotUpdated(api.patch(`/api/providers/${id}`, { allow_unsanctioned_free: allow })),
     success: "Provider updated",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.models],
   })
   // No row is not the same as no such provider: the list holds every provider
   // the release supports, and clicking one that nobody has configured has to
   // land somewhere that explains it rather than on a deletion notice.
   const preset = presets.data?.presets.find((p) => p.id === id)
+  // Without the lists this page cannot tell a configured provider from an
+  // unconfigured or deleted one, and guessing would be a false claim either way.
+  const listFailure = provider
+    ? null
+    : providers.isError
+      ? providers
+      : providers.isSuccess && !preset && presets.isError
+        ? presets
+        : null
+  if (listFailure) {
+    return (
+      <>
+        <Link to="/providers" className="text-sm text-[hsl(var(--legend))] hover:underline">
+          ← Providers
+        </Link>
+        <LoadError
+          what={listFailure === providers ? "The providers" : "The provider catalogue"}
+          error={listFailure.error}
+          onRetry={() => void listFailure.refetch()}
+          className="mt-4"
+        />
+      </>
+    )
+  }
   if (providers.isSuccess && !provider) {
     if (preset) return <UnconfiguredProvider preset={preset} />
     if (!presets.isSuccess) return null
@@ -345,10 +375,18 @@ export function ProviderDetail() {
   const accountsSummary = accountSummary(provider, cooling)
   const models = modelsFor(catalog.data?.models ?? [], provider.id)
   const caps = capabilityCount(models)
-  const series = requestsByDay(usage.data?.days ?? [], provider.id)
+  const series = requestsByDay(
+    usage.data?.days ?? [],
+    provider.id,
+    usage.data ? utcDays(usage.data.first_day, usage.data.last_day) : [],
+  )
   const requests = totalRequests(usage.data?.days ?? [], provider.id)
   const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
   const discovered = discoveryFraction(discoveryRow)
+  const modelsFailed = catalog.isError && !catalog.data
+  const healthFailed = health.isError && !health.data
+  const discoveryFailed = discovery.isError && !discovery.data
+  const usageFailed = usage.isError && !usage.data
 
   return (
     <>
@@ -413,16 +451,25 @@ export function ProviderDetail() {
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           caption="requests · 30d"
-          value={requests.toLocaleString()}
-          note={series.length < 2 ? "no daily series yet" : undefined}
+          value={usageFailed ? "—" : requests.toLocaleString()}
+          note={
+            usageFailed
+              ? "did not load"
+              : usage.data && !series.some((n) => n > 0)
+                ? "no requests in this window"
+                : undefined
+          }
+          tone={usageFailed ? "warning" : undefined}
         >
-          <Sparkline points={series} />
+          {!usageFailed && <Sparkline points={series} />}
         </Stat>
         <Stat
           caption="credentials usable"
           value={`${accountsSummary.usable}/${accountsSummary.total}`}
           note={
-            accountsSummary.cooling > 0
+            healthFailed
+              ? "cooldowns did not load"
+              : accountsSummary.cooling > 0
               ? `${accountsSummary.cooling} cooling`
               : accountsSummary.disabled > 0
                 ? `${accountsSummary.disabled} disabled`
@@ -430,20 +477,28 @@ export function ProviderDetail() {
                   ? "none configured"
                   : "all available"
           }
-          tone={accountsSummary.cooling > 0 ? "warning" : "muted"}
+          tone={healthFailed || accountsSummary.cooling > 0 ? "warning" : "muted"}
         />
         <Stat
           caption="models offered"
-          value={String(models.length)}
-          note={caps.total > 0 ? `${caps.tools} with tools` : "catalogue empty"}
+          value={modelsFailed ? "—" : String(models.length)}
+          note={
+            modelsFailed
+              ? "did not load"
+              : caps.total > 0
+                ? `${caps.tools} with tools`
+                : "catalogue empty"
+          }
+          tone={modelsFailed ? "warning" : undefined}
         />
         <Stat
           caption="discovery"
           value={discovered ?? "—"}
-          note={discoveryNote(discoveryRow)}
+          note={discoveryFailed ? "did not load" : discoveryNote(discoveryRow)}
           tone={
-            discoveryRow &&
-            (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0)
+            discoveryFailed ||
+            (discoveryRow &&
+              (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0))
               ? "warning"
               : "muted"
           }
@@ -528,14 +583,37 @@ export function ProviderDetail() {
 
           <section>
             <h2 className="mb-2 text-sm font-medium">Models</h2>
-            <ProviderModels models={models} loading={catalog.isPending} />
+            {modelsFailed ? (
+              <LoadError
+                what="The models"
+                error={catalog.error}
+                onRetry={() => void catalog.refetch()}
+              />
+            ) : (
+              <ProviderModels models={models} loading={catalog.isPending} />
+            )}
           </section>
 
           <section>
             <h2 className="mb-2 text-sm font-medium">Health</h2>
             <div className="flex flex-col gap-3">
               <ProbePanel providerId={provider.id} />
-              <DiscoveryPanel providerId={provider.id} />
+              {healthFailed && (
+                <LoadError
+                  what="Credential health"
+                  error={health.error}
+                  onRetry={() => void health.refetch()}
+                />
+              )}
+              {discoveryFailed ? (
+                <LoadError
+                  what="The discovery readings"
+                  error={discovery.error}
+                  onRetry={() => void discovery.refetch()}
+                />
+              ) : (
+                <DiscoveryPanel providerId={provider.id} />
+              )}
             </div>
           </section>
         </div>

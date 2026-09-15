@@ -34,10 +34,13 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden files from current behavior")
 
 // meta carries what a fixture needs beyond its body: the Gemini model lives in
-// the URL, and the Anthropic version arrives as a header.
+// the URL, and the Anthropic version arrives as a header. Models replaces the
+// target model for the adapter kinds it names, for a case whose rendering
+// depends on what the model supports.
 type meta struct {
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers"`
+	Models  map[string]string `json:"models"`
 }
 
 // dialects are the inbound edges, keyed by the directory name under
@@ -213,7 +216,11 @@ func TestGoldenRequests(t *testing.T) {
 				compareJSON(t, filepath.Join(dir, "ir.json"), req)
 
 				for kind, ad := range adapters() {
-					hr, warns, err := ad.BuildRequest(ctx, targetFor(kind), req)
+					tgt := targetFor(kind)
+					if model, ok := m.Models[kind]; ok {
+						tgt.Model = model
+					}
+					hr, warns, err := ad.BuildRequest(ctx, tgt, req)
 					if err != nil {
 						t.Fatalf("%s build: %v", kind, err)
 					}

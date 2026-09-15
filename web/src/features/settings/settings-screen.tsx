@@ -13,7 +13,7 @@ import type { ConfigResponse, Session } from "../../lib/api-types"
 import { AccountsCard } from "./accounts-card"
 import { ChangePasswordDialog } from "./change-password-dialog"
 import { SettingField } from "./setting-field"
-import { settingGroups, type GroupId } from "./settings-catalog"
+import { displayOf, sameSetting, settingGroups, type GroupId } from "./settings-catalog"
 
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
@@ -65,7 +65,7 @@ export function settingsPatch(
       if (meta.source === "database") clear.push(field)
       continue
     }
-    if (next !== current) set[field] = next
+    if (!sameSetting(next, current, meta.kind)) set[field] = next
   }
 
   for (const field of reset) {
@@ -168,16 +168,32 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
     setErrors({})
   }
 
-  // Reseeded whenever the server's answer changes, which is what a successful
-  // save produces. Without this the bar never clears: Go normalises durations
-  // on the way out (`Total.String()` turns a typed "10m" into "10m0s"), so the
-  // draft and the saved value compare unequal forever and a live Save button
-  // sits under a toast saying the settings were saved.
-  const [seededFrom, setSeededFrom] = useState(cfg)
-  if (cfg !== seededFrom) {
-    setSeededFrom(cfg)
-    reseedFrom(cfg)
+  /** Moves the rows the operator has not touched to a newer answer, keeping
+   *  every edit. An edit whose row also moved underneath it says so on the
+   *  row, since saving will overwrite what the other change stored. */
+  const rebaseOnto = (from: ConfigResponse, to: ConfigResponse) => {
+    const before = seedDraft(from)
+    const after = seedDraft(to)
+    const next = { ...after }
+    const kept: Record<string, string> = {}
+    for (const [f, typed] of Object.entries(draft)) {
+      const stored = after[f]
+      if (stored === undefined || typed === before[f]) continue
+      next[f] = typed
+      const error = errors[f]
+      if (error) kept[f] = error
+      const kind = to.fields[f]?.kind ?? "string"
+      if (stored !== before[f] && !sameSetting(stored, typed, kind)) {
+        const shown = displayOf(stored, kind)
+        kept[f] = `Changed elsewhere to ${shown} while you were editing. Saving replaces it with the value here.`
+      }
+    }
+    setDraft(next)
+    setReset((r) => new Set([...r].filter((f) => to.fields[f]?.source === "database")))
+    setErrors(kept)
   }
+
+  const [seededFrom, setSeededFrom] = useState(cfg)
 
   const save = useApiMutation({
     // The toast is this screen's to raise: a refusal naming a key is already
@@ -229,6 +245,18 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
       reseedFrom(queryClient.getQueryData<ConfigResponse>(keys.config) ?? cfg)
     },
   })
+
+  // A changed answer during a save is that save's own refetch, and the editors
+  // are gated, so the whole draft is reseeded: Go normalises durations on the
+  // way out (`Total.String()` turns a typed "10m" into "10m0s"), and a draft
+  // kept against that would compare unequal forever under a toast saying the
+  // settings were saved. Any other change is a background refetch bringing
+  // someone else's write, which must not take the operator's unsaved edits.
+  if (cfg !== seededFrom) {
+    setSeededFrom(cfg)
+    if (save.isPending) reseedFrom(cfg)
+    else rebaseOnto(seededFrom, cfg)
+  }
 
   const patch = settingsPatch(draft, reset, cfg)
   const dirty = Object.keys(patch).length > 0

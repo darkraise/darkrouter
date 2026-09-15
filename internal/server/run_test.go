@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
@@ -15,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
+	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/provider/providertest"
@@ -105,19 +109,6 @@ func TestRunClosesSurvivingServerWhenOneListenerFails(t *testing.T) {
 	_ = l.Close()
 }
 
-func TestAnOutOfBandFailureSurfacesOnHealthz(t *testing.T) {
-	// Rehydration and the other startup steps report through RecordError
-	// rather than Reload, and a failure there would otherwise be invisible.
-	store := config.NewStoreOf(testConfigOf(t, nil))
-	store.RecordError(errRehydrationFailed)
-	if store.LastError() == nil {
-		t.Fatal("an out-of-band failure must be visible through LastError")
-	}
-	if !strings.Contains(store.LastError().Error(), "rehydration") {
-		t.Fatalf("unexpected error %v", store.LastError())
-	}
-}
-
 func waitListening(t *testing.T, addr string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -133,11 +124,44 @@ func waitListening(t *testing.T, addr string) {
 	t.Fatalf("%s never started listening", addr)
 }
 
-var errRehydrationFailed = errRehydration{}
+// Restoring breaker health is best effort: the gateway serves without it, so
+// a failed restore is reported but must not take the process out of rotation.
+func TestAFailedRestoreWarnsWithoutFailingReadiness(t *testing.T) {
+	proxyAddr, adminAddr := freePort(t), freePort(t)
+	s := serverOn(t, proxyAddr, adminAddr)
+	if _, err := s.db.Write.Exec(`DROP TABLE health`); err != nil {
+		t.Fatal(err)
+	}
 
-type errRehydration struct{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitListening(t, adminAddr)
 
-func (errRehydration) Error() string { return "health rehydration: could not read" }
+	rec := httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	if rec.Code != 200 {
+		t.Fatalf("readyz = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	s.AdminHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	var got struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(got.Warnings, func(w string) bool {
+		return strings.Contains(w, "health rehydration")
+	}) {
+		t.Fatalf("warnings = %q, want the failed restore named", got.Warnings)
+	}
+}
 
 // fakeProvider is the one upstream most fixtures in this package declare. It
 // is never called: the tests exercise the wiring around it.
@@ -557,5 +581,72 @@ func TestHealthzReportsPendingRestartAcrossAnUnrelatedReload(t *testing.T) {
 	})
 	if got := pending(); !slices.Contains(got, "catalog.sync_interval") {
 		t.Fatalf("pending_restart = %v after an unrelated save, want the notice still standing", got)
+	}
+}
+
+// A stream still running when the drain expires is cut by the gateway, and
+// the handler has to be able to tell that apart from a client hanging up, or
+// its request row blames the client. The cancellation also has to leave the
+// handler time to send its final event before the socket is closed.
+func TestADrainThatExpiresCancelsRequestsAsAShutdown(t *testing.T) {
+	lc, cancelLC := context.WithCancelCause(context.Background())
+	defer cancelLC(nil)
+	started := make(chan struct{})
+	causes := make(chan error, 1)
+	proxy := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("data: first\n\n"))
+			w.(http.Flusher).Flush()
+			close(started)
+			<-r.Context().Done()
+			causes <- context.Cause(r.Context())
+			_, _ = w.Write([]byte("data: last\n\n"))
+		}),
+		BaseContext: func(net.Listener) context.Context { return lc },
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = proxy.Serve(ln)
+	}()
+	defer func() { <-served }()
+
+	body := make(chan string, 1)
+	go func() {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("http://" + ln.Addr().String())
+		if err != nil {
+			body <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		body <- string(b)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream never started")
+	}
+
+	drain, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := shutdownProxy(proxy, drain, cancelLC); err == nil {
+		t.Fatal("the drain completed with a stream still in flight")
+	}
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, exec.ErrShutdown) {
+			t.Errorf("request context cancelled with %v, want %v", cause, exec.ErrShutdown)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the in-flight request was never cancelled")
+	}
+	if got := <-body; !strings.Contains(got, "data: last") {
+		t.Errorf("client saw %q, want the handler's final event", got)
 	}
 }

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,12 +10,15 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -22,7 +26,7 @@ import (
 // whole Breaker so a test can supply four methods instead of a live one.
 type Health interface {
 	Record(k health.Key, s health.Signal)
-	Available(k health.Key) bool
+	SnapshotAvailability(at time.Time) health.Availability
 	LastUsedSnapshot() map[health.CredKey]time.Time
 	MarkUsed(ck health.CredKey, at time.Time)
 }
@@ -263,6 +267,23 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	}
 	p.BaseURL = base
 
+	now := time.Now().UTC()
+
+	// A kind with no listing endpoint is seeded from models.dev rather than
+	// probed. Spec §4.3: no credential is spent and no request is made, which
+	// is what "discovery is not pretended" means in practice. The credential
+	// probe confirms reachability separately, on the operator's schedule.
+	//
+	// Ahead of the listing probe, because that probe refuses exactly the kinds
+	// seeding exists for.
+	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
+		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset, cred.Secret))
+		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
+			slog.Warn("discovery: seeding failed", "provider", p.ID, "err", err)
+		}
+		return
+	}
+
 	pr, err := ProbeForKind(p, preset, preset.Auth.Secret(cred.Secret), d.opts.Listers)
 	if err != nil {
 		// An undiscoverable kind is a permanent, known fact rather than a
@@ -271,28 +292,12 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 		return
 	}
 
-	now := time.Now().UTC()
-
-	// A kind with no listing endpoint is seeded from models.dev rather than
-	// probed. Spec §4.3: no credential is spent and no request is made, which
-	// is what "discovery is not pretended" means in practice. The credential
-	// probe confirms reachability separately, on the operator's schedule.
-	if seeded := SeedFromPreset(preset, d.doc()); len(seeded) > 0 {
-		seeded, dropped := SelectModelsForImport(seeded, p.FreeModelsOnly, d.freeRules(p, preset))
-		if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seeded, dropped, now); err != nil {
-			slog.Warn("discovery: seeding failed", "provider", p.ID, "err", err)
-		}
-		return
-	}
-
 	// A signed listing needs the credential turned into a signature. Unlike an
 	// undiscoverable kind, a strategy that cannot be resolved is a
 	// misconfiguration the operator can fix, so it is recorded rather than
 	// skipped in silence.
 	if az, aerr := d.authorizerFor(ctx, p, cred); aerr != nil {
-		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, aerr.Error()); rerr != nil {
-			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
-		}
+		d.recordFailure(ctx, p.ID, now, aerr, cred.Secret, pr.APIKey)
 		return
 	} else {
 		pr.Authorize = az
@@ -305,9 +310,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 			// Shutdown is not a provider failure.
 			return
 		}
-		if rerr := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), p.ID, now, err.Error()); rerr != nil {
-			slog.Error("discovery: recording failure failed", "provider", p.ID, "err", rerr)
-		}
+		d.recordFailure(ctx, p.ID, now, err, cred.Secret, pr.APIKey)
 		return
 	}
 
@@ -330,10 +333,22 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 	// the sweep just fetched, before any of it is recorded. Narrowing at
 	// routing time instead would leave the catalogue full of models the
 	// operator asked not to have.
-	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset))
+	seen, dropped := SelectModelsForImport(seen, p.FreeModelsOnly, d.freeRules(p, preset, cred.Secret))
 
 	if err := d.db.RecordDiscoverySuccess(context.WithoutCancel(ctx), p.ID, seen, dropped, now); err != nil {
 		slog.Error("discovery: recording success failed", "provider", p.ID, "err", err)
+	}
+}
+
+// recordFailure stores a failed probe's cause with the credential removed. The
+// row is plaintext while the credential is stored encrypted, and a transport
+// error quotes the request URL, where a query-param key sits escaped.
+func (d *Discoverer) recordFailure(ctx context.Context, providerID string, at time.Time,
+	cause error, secrets ...string) {
+
+	msg := redact.Error(cause, secrets...).Error()
+	if err := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), providerID, at, msg); err != nil {
+		slog.Error("discovery: recording failure failed", "provider", providerID, "err", err)
 	}
 }
 
@@ -343,12 +358,19 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 // Keyed on the preset rather than the provider row's id, because the curated
 // catalogue is a fact about the upstream vendor. A provider row an operator
 // named something else still routes to the same free tier.
-func (d *Discoverer) freeRules(p provider.Provider, preset Preset) FreeRules {
+//
+// operatorKey is the secret of the credential the sweep chose. A keyless style
+// holding one is reached on the operator's account, which the keyless fallback
+// must not treat as having no account to bill.
+func (d *Discoverer) freeRules(p provider.Provider, preset Preset, operatorKey string) FreeRules {
 	style := p.AuthStyle
 	if style == "" {
 		style = preset.Auth.Style
 	}
-	rules := FreeRules{Price: d.priceLookup(preset), Keyless: auth.IsKeyless(style)}
+	rules := FreeRules{
+		Price:   d.priceLookup(preset),
+		Keyless: auth.IsKeyless(style) && operatorKey == "",
+	}
 	key := freeCatalogKey(p)
 	free := FreeModels()
 	if d.opts.FreeTiers != nil {
@@ -399,46 +421,167 @@ func (d *Discoverer) doc() Doc {
 	return FallbackDoc()
 }
 
-// list performs the request and classifies the response.
+// MaxListPages bounds how far a listing's cursor is followed. At the smallest
+// default page size in use, Anthropic's twenty, it still admits two thousand
+// models, and it stops an upstream whose cursor never ends from holding a
+// sweep slot forever.
+const MaxListPages = 100
+
+// maxListerCalls is a paged listing plus the one unpaged call Bedrock makes
+// before it.
+const maxListerCalls = MaxListPages + 1
+
+// list reads every page of the listing. Anything short of the whole listing
+// is an error: a successful listing that omits a model is what retires it, so
+// a partial one must never be recorded as a success.
 func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID string) ([]Discovered, error) {
 	if pr.Lister != nil {
 		// A kind whose model list does not come from one GET. Bedrock needs
 		// two signed calls against the control-plane host.
-		return pr.Lister.List(ctx, pr)
+		//
+		// The client's timeout does not reach a lister's own client, and the
+		// sweep waits on every probe, so the bound travels on the context.
+		// It bounds each call rather than the listing: the lister signs once
+		// per call, so every signature restarts the clock, and a listing of
+		// many profile pages is not failed for being long. The calls are
+		// capped instead, which keeps the whole listing within
+		// maxListerCalls timeouts.
+		lctx, cancel := context.WithCancelCause(ctx)
+		defer cancel(nil)
+		expire := func() { cancel(context.DeadlineExceeded) }
+		timer := time.AfterFunc(d.opts.Timeout, expire)
+		defer timer.Stop()
+		lpr := pr
+		if pr.Authorize != nil {
+			var calls atomic.Int64
+			lpr.Authorize = func(ctx context.Context, req *http.Request) error {
+				if calls.Add(1) > maxListerCalls {
+					return fmt.Errorf("listing did not end within %d calls", maxListerCalls)
+				}
+				timer.Reset(d.opts.Timeout)
+				return pr.Authorize(ctx, req)
+			}
+		}
+		models, err := pr.Lister.List(lctx, lpr)
+		if err != nil && context.Cause(lctx) == context.DeadlineExceeded && ctx.Err() == nil {
+			return nil, fmt.Errorf("a listing call did not finish within %s: %w", d.opts.Timeout, err)
+		}
+		return models, err
 	}
+	return ListPages(ctx, d.client, pr, func(resp *http.Response) error {
+		refused := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
+		if !refused && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			refused = geminiadapter.APIKeyInvalid(raw)
+		}
+		if refused {
+			// A rejected key on a probe is the same evidence as a rejected key on
+			// a request, so it cools the credential across every model it serves.
+			d.health.Record(
+				health.Key{ProviderID: providerID, KeyID: keyID},
+				health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: resp.StatusCode},
+			)
+			return fmt.Errorf("listing rejected the credential: %s", resp.Status)
+		}
+		return nil
+	})
+}
+
+// ListPages reads every page of pr's generic listing through client, following
+// the cursor up to MaxListPages and returning each model once, in listing
+// order. An empty listing is an error.
+//
+// classify, when set, sees every response before its body is read, and any
+// error it returns ends the listing. A non-2xx response it lets through is
+// still an error.
+func ListPages(ctx context.Context, client *http.Client, pr Probe,
+	classify func(*http.Response) error) ([]Discovered, error) {
+
+	var out []Discovered
+	seen := map[string]bool{}
+	cursors := map[string]bool{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page == MaxListPages {
+			return nil, fmt.Errorf("listing did not end within %d pages", MaxListPages)
+		}
+		models, next, err := listPage(ctx, client, pr, cursor, classify)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range models {
+			if !seen[m.ModelID] {
+				seen[m.ModelID] = true
+				out = append(out, m)
+			}
+		}
+		if next == "" {
+			break
+		}
+		if cursors[next] {
+			return nil, fmt.Errorf("listing repeated the page cursor %q", next)
+		}
+		cursors[next] = true
+		cursor = next
+	}
+	if len(out) == 0 {
+		return nil, errors.New("listing reported no models")
+	}
+	return out, nil
+}
+
+// listPage performs one page's request and classifies the response.
+func listPage(ctx context.Context, client *http.Client, pr Probe, cursor string,
+	classify func(*http.Response) error) ([]Discovered, string, error) {
+
 	req, err := BuildListRequest(ctx, pr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	resp, err := d.client.Do(req)
+	if cursor != "" {
+		SetListCursor(req, pr.Kind, cursor)
+	}
+	if err := authorize(ctx, pr, req); err != nil {
+		return nil, "", err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		// A rejected key on a probe is the same evidence as a rejected key on
-		// a request, so it cools the credential across every model it serves.
-		d.health.Record(
-			health.Key{ProviderID: providerID, KeyID: keyID},
-			health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: resp.StatusCode},
-		)
-		return nil, fmt.Errorf("listing rejected the credential: %s", resp.Status)
+	if classify != nil {
+		if err := classify(resp); err != nil {
+			return nil, "", err
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("listing returned %s", resp.Status)
+		return nil, "", fmt.Errorf("listing returned %s", resp.Status)
 	}
 
 	// Bounded: a listing endpoint that streams unbounded data must not be able
 	// to exhaust memory on a background worker nobody is watching.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return ParseList(pr.Kind, body)
+	return ParseListPage(pr.Kind, body)
+}
+
+// authorize runs a non-static style's authorizer on a generic request. The
+// static header BuildListRequest writes is deliberately nothing for those
+// styles, so skipping this sends the request with no credential at all.
+func authorize(ctx context.Context, pr Probe, req *http.Request) error {
+	if pr.Authorize == nil {
+		return nil
+	}
+	if err := pr.Authorize(ctx, req); err != nil {
+		return fmt.Errorf("authorize listing: %w", err)
+	}
+	return nil
 }
 
 // showCapabilities asks a local runtime about one model. A failure is silent:
@@ -447,6 +590,9 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 func (d *Discoverer) showCapabilities(ctx context.Context, pr Probe, modelID string) (store.ModelCapabilities, bool) {
 	req, err := BuildCapabilityRequest(ctx, pr, modelID)
 	if err != nil {
+		return store.ModelCapabilities{}, false
+	}
+	if authorize(ctx, pr, req) != nil {
 		return store.ModelCapabilities{}, false
 	}
 	resp, err := d.client.Do(req)
@@ -470,15 +616,20 @@ func (d *Discoverer) showCapabilities(ctx context.Context, pr Probe, modelID str
 // pickCredential returns the least-recently-used credential that is not
 // cooling. Least-recently-used is what spreads probes across quotas instead of
 // spending the first key's budget on listing.
+//
+// Cooling is read from a frozen view rather than the breaker's Available,
+// which claims the half-open probe. A listing never records its success, so a
+// probe claimed here would never be released.
 func (d *Discoverer) pickCredential(p provider.Provider) (provider.Credential, bool) {
 	lastUsed := d.health.LastUsedSnapshot()
+	avail := d.health.SnapshotAvailability(time.Now())
 
 	usable := make([]provider.Credential, 0, len(p.Credentials))
 	for _, c := range p.Credentials {
 		if !c.Enabled {
 			continue
 		}
-		if !d.health.Available(health.Key{ProviderID: p.ID, KeyID: c.ID}) {
+		if !avail.Available(health.Key{ProviderID: p.ID, KeyID: c.ID}) {
 			continue
 		}
 		usable = append(usable, c)

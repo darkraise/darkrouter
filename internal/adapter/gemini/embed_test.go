@@ -104,7 +104,7 @@ func TestBuildEmbeddingRefusesTokenInput(t *testing.T) {
 
 func TestParseEmbeddingReadsTheBatchResponse(t *testing.T) {
 	resp := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(
-		`{"embeddings":[{"values":[0.5,-0.25]},{"values":[1]}]}`))}
+		`{"embeddings":[{"values":[0.5,-0.25]},{"values":[1,0]}]}`))}
 	out, err := New().ParseEmbedding(resp)
 	if err != nil {
 		t.Fatal(err)

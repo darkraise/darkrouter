@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -558,5 +559,49 @@ func storeSetting(t *testing.T, db *store.DB, key, value string) {
 	if _, err := db.Write.ExecContext(context.Background(),
 		`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, key, value); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A committed write the gateway could not load is identified by
+// routing_updated:false on every endpoint, so a client needs one check to know
+// the change is stored but not serving.
+func TestACommittedConfigWriteThatDidNotLoadSaysRoutingWasNotUpdated(t *testing.T) {
+	for _, tc := range []struct{ path, body string }{
+		{"/api/config", `{"set":{}}`},
+		{"/api/aliases", `{}`},
+		{"/api/policy", `{}`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			loads := 0
+			cfg, err := config.NewStoreFrom(func() (*config.Config, error) {
+				loads++
+				if loads > 1 {
+					return nil, errors.New("boom")
+				}
+				return s.deps.Config.Current(), nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.SetWriter(func(context.Context, config.Patch) ([]string, error) { return nil, nil })
+			s.deps.Config = cfg
+
+			w := do(t, s, cookie, token, "PUT", tc.path, tc.body)
+			var body struct {
+				Valid          *bool `json:"valid"`
+				RoutingUpdated *bool `json:"routing_updated"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 200 || body.Valid == nil || *body.Valid {
+				t.Fatalf("status = %d, body = %s; want 200 valid:false", w.Code, w.Body.String())
+			}
+			if body.RoutingUpdated == nil || *body.RoutingUpdated {
+				t.Errorf("body = %s; want routing_updated:false", w.Body.String())
+			}
+		})
 	}
 }

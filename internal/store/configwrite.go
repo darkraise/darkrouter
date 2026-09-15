@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -45,6 +46,20 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 	if aliases == nil {
 		if aliases, err = aliasesTx(ctx, tx); err != nil {
 			return nil, err
+		}
+	} else if p.AliasesRevisions != nil {
+		// Read inside the write transaction rather than trusted from the
+		// caller's own snapshot: a revision matched against the table before
+		// the transaction opened could still be stale by the time this write
+		// lands, and the whole point of the check is to close that gap.
+		current, err := aliasesTx(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(p.AliasesRevisions, config.AliasesRevision(current)) {
+			return nil, config.ConflictError{
+				Msg: "aliases changed since you loaded them; reload and try again",
+			}
 		}
 	}
 	// Checked before the table is judged. buildConfig reverts keys until the

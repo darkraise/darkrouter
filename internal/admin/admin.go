@@ -75,8 +75,8 @@ type Deps struct {
 	// routes, which is what every test that does not exercise them wants.
 	Flows *auth.FlowStore
 
-	// HTTP is the client used for token exchange and credential probes. Nil
-	// uses http.DefaultClient.
+	// HTTP is the client used for token exchange and credential probes. A
+	// client without a timeout, or nil, is bounded by discovery's timeout.
 	HTTP *http.Client
 
 	// Auth resolves a non-static credential into an authorizer, so the probe
@@ -111,6 +111,9 @@ type Server struct {
 	// because both the server's shutdown path and a test's cleanup reach it.
 	stopSweep chan struct{}
 	closeOnce sync.Once
+
+	// now is the clock the usage endpoints draw their calendar days from.
+	now func() time.Time
 }
 
 // New builds the admin server, sweeps expired sessions once, and starts the
@@ -128,6 +131,7 @@ func New(deps Deps) (*Server, error) {
 		deps: deps, csrf: csrf,
 		logins:    newLoginLimiter(loginRate, loginBurst, loginConcurrency),
 		stopSweep: make(chan struct{}),
+		now:       time.Now,
 	}
 	if _, err := deps.DB.SweepSessions(ctx); err != nil {
 		return nil, fmt.Errorf("admin: sweep sessions: %w", err)

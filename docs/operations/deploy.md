@@ -202,6 +202,14 @@ clears it while the stale value is still in force.
 Providers, aliases and policy are owned by the database and edited in the
 console.
 
+`server.shutdown_grace` applies on reload, but the container's
+`stop_grace_period` does not: both compose files set it to 30s, after which
+Docker sends SIGKILL. Shutdown needs a few seconds past the grace to close
+streams and flush the request log, so raising `shutdown_grace` above 25s adds a
+warning to `warnings`. Raise `stop_grace_period` in the compose file to at
+least the new grace plus 5s and recreate the container, or the extra grace is
+cut short by the kill.
+
 ## Exposure
 
 Both ports bind every interface, so the LAN reaches them directly. Neither
@@ -251,9 +259,44 @@ changes.
 
 ## Command line
 
+`rotate-key` re-encrypts every stored credential under a new master key. **Stop
+the gateway first.** A running gateway keeps the key it started with and seals
+every credential it writes afterwards — a refreshed OAuth token, a key added in
+the console — under that key, so a rotation beside it leaves rows the next start
+cannot decrypt. The command refuses rather than letting that happen: the
+gateway holds an exclusive lock on `data/darkrouter.db.lock` for as long as it
+runs, and `rotate-key` exits with "stop the gateway before rotating the key"
+while it is held. A second gateway started on the same `data/` is refused the
+same way.
+
+Some network mounts (NFS or CIFS without lock support) cannot take the lock at
+all, and neither can a binary built for a non-Unix platform such as Windows,
+which has no lock to take on any filesystem. The gateway still starts there and
+logs "running without the database lock", but nothing can then tell whether it
+is running, so `rotate-key` refuses unless you add `-gateway-stopped` to
+confirm you stopped it. On a non-Unix build that means every rotation needs the
+flag, and a second gateway on the same `data/` is not refused. The flag never
+overrides a lock another process actually holds.
+
 ```bash
-docker run --rm --entrypoint darkrouter darkraise/darkrouter:latest rotate-key -db …
+docker compose -f compose.prod.yml stop darkrouter
+docker run --rm -i -v ./data:/data --env-file .env \
+  --entrypoint darkrouter darkraise/darkrouter:latest rotate-key -db /data/darkrouter.db
+# set DARKROUTER_MASTER_KEY in .env to the new key, then
+docker compose -f compose.prod.yml up -d darkrouter
 ```
 
 The entrypoint is the gateway itself, which is why the override is needed.
-`rotate-key` reads the new key from stdin.
+`rotate-key` reads the current key from `DARKROUTER_MASTER_KEY` and the new one
+from stdin, hence `-i`.
+
+`docker run --env-file` passes every value verbatim, quotes included, the same
+way `compose.prod.yml`'s `format: raw` does, so a `.env` written for that file
+works unchanged. A `.env` read by `compose.yml` is different: Compose
+interpolates it there and strips surrounding quotes, so the gateway runs on
+`abc` from `DARKROUTER_MASTER_KEY="abc"` while `--env-file` hands `rotate-key`
+the value with its quotes and it fails as the wrong key. Remove the quotes
+from that line first, or pass the key with `-e DARKROUTER_MASTER_KEY` from a
+shell where it is set. The lock file stays in `data/` after either process
+exits; it is not a sign that anything is still running, and it must not be
+deleted while the gateway is up.

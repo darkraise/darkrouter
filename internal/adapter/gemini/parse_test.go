@@ -82,7 +82,8 @@ func TestParseResponseReadsPartsAndUsage(t *testing.T) {
 	if got.Model != "gemini-2.0-flash" {
 		t.Errorf("model = %q", got.Model)
 	}
-	if got.Usage.InputTokens != 7 || got.Usage.OutputTokens != 4 ||
+	// Output is candidates plus thoughts: the IR counts reasoning inside it.
+	if got.Usage.InputTokens != 7 || got.Usage.OutputTokens != 10 ||
 		got.Usage.CacheReadTokens != 3 || got.Usage.ReasoningTokens != 6 {
 		t.Errorf("usage = %+v", got.Usage)
 	}

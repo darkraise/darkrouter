@@ -89,6 +89,23 @@ func TestReaderRejectsOversizedLine(t *testing.T) {
 	}
 }
 
+func TestReaderRejectsAnEventWhoseDataLinesExceedTheCap(t *testing.T) {
+	// Every line is short, so only a cap on the event as a whole stops an
+	// upstream that never sends the blank line from growing it without bound.
+	body := strings.Repeat("data: xxxxxxxxxx\n", 100) + "\n"
+	r := NewReader(strings.NewReader(body), 64)
+	if _, err := r.Next(); !errors.Is(err, ErrEventTooLong) {
+		t.Fatalf("expected ErrEventTooLong, got %v", err)
+	}
+}
+
+func TestReaderAcceptsAMultiLineEventWithinTheCap(t *testing.T) {
+	got := readAll(t, "data: 0123456789\ndata: 0123456789\n\n", 21)
+	if len(got) != 1 || got[0].Data != "0123456789\n0123456789" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestReaderIgnoresUnknownFields(t *testing.T) {
 	got := readAll(t, "foo: bar\ndata: x\n\n", 1024)
 	if len(got) != 1 || got[0].Data != "x" {

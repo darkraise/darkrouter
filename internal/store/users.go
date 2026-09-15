@@ -151,9 +151,18 @@ func (d *DB) CreateUser(ctx context.Context, id, username, hash, role string) er
 }
 
 // DeleteUser removes an account and, through ON DELETE CASCADE, every session
-// it holds. It reports whether a row went.
+// it holds. It reports whether a row went, and refuses with ErrConflict to
+// remove the last administrator.
+//
+// The administrator count lives inside the DELETE rather than in a read ahead
+// of it. Two administrators removing each other would otherwise both count two
+// and both go, leaving a console nobody can manage.
 func (d *DB) DeleteUser(ctx context.Context, id string) (bool, error) {
-	res, err := d.Write.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	res, err := d.Write.ExecContext(ctx,
+		`DELETE FROM users
+		  WHERE id = ?
+		    AND (role != ? OR (SELECT count(*) FROM users WHERE role = ?) > 1)`,
+		id, RoleAdmin, RoleAdmin)
 	if err != nil {
 		return false, fmt.Errorf("delete user: %w", err)
 	}
@@ -161,12 +170,20 @@ func (d *DB) DeleteUser(ctx context.Context, id string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("delete user: %w", err)
 	}
-	return n > 0, nil
+	if n > 0 {
+		return true, nil
+	}
+	u, found, err := d.UserByID(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if found && u.Role == RoleAdmin {
+		return false, fmt.Errorf("the last administrator cannot be removed: %w", ErrConflict)
+	}
+	return false, nil
 }
 
-// AdminCount is what stops the last administrator removing or demoting
-// themselves, which would leave a console nobody can manage and no recovery
-// path to fix it.
+// AdminCount reports how many administrators exist.
 func (d *DB) AdminCount(ctx context.Context) (int, error) {
 	var n int
 	if err := d.Read.QueryRowContext(ctx,

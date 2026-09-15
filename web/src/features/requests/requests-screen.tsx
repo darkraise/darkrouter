@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react"
 import { ChevronDown } from "lucide-react"
 import { Link, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
 import { Banner, Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
+import { useRowHeight } from "../../lib/row-height"
 import { useAliases, useModels, useProviders, useRequests } from "../../lib/queries"
 import { useSearchFilters, filterQuery } from "../../lib/search-filters"
 import type { RequestPage, RequestRow } from "../../lib/api-types"
 import { ModelCombobox } from "../shell/model-combobox"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { TrafficStrip } from "./traffic-strip"
 import { TraceDrawer } from "./trace-drawer"
 import { FilterSelect } from "./filter-select"
@@ -31,7 +33,7 @@ const FIELDS = [
   "range",
 ] as const
 
-const STATUS_OPTIONS = ["success", "error"]
+const STATUS_OPTIONS = ["success", "error", "cancelled"]
 
 const TIME_WINDOWS = [
   { value: "1h", label: "1h", ms: 60 * 60 * 1000 },
@@ -52,6 +54,20 @@ export function newerCount(firstPage: RequestRow[], heldNewestId: string): numbe
   // Not on the page at all: retention or a long absence carried it away, and
   // reporting zero would be the one answer that is certainly wrong.
   return i === -1 ? firstPage.length : i
+}
+
+/** `next` with anything already in `existing` dropped, by id.
+ *
+ * A page fetched from a cursor minted against one snapshot of `held` can
+ * still overlap it when the log moved between the two -- the frozen page and
+ * the cursor it ends on come from different polls whenever a newer request
+ * lands before Load more is first clicked. Dropping the overlap here is a
+ * second line of defence behind pinning that cursor to the frozen page: it
+ * also covers a retention sweep or any other way the same id could reappear.
+ */
+export function dedupeAppend(existing: RequestRow[], next: RequestRow[]): RequestRow[] {
+  const seen = new Set(existing.map((r) => r.id))
+  return next.filter((r) => !seen.has(r.id))
 }
 
 /** Distinct values for a combobox, drawn from what the log actually holds. */
@@ -98,13 +114,26 @@ export function RequestsScreen() {
   // Pages accumulate: the operator is scrolling a log, and a "next page" that
   // swapped the table would lose their place and make the cursor pointless.
   const [older, setOlder] = useState<RequestRow[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
+  // undefined: no page has been fetched past the frozen first one, so paging
+  // follows that first page's own cursor (held.nextCursor) rather than
+  // whatever the live, still-polling `first` query holds by the time Load
+  // more is clicked. null is that first page's cursor once fetched and found
+  // to carry no further page; a string is a page fetched with another one
+  // after it. Collapsing "not yet paged" and "exhausted" into one null, as a
+  // plain `cursor ?? first.data?.next_cursor` fallback does, is what let the
+  // exhausted state fall back to the first page's cursor forever.
+  const [cursor, setCursor] = useState<string | null | undefined>(undefined)
   const [loadingMore, setLoadingMore] = useState(false)
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
-  // The first page the reader is currently looking at, frozen. `null` means
-  // "not yet loaded" — distinct from an empty result set, which would
-  // otherwise look identical and re-freeze forever on every poll.
-  const [held, setHeld] = useState<RequestRow[] | null>(null)
+  // The first page the reader is currently looking at, frozen together with
+  // the cursor it ends on. `null` means "not yet loaded" — distinct from an
+  // empty result set, which would otherwise look identical and re-freeze
+  // forever on every poll. Freezing the cursor alongside the rows is what
+  // keeps the first Load more paging from the boundary those rows actually
+  // end at, rather than from wherever a live poll has since moved it.
+  const [held, setHeld] = useState<{ requests: RequestRow[]; nextCursor: string | null } | null>(
+    null,
+  )
 
   const first = useRequests({ ...apiFilters(filters), limit: "50" })
   // The filter vocabularies. Cheap: all three are already cached by the
@@ -123,6 +152,11 @@ export function RequestsScreen() {
   // started under earlier ones. A page requested under the previous filters
   // is thrown away when it lands rather than appended.
   const latestFilterKey = useRef(filterKey)
+  // Bumped when the loaded pages are thrown away for a new first page, so an
+  // older page still in flight does not land after rows it no longer follows.
+  const pagesReset = useRef(0)
+  const tableRef = useRef<HTMLDivElement>(null)
+  const rowHeight = useRowHeight(tableRef, [held, older])
   const [pagedUnder, setPagedUnder] = useState(filterKey)
 
   // Both adjustments run during render rather than after it. An effect would
@@ -132,17 +166,21 @@ export function RequestsScreen() {
   if (filterKey !== pagedUnder) {
     setPagedUnder(filterKey)
     setOlder([])
-    setCursor(null)
+    setCursor(undefined)
     setHeld(null)
     setLoadingMore(false)
     setLoadMoreError(null)
-  } else if (first.data && (held === null || held.length === 0) && held !== first.data.requests) {
+  } else if (
+    first.data &&
+    (held === null || held.requests.length === 0) &&
+    held?.requests !== first.data.requests
+  ) {
     // An empty first load must keep re-freezing on every poll, same as
     // `null`: freezing `[]` once would leave the very first row that ever
     // arrives uncounted and undisplayed until something else forced a reload.
     // Each poll brings a new array, which is what stops this repeating
     // against the one already held.
-    setHeld(first.data.requests)
+    setHeld({ requests: first.data.requests, nextCursor: first.data.next_cursor ?? null })
   }
 
   useEffect(() => {
@@ -173,24 +211,50 @@ export function RequestsScreen() {
   }
 
   async function loadMore() {
-    const from = cursor ?? first.data?.next_cursor
+    // Before the first page is fetched, page from where the frozen first
+    // page ends -- not from `first.data?.next_cursor`, which keeps moving as
+    // the live query polls and can by now sit past rows `held` never showed.
+    const from = cursor === undefined ? held?.nextCursor : cursor
     if (!from || loadingMore) return
     const requestedUnder = filterKey
+    const requestedAfter = pagesReset.current
+    const current = () =>
+      latestFilterKey.current === requestedUnder && pagesReset.current === requestedAfter
     setLoadingMore(true)
     setLoadMoreError(null)
     try {
       const page = await api.get<RequestPage>(
         `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
       )
-      if (latestFilterKey.current !== requestedUnder) return
-      setOlder((p) => [...p, ...page.requests])
+      if (!current()) return
+      setOlder((p) => [...p, ...dedupeAppend(p, page.requests)])
       setCursor(page.next_cursor ?? null)
     } catch (err) {
-      if (latestFilterKey.current !== requestedUnder) return
+      if (!current()) return
       setLoadMoreError((err as Error).message)
     } finally {
-      if (latestFilterKey.current === requestedUnder) setLoadingMore(false)
+      if (current()) setLoadingMore(false)
     }
+  }
+
+  function showNewer() {
+    const page = first.data
+    const newest = held?.requests[0]?.id
+    if (!page || newest === undefined) return
+    const at = page.requests.findIndex((r) => r.id === newest)
+    if (at !== -1) {
+      const newer = page.requests.slice(0, at)
+      setHeld((prev) => prev && { ...prev, requests: [...newer, ...prev.requests] })
+      return
+    }
+    // The new first page does not reach the rows on screen, so appending
+    // those after it would hide the gap between them. Paging starts over.
+    pagesReset.current += 1
+    setHeld({ requests: page.requests, nextCursor: page.next_cursor ?? null })
+    setOlder([])
+    setCursor(undefined)
+    setLoadingMore(false)
+    setLoadMoreError(null)
   }
 
   function openRowUnderPointer(e: MouseEvent<HTMLDivElement>) {
@@ -208,13 +272,20 @@ export function RequestsScreen() {
     void navigate({ to: "/requests", search: true })
   }
 
-  const pageRows = [...(held ?? []), ...older]
+  // Deduplicated here rather than when a page lands: `held` can gain newer
+  // rows while an older page is in flight.
+  const heldRows = held?.requests ?? []
+  const pageRows = [...heldRows, ...dedupeAppend(heldRows, older)]
   const rows = pageRows.map(facetRow)
   // navigate is stable for the router's life, so the columns build once.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const columns = useMemo(() => buildColumns(openTrace), [])
-  const more = cursor ?? first.data?.next_cursor
+  const more = cursor === undefined ? held?.nextCursor : cursor
   const filtered = Object.values(filters).some((v) => v !== "")
+  // No page has ever loaded, and the one just attempted failed: the empty
+  // state below would otherwise read as "no requests yet" rather than as the
+  // query failure it is.
+  const initialFailure = first.isError && held === null
 
   // The page's own values first — those are the ones with traffic behind them
   // right now — then everything else the gateway knows about.
@@ -230,7 +301,7 @@ export function RequestsScreen() {
     optionsFrom(pageRows, "alias"),
     aliases.data ? Object.keys(aliases.data) : [],
   )
-  const newer = newerCount(first.data?.requests ?? [], held?.[0]?.id ?? "")
+  const newer = newerCount(first.data?.requests ?? [], held?.requests?.[0]?.id ?? "")
 
   return (
     <>
@@ -330,7 +401,11 @@ export function RequestsScreen() {
           </Button>
         )}
         {newer > 0 && (
-          <Button variant="secondary" size="sm" onClick={() => first.data && setHeld(first.data.requests)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={showNewer}
+          >
             {newer} newer
           </Button>
         )}
@@ -348,39 +423,74 @@ export function RequestsScreen() {
 
       <TrafficStrip rows={rows} />
 
-      {/* Scrolls sideways inside its own box rather than pushing the page
-          wider: ten columns do not fit a laptop, and the Path column at the
-          far end is the one that used to fall off. */}
-      {/* A click anywhere on a row opens it; the Open button stays for
-          the keyboard and for screen readers, since the row itself is a
-          row and not a button. The table renders its own cells, so the id
-          rides on the first cell and the click is delegated from here. */}
-      <div className="overflow-x-auto [&_tbody_tr]:cursor-pointer" onClick={openRowUnderPointer}>
-        <DataTable
-          columns={columns}
-          data={rows}
-          facets={["surface", "status", "failover"]}
-          virtualize={{ rowHeight: 36, height: 640 }}
+      {initialFailure ? (
+        // Not the table: without a page to show, "no requests yet" is a
+        // claim about the log that a query failure never earned.
+        <LoadError
+          what="The requests"
+          error={first.error}
+          onRetry={() => void first.refetch()}
+          className="mt-4"
         />
-      </div>
-
-      {rows.length === 0 && (
-        <div className="mt-4">
-          {filtered ? (
-            <NoMatch what="requests" onClear={clear} />
-          ) : (
-            <EmptyState
-              title="Every request the gateway serves is logged here"
-              hint="Point a client at the proxy and the first one appears within seconds, with the full attempt trail behind it."
-              action={
-                <Button asChild size="sm">
-                  <Link to="/connect">Get a client connected</Link>
-                </Button>
-              }
-              preview={<GhostRows />}
-            />
+      ) : (
+        <>
+          {/* A failed poll on a screen that has already loaded is a staleness
+              note, not an alarm: the rows below are real, just older than
+              they look, and an empty log may have filled since. */}
+          {first.isError && held && (
+            <p className="mb-2 text-sm text-[hsl(var(--warning))]">
+              {held.requests.length > 0
+                ? "last refresh failed — rows may be stale"
+                : "last refresh failed — requests may have arrived since"}
+            </p>
           )}
-        </div>
+          {/* Scrolls sideways inside its own box rather than pushing the page
+              wider: ten columns do not fit a laptop, and the Path column at
+              the far end is the one that used to fall off.
+
+              Cells do not wrap. darkraise-ui gives every table cell
+              `overflow-wrap: anywhere`, which lets a column's minimum width
+              fall to a single glyph, so a full-width table crushed its
+              columns instead of overflowing — "success" one letter per line,
+              rows 240px tall under a window that places them one row apart. */}
+          {/* A click anywhere on a row opens it; the Open button stays for
+              the keyboard and for screen readers, since the row itself is a
+              row and not a button. The table renders its own cells, so the
+              id rides on the first cell and the click is delegated from
+              here. */}
+          <div
+            ref={tableRef}
+            className="row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
+            style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
+            onClick={openRowUnderPointer}
+          >
+            <DataTable
+              columns={columns}
+              data={rows}
+              facets={["surface", "status", "failover"]}
+              virtualize={{ rowHeight, height: 640 }}
+            />
+          </div>
+
+          {rows.length === 0 && (
+            <div className="mt-4">
+              {filtered ? (
+                <NoMatch what="requests" onClear={clear} />
+              ) : (
+                <EmptyState
+                  title="Every request the gateway serves is logged here"
+                  hint="Point a client at the proxy and the first one appears within seconds, with the full attempt trail behind it."
+                  action={
+                    <Button asChild size="sm">
+                      <Link to="/connect">Get a client connected</Link>
+                    </Button>
+                  }
+                  preview={<GhostRows />}
+                />
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {loadMoreError !== null && (

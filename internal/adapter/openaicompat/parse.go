@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
@@ -79,10 +81,21 @@ func decodeResponse(r io.Reader) (*ir.Response, error) {
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
-		Usage wireUsage `json:"usage"`
+		Usage wireUsage  `json:"usage"`
+		Error *wireError `json:"error"`
 	}
-	if err := json.NewDecoder(r).Decode(&w); err != nil {
+	raw, err := adapter.ReadResponse(r)
+	if err != nil {
 		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&w); err != nil {
+		return nil, err
+	}
+	if w.Error != nil {
+		return nil, w.Error.toIR()
+	}
+	if len(w.Choices) == 0 {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no choices"}
 	}
 	out := &ir.Response{ID: w.ID, Model: w.Model, Usage: w.Usage.toIR()}
 	if len(w.Choices) > 1 {
@@ -240,6 +253,8 @@ const toolBlockBase = 1000
 // a text delta when both arrive at zero.
 const reasoningBlockBase = 2000
 
+var errStreamTruncated = fmt.Errorf("upstream stream ended before a finish reason: %w", io.ErrUnexpectedEOF)
+
 // ParseStream reconstructs block structure from OpenAI's flat deltas. The state
 // machine opens a block when a delta first carries a given kind and closes it
 // when the stream ends or a finish reason arrives. Tool calls are indexed, so
@@ -265,6 +280,10 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		// takes the next number.
 		callByID := map[string]int{}
 		nextCall := 0
+		// finished is what separates an upstream that is done from one whose
+		// connection dropped: some compatible upstreams never send [DONE],
+		// but every completed choice carries a finish reason.
+		finished := false
 
 		closeAll := func() bool {
 			textIdx = -1
@@ -277,6 +296,10 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		for {
 			ev, err := reader.Next()
 			if errors.Is(err, io.EOF) {
+				if !finished {
+					yield(ir.StreamEvent{}, errStreamTruncated)
+					return
+				}
 				closeAll()
 				return
 			}
@@ -375,6 +398,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					}
 				}
 				if ch.FinishReason != nil {
+					finished = true
 					if !closeAll() {
 						return
 					}

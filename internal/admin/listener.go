@@ -83,11 +83,19 @@ func (s *Server) startListener(flow auth.Flow, port int, sessionID string, ttl t
 			http.Error(w, perr.Error(), http.StatusBadRequest)
 			return
 		}
-		if _, _, _, cerr := s.completeOAuth(r.Context(), code, state, sessionID); cerr != nil {
+		done, cerr := s.completeOAuth(r.Context(), code, state, sessionID)
+		if cerr != nil {
 			http.Error(w, cerr.Error(), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if done.reloadErr != nil {
+			// Still "Connected": the account is stored, and connecting it again
+			// would store it twice.
+			_, _ = w.Write([]byte("Connected, but not yet in use: " + errRoutingNotUpdated.Error() +
+				". Do not connect this account again; return to Darkrouter."))
+			return
+		}
 		_, _ = w.Write([]byte("Connected. You can close this tab and return to Darkrouter."))
 	})
 	rl.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}

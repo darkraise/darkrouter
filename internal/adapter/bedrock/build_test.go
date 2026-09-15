@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/store"
 )
 
 func build(t *testing.T, tgt *adapter.Target, req *ir.Request) (map[string]any, string, []ir.Warning) {
@@ -194,6 +197,153 @@ func TestImagesBecomeImageBlocks(t *testing.T) {
 	}
 }
 
+func documentsIn(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	var docs []map[string]any
+	for _, msg := range body["messages"].([]any) {
+		for _, b := range msg.(map[string]any)["content"].([]any) {
+			if d, ok := b.(map[string]any)["document"].(map[string]any); ok {
+				docs = append(docs, d)
+			}
+		}
+	}
+	return docs
+}
+
+func TestDocumentsBecomeDocumentBlocks(t *testing.T) {
+	req := simple()
+	for _, mime := range []string{"application/pdf", "text/plain", "text/markdown", "text/csv",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"} {
+		req.Messages[0].Content = append(req.Messages[0].Content, ir.ContentBlock{
+			Type: ir.BlockDocument, Media: &ir.Media{MIME: mime, Data: "aGk="},
+		})
+	}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if len(warns) != 0 {
+		t.Errorf("warnings = %+v, want none", warns)
+	}
+	docs := documentsIn(t, body)
+	wantFormats := []string{"pdf", "txt", "md", "csv", "xlsx"}
+	if len(docs) != len(wantFormats) {
+		t.Fatalf("documents = %#v, want %d", docs, len(wantFormats))
+	}
+	seen := map[string]bool{}
+	for i, d := range docs {
+		if d["format"] != wantFormats[i] {
+			t.Errorf("document %d format = %v, want %s", i, d["format"], wantFormats[i])
+		}
+		if src, _ := d["source"].(map[string]any); src["bytes"] != "aGk=" {
+			t.Errorf("document %d source = %#v, want the base64 bytes", i, d["source"])
+		}
+		// Converse requires a name, and AWS recommends a neutral one: the
+		// model can read it as an instruction.
+		name, _ := d["name"].(string)
+		if name == "" || seen[name] {
+			t.Errorf("document %d name = %q, want a distinct non-empty name", i, name)
+		}
+		seen[name] = true
+		for _, r := range name {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+				t.Errorf("document %d name = %q holds %q, outside Converse's name alphabet", i, name, r)
+			}
+		}
+	}
+}
+
+func doc() ir.ContentBlock {
+	return ir.ContentBlock{Type: ir.BlockDocument, Media: &ir.Media{MIME: "application/pdf", Data: "aGk="}}
+}
+
+func messagesIn(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, m := range body["messages"].([]any) {
+		out = append(out, m.(map[string]any))
+	}
+	return out
+}
+
+// Converse refuses a message carrying a document without a text block
+// alongside it. A client can send a file with its instruction in the system
+// prompt, which Anthropic takes as it is.
+func TestADocumentOnlyTurnGetsTheTextBlockConverseRequires(t *testing.T) {
+	req := simple()
+	req.Messages[0].Content = []ir.ContentBlock{doc()}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	content := messagesIn(t, body)[0]["content"].([]any)
+	var texts, docs int
+	for _, b := range content {
+		blk := b.(map[string]any)
+		if _, ok := blk["text"]; ok {
+			texts++
+		}
+		if _, ok := blk["document"]; ok {
+			docs++
+		}
+	}
+	if docs != 1 || texts != 1 {
+		t.Errorf("content = %#v, want the document and one text block", content)
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
+	}
+}
+
+// Converse takes five documents in a message. Consecutive user messages merge
+// into one, so two turns of three files each would reach six.
+func TestAMessageKeepsAtMostFiveDocuments(t *testing.T) {
+	req := simple()
+	three := []ir.ContentBlock{{Type: ir.BlockText, Text: "read"}, doc(), doc(), doc()}
+	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: three}, {Role: ir.RoleUser, Content: three}}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if msgs := messagesIn(t, body); len(msgs) != 1 {
+		t.Fatalf("messages = %d, want the two user turns merged into one", len(msgs))
+	}
+	if docs := documentsIn(t, body); len(docs) != 5 {
+		t.Errorf("documents = %d, want five", len(docs))
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
+	}
+}
+
+// Converse takes documents in user turns only.
+func TestADocumentInAnAssistantTurnIsDropped(t *testing.T) {
+	req := simple()
+	req.Messages = append(req.Messages,
+		ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "here"}, doc()}},
+		ir.Message{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "thanks"}}})
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if docs := documentsIn(t, body); len(docs) != 0 {
+		t.Errorf("documents = %#v, want the assistant's dropped", docs)
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
+	}
+}
+
+func TestADocumentConverseCannotTakeIsWarned(t *testing.T) {
+	for name, m := range map[string]*ir.Media{
+		"unsupported format": {MIME: "application/zip", Data: "UEsDBA=="},
+		"url only":           {MIME: "application/pdf", URL: "https://example.invalid/a.pdf"},
+		"file id only":       {FileID: "file_1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := simple()
+			req.Messages[0].Content = append(req.Messages[0].Content, ir.ContentBlock{
+				Type: ir.BlockDocument, Media: m,
+			})
+			body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+			if docs := documentsIn(t, body); len(docs) != 0 {
+				t.Errorf("documents = %#v, want it dropped", docs)
+			}
+			if len(warns) != 1 || warns[0].Field != "document" {
+				t.Errorf("warnings = %+v, want one document warning", warns)
+			}
+		})
+	}
+}
+
 func TestAURLImageIsWarnedNotFetched(t *testing.T) {
 	// Converse takes bytes only. Fetching the URL here would make an outbound
 	// request from a request builder, which no other adapter does.
@@ -332,7 +482,10 @@ func TestEmptyToolInputIsAnObject(t *testing.T) {
 	}
 }
 
-func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
+// Converse passes additionalModelRequestFields through to Claude's native
+// request, so a manual budget is Anthropic's own thinking field, as AWS's
+// Claude 4 Converse example spells it.
+func TestReasoningBecomesAThinkingBudgetForAnthropicModels(t *testing.T) {
 	req := simple()
 	req.Reasoning = &ir.Reasoning{Budget: 2048}
 	body, _, warns := build(t, anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
@@ -341,9 +494,12 @@ func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
 	if !ok {
 		t.Fatalf("additionalModelRequestFields = %#v", body["additionalModelRequestFields"])
 	}
-	cfg, _ := extra["reasoning_config"].(map[string]any)
+	if cfg, sent := extra["reasoning_config"]; sent {
+		t.Errorf("reasoning_config = %#v, want the thinking field", cfg)
+	}
+	cfg, _ := extra["thinking"].(map[string]any)
 	if cfg["type"] != "enabled" || cfg["budget_tokens"] != float64(2048) {
-		t.Errorf("reasoning_config = %#v", cfg)
+		t.Errorf("thinking = %#v", extra["thinking"])
 	}
 	for _, w := range warns {
 		if w.Field == "reasoning" {
@@ -355,7 +511,7 @@ func TestReasoningBecomesReasoningConfigForAnthropicModels(t *testing.T) {
 	// the same request reasons to the same depth here as it does elsewhere.
 	req.Reasoning = &ir.Reasoning{Effort: "high"}
 	body, _, _ = build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
-	cfg = body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	cfg = body["additionalModelRequestFields"].(map[string]any)["thinking"].(map[string]any)
 	if cfg["budget_tokens"] != float64(32768) {
 		t.Errorf("effort high budget = %v", cfg["budget_tokens"])
 	}
@@ -370,7 +526,7 @@ func TestReasoningBudgetIsClampedBelowMaxTokens(t *testing.T) {
 	req.MaxTokens = &max
 	req.Reasoning = &ir.Reasoning{Budget: 8000}
 	body, _, warns := build(t, anthropicTarget("anthropic.claude-3-7-sonnet-20250219-v1:0"), req)
-	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
+	cfg := body["additionalModelRequestFields"].(map[string]any)["thinking"].(map[string]any)
 	if cfg["budget_tokens"] != float64(3999) {
 		t.Errorf("budget = %v, want 3999", cfg["budget_tokens"])
 	}
@@ -380,14 +536,14 @@ func TestReasoningBudgetIsClampedBelowMaxTokens(t *testing.T) {
 }
 
 func TestReasoningIsWarnedForOtherPublishers(t *testing.T) {
-	// reasoning_config is Anthropic's additional field. Sending it to Nova
+	// thinking is Anthropic's additional field. Sending it to Nova
 	// or Llama is a ValidationException, and silently dropping it hides a
 	// request that reasons less than the client asked.
 	req := simple()
 	req.Reasoning = &ir.Reasoning{Effort: "high"}
 	body, _, warns := build(t, anthropicTarget("amazon.nova-pro-v1:0"), req)
 	if _, ok := body["additionalModelRequestFields"]; ok {
-		t.Errorf("reasoning_config sent to a non-Anthropic model: %#v", body["additionalModelRequestFields"])
+		t.Errorf("thinking sent to a non-Anthropic model: %#v", body["additionalModelRequestFields"])
 	}
 	if !hasWarning(warns, "reasoning") {
 		t.Errorf("no warning named reasoning: %+v", warns)
@@ -476,46 +632,455 @@ func TestTypedServerToolsAreWarnedAndDropped(t *testing.T) {
 	}
 }
 
-// The catalog's per-generation traits are what decide the thinking shape
-// everywhere else. Bedrock read only the model id, so a generation that takes
-// the adaptive shape was sent a manual budget it refuses, and a model that
-// always thinks was sent a budget it does not accept either.
-func TestReasoningHonoursTheCatalogThinkingTraits(t *testing.T) {
-	adaptiveOnly := anthropicTarget("us.anthropic.claude-opus-4-7-v1:0")
-	adaptiveOnly.Info = adapter.ModelInfo{
-		TraitsKnown: true, Adaptive: true, ManualBudget: false, MaxOutputTokens: 64000,
-	}
+func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
+	// A Gemini built-in has no name, and a toolSpec with an empty name is a
+	// validation error on every request that carries one.
 	req := simple()
-	req.Reasoning = &ir.Reasoning{Budget: 2048}
-
-	body, _, warns := build(t, adaptiveOnly, req)
-	if extra, ok := body["additionalModelRequestFields"].(map[string]any); ok {
-		if _, sent := extra["reasoning_config"]; sent {
-			t.Errorf("sent a manual reasoning_config to a model the catalog says takes "+
-				"only the adaptive shape: %#v", extra["reasoning_config"])
-		}
+	req.Tools = []ir.Tool{
+		{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
 	}
-	if !hasWarn(warns, "reasoning") {
-		t.Error("dropped the reasoning request without warning")
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["toolSpec"].(map[string]any)["name"] != "f" {
+		t.Errorf("tools = %#v", tools)
 	}
-
-	// A model whose traits are known and manual-capable still gets the budget.
-	manual := anthropicTarget("us.anthropic.claude-sonnet-4-20250514-v1:0")
-	manual.Info = adapter.ModelInfo{
-		TraitsKnown: true, Adaptive: true, ManualBudget: true, MaxOutputTokens: 64000,
-	}
-	body, _, _ = build(t, manual, req)
-	cfg := body["additionalModelRequestFields"].(map[string]any)["reasoning_config"].(map[string]any)
-	if cfg["budget_tokens"] != float64(2048) {
-		t.Errorf("budget_tokens = %v on a manual-capable model", cfg["budget_tokens"])
+	if !hasWarning(warns, "tools[].googleSearch") {
+		t.Errorf("warnings = %+v", warns)
 	}
 }
 
-func hasWarn(warns []ir.Warning, field string) bool {
-	for _, w := range warns {
-		if w.Field == field {
-			return true
+func TestNamelessTypedToolIsDroppedAsProviderRun(t *testing.T) {
+	req := simple()
+	req.Tools = []ir.Tool{
+		{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 {
+		t.Errorf("tools = %#v", tools)
+	}
+	if len(warns) != 1 || warns[0].Field != "tools[].type" || !strings.Contains(warns[0].Reason, "provider-run") {
+		t.Errorf("warnings = %+v; one provider-run warning, not one per field", warns)
+	}
+}
+
+// catalogTarget resolves a model's traits the way a live request does, through
+// the shipped presets and the catalog merge, rather than stating them. Stated
+// traits hid that the bedrock preset yields none at all.
+func catalogTarget(t *testing.T, model string) *adapter.Target {
+	t.Helper()
+	presets, err := catalog.LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := catalog.Merge(catalog.MergeInput{
+		Providers: []provider.Provider{{ID: "p", Kind: "bedrock", Preset: "bedrock"}},
+		Presets:   presets,
+		Rows:      []store.ModelRow{{ProviderID: "p", ModelID: model, State: "live"}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("%s: merged to %d models", model, len(got))
+	}
+	tr := got[0].Traits
+	tgt := anthropicTarget(model)
+	tgt.Info = adapter.ModelInfo{
+		MaxOutputTokens:    64000,
+		Adaptive:           tr.Adaptive,
+		ManualBudget:       tr.ManualBudget,
+		FreeSampling:       tr.FreeSampling,
+		TraitsKnown:        tr.Known,
+		NoPrefill:          tr.NoPrefill,
+		ThinkingAlwaysOn:   tr.ThinkingAlwaysOn,
+		NoForcedToolChoice: tr.NoForcedToolChoice,
+	}
+	return tgt
+}
+
+// A generation that dropped the manual budget refuses one, so it is sent the
+// adaptive shape Converse carries in additionalModelRequestFields, with the
+// client's depth expressed as an effort.
+func TestReasoningTakesTheAdaptiveShapeOnAdaptiveOnlyModels(t *testing.T) {
+	for _, c := range []struct {
+		model      string
+		reasoning  ir.Reasoning
+		wantEffort string
+	}{
+		{"us.anthropic.claude-opus-4-7", ir.Reasoning{Budget: 2048}, "low"},
+		{"anthropic.claude-opus-5", ir.Reasoning{Effort: "high"}, "high"},
+		{"global.anthropic.claude-fable-5", ir.Reasoning{Effort: "medium"}, "medium"},
+	} {
+		req := simple()
+		req.Reasoning = &c.reasoning
+		body, _, warns := build(t, catalogTarget(t, c.model), req)
+
+		extra, ok := body["additionalModelRequestFields"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: additionalModelRequestFields = %#v", c.model, body["additionalModelRequestFields"])
+		}
+		if cfg, sent := extra["reasoning_config"]; sent {
+			t.Errorf("%s: sent a manual budget the model refuses: %#v", c.model, cfg)
+		}
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "adaptive" {
+			t.Errorf("%s: thinking = %#v, want type adaptive", c.model, extra["thinking"])
+		}
+		if oc, _ := extra["output_config"].(map[string]any); oc["effort"] != c.wantEffort {
+			t.Errorf("%s: output_config = %#v, want effort %q", c.model, extra["output_config"], c.wantEffort)
+		}
+		if hasWarning(warns, "reasoning") {
+			t.Errorf("%s: warned about a reasoning request the model can serve: %+v", c.model, warns)
 		}
 	}
-	return false
+
+	// A generation that still takes a budget keeps it.
+	req := simple()
+	req.Reasoning = &ir.Reasoning{Budget: 2048}
+	body, _, _ := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-20250514-v1:0"), req)
+	extra := body["additionalModelRequestFields"].(map[string]any)
+	if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" || th["budget_tokens"] != float64(2048) {
+		t.Errorf("thinking = %#v on a manual-capable model", extra["thinking"])
+	}
+}
+
+// Opus 5 and Sonnet 5 think adaptively when the thinking field is absent, so
+// a client's "no thinking" has to be sent as the explicit off switch. Models
+// that always think reject that switch, and models before adaptive thinking
+// never had one: omitting the field is what off means there.
+func TestDisabledReasoningIsSentExplicitlyWhereTheModelHasAnOffSwitch(t *testing.T) {
+	disabled := func(model string, anthropicEdge bool) (map[string]any, []ir.Warning) {
+		req := simple()
+		if anthropicEdge {
+			req.Metadata = map[string]string{"anthropic_thinking_type": "disabled"}
+		} else {
+			req.Reasoning = &ir.Reasoning{Disabled: true}
+		}
+		body, _, warns := build(t, catalogTarget(t, model), req)
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		return extra, warns
+	}
+	for _, model := range []string{"anthropic.claude-opus-5", "us.anthropic.claude-sonnet-5", "us.anthropic.claude-opus-4-7"} {
+		for _, viaEdge := range []bool{false, true} {
+			extra, _ := disabled(model, viaEdge)
+			if th, _ := extra["thinking"].(map[string]any); th["type"] != "disabled" {
+				t.Errorf("%s (anthropic edge %v): thinking = %#v, want type disabled", model, viaEdge, extra["thinking"])
+			}
+		}
+	}
+
+	extra, warns := disabled("global.anthropic.claude-fable-5", false)
+	if th, sent := extra["thinking"]; sent {
+		t.Errorf("fable-5: thinking = %#v sent to a model that rejects the off switch", th)
+	}
+	if !hasWarning(warns, "reasoning") {
+		t.Errorf("fable-5: thinking stays on without a warning: %+v", warns)
+	}
+
+	for _, model := range []string{"anthropic.claude-3-7-sonnet-20250219-v1:0", "amazon.nova-pro-v1:0"} {
+		if extra, _ := disabled(model, false); extra != nil {
+			t.Errorf("%s: additionalModelRequestFields = %#v, want none", model, extra)
+		}
+	}
+}
+
+// Converse forwards inferenceConfig, toolChoice and the conversation to
+// Claude's native request, so every shape a generation refuses — and every
+// control Anthropic rejects alongside thinking — refuses here too.
+func TestClaudeRequestShapeRestrictionsHoldOnBedrock(t *testing.T) {
+	temp, lowTopP, highTopP := 0.2, 0.5, 0.97
+	withTool := func(req *ir.Request, mode string) {
+		req.Tools = []ir.Tool{{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)}}
+		req.ToolChoice = &ir.ToolChoice{Mode: mode, Name: "f"}
+	}
+	prefill := func(req *ir.Request) {
+		req.Messages = append(req.Messages, ir.Message{Role: ir.RoleAssistant,
+			Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "{"}}})
+	}
+	sampling := func(body map[string]any) map[string]any {
+		cfg, _ := body["inferenceConfig"].(map[string]any)
+		return cfg
+	}
+
+	t.Run("sealed sampling", func(t *testing.T) {
+		req := simple()
+		req.Temperature, req.TopP = &temp, &highTopP
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-5"), req)
+		if cfg := sampling(body); cfg["temperature"] != nil || cfg["topP"] != nil {
+			t.Errorf("inferenceConfig = %#v, want no sampling on a sealed model", cfg)
+		}
+		if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_p") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("sampling beside thinking", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		req.Temperature, req.TopP = &temp, &lowTopP
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != nil || cfg["topP"] != nil {
+			t.Errorf("inferenceConfig = %#v, want temperature and a narrow top_p dropped", cfg)
+		}
+		if !hasWarning(warns, "temperature") || !hasWarning(warns, "top_p") {
+			t.Errorf("warnings = %+v", warns)
+		}
+
+		req.Temperature, req.TopP = nil, &highTopP
+		body, _, _ = build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["topP"] != highTopP {
+			t.Errorf("inferenceConfig = %#v, want top_p 0.97 kept beside thinking", cfg)
+		}
+
+		req.Reasoning, req.Temperature = nil, &temp
+		body, _, _ = build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != temp {
+			t.Errorf("inferenceConfig = %#v, want temperature kept without thinking", cfg)
+		}
+	})
+
+	t.Run("no forced tool choice", func(t *testing.T) {
+		req := simple()
+		withTool(req, "tool")
+		body, _, warns := build(t, catalogTarget(t, "global.anthropic.claude-fable-5"), req)
+		choice, _ := body["toolConfig"].(map[string]any)["toolChoice"].(map[string]any)
+		if _, auto := choice["auto"]; !auto {
+			t.Errorf("toolChoice = %#v, want auto", choice)
+		}
+		if !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("manual thinking yields to a forced tool", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		withTool(req, "any")
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if extra, sent := body["additionalModelRequestFields"]; sent {
+			t.Errorf("additionalModelRequestFields = %#v beside a forced tool", extra)
+		}
+		choice, _ := body["toolConfig"].(map[string]any)["toolChoice"].(map[string]any)
+		if _, forced := choice["any"]; !forced {
+			t.Errorf("toolChoice = %#v, want the client's any", choice)
+		}
+		if !hasWarning(warns, "reasoning") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("manual thinking survives a forced choice among no rendered tools", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		req.Tools = []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}}
+		req.ToolChoice = &ir.ToolChoice{Mode: "any"}
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if tc, sent := body["toolConfig"]; sent {
+			t.Errorf("toolConfig = %#v with every tool dropped", tc)
+		}
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" {
+			t.Errorf("additionalModelRequestFields = %#v; nothing is forced without a tool", extra)
+		}
+		if hasWarning(warns, "reasoning") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("manual thinking survives a forced choice the model downgraded", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		withTool(req, "any")
+		tgt := anthropicTarget("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+		tgt.Info = adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true, NoForcedToolChoice: true}
+		body, _, warns := build(t, tgt, req)
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" {
+			t.Errorf("additionalModelRequestFields = %#v; the choice sent was auto", extra)
+		}
+		if hasWarning(warns, "reasoning") || !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("prefill", func(t *testing.T) {
+		for _, c := range []struct {
+			model     string
+			reasoning *ir.Reasoning
+		}{
+			{"anthropic.claude-opus-5", nil},
+			{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", &ir.Reasoning{Budget: 2048}},
+		} {
+			req := simple()
+			req.Reasoning = c.reasoning
+			prefill(req)
+			body, _, warns := build(t, catalogTarget(t, c.model), req)
+			if n := len(body["messages"].([]any)); n != 1 {
+				t.Errorf("%s: %d messages, want the prefill dropped", c.model, n)
+			}
+			if !hasWarning(warns, "messages[last].assistant_prefill") {
+				t.Errorf("%s: warnings = %+v", c.model, warns)
+			}
+		}
+	})
+
+	t.Run("other publishers are untouched", func(t *testing.T) {
+		req := simple()
+		req.Temperature = &temp
+		withTool(req, "tool")
+		prefill(req)
+		body, _, warns := build(t, catalogTarget(t, "amazon.nova-pro-v1:0"), req)
+		if cfg := sampling(body); cfg["temperature"] != temp {
+			t.Errorf("inferenceConfig = %#v", cfg)
+		}
+		if n := len(body["messages"].([]any)); n != 2 {
+			t.Errorf("%d messages, want the assistant turn kept", n)
+		}
+		if len(warns) != 0 {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+}
+
+// A cachePoint carries the marker's TTL, counts toward the same four-marker
+// limit Anthropic enforces, and is placed only where Converse admits one:
+// ToolResultContentBlock has no cachePoint member, so a marker inside a tool
+// result closes the tool result itself.
+func TestCachePointsKeepTheirTTLTheBudgetAndValidPlacements(t *testing.T) {
+	hour := &ir.CacheControl{Type: "ephemeral", TTL: "1h"}
+	plain := &ir.CacheControl{Type: "ephemeral"}
+	points := func(blocks []any) []map[string]any {
+		var out []map[string]any
+		for _, b := range blocks {
+			if cp, ok := b.(map[string]any)["cachePoint"].(map[string]any); ok {
+				out = append(out, cp)
+			}
+		}
+		return out
+	}
+
+	const hourModel = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+	req := simple()
+	req.Model = hourModel
+	req.System = []ir.ContentBlock{{Type: ir.BlockText, Text: "preamble", CacheControl: hour}}
+	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+		{Type: ir.BlockText, Text: "a", CacheControl: plain},
+		{Type: ir.BlockText, Text: "b", CacheControl: plain},
+		{Type: ir.BlockText, Text: "c", CacheControl: plain},
+		{Type: ir.BlockText, Text: "d", CacheControl: plain},
+	}}}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	sys := points(body["system"].([]any))
+	if len(sys) != 1 || sys[0]["ttl"] != "1h" || sys[0]["type"] != "default" {
+		t.Errorf("system cachePoints = %#v, want one with ttl 1h", sys)
+	}
+	msg := points(body["messages"].([]any)[0].(map[string]any)["content"].([]any))
+	if len(msg) != 3 {
+		t.Errorf("message cachePoints = %d, want 3: four markers in all", len(msg))
+	}
+	for _, cp := range msg {
+		if _, set := cp["ttl"]; set {
+			t.Errorf("cachePoint = %#v, want no ttl for a marker without one", cp)
+		}
+	}
+	if !hasWarning(warns, "cache_control") {
+		t.Errorf("surplus marker dropped without a warning: %+v", warns)
+	}
+
+	req = simple()
+	req.Model = hourModel
+	req.Messages = append(req.Messages,
+		ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{
+			Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "c1", Name: "f"},
+		}}},
+		ir.Message{Role: ir.RoleTool, Content: []ir.ContentBlock{{
+			Type: ir.BlockToolResult, ToolResult: &ir.ToolResult{ToolUseID: "c1", Content: []ir.ContentBlock{
+				{Type: ir.BlockText, Text: "result", CacheControl: hour},
+			}},
+		}}},
+	)
+	body, _, _ = build(t, anthropicTarget(req.Model), req)
+	msgs := body["messages"].([]any)
+	content := msgs[len(msgs)-1].(map[string]any)["content"].([]any)
+	var result map[string]any
+	for _, b := range content {
+		if r, ok := b.(map[string]any)["toolResult"].(map[string]any); ok {
+			result = r
+		}
+	}
+	if result == nil {
+		t.Fatalf("content = %#v, want a toolResult", content)
+	}
+	if inner := points(result["content"].([]any)); len(inner) != 0 {
+		t.Errorf("toolResult content carries cachePoints %#v", inner)
+	}
+	if outer := points(content); len(outer) != 1 || outer[0]["ttl"] != "1h" {
+		t.Errorf("content cachePoints = %#v, want one closing the tool result with ttl 1h", outer)
+	}
+}
+
+// AWS lists the one-hour TTL for some Claude models only; the rest, and every
+// other publisher, take the five-minute default and nothing else. A one-hour
+// entry must also precede every five-minute one.
+func TestCachePointTTLFollowsTheModelAndTheOrderingRule(t *testing.T) {
+	hour := &ir.CacheControl{Type: "ephemeral", TTL: "1h"}
+	five := &ir.CacheControl{Type: "ephemeral", TTL: "5m"}
+	ttls := func(body map[string]any) []any {
+		var out []any
+		collect := func(blocks []any) {
+			for _, b := range blocks {
+				if cp, ok := b.(map[string]any)["cachePoint"].(map[string]any); ok {
+					out = append(out, cp["ttl"])
+				}
+			}
+		}
+		if sys, ok := body["system"].([]any); ok {
+			collect(sys)
+		}
+		for _, m := range body["messages"].([]any) {
+			collect(m.(map[string]any)["content"].([]any))
+		}
+		return out
+	}
+	request := func(model string, sys, msg *ir.CacheControl) *ir.Request {
+		return &ir.Request{
+			Model:  model,
+			System: []ir.ContentBlock{{Type: ir.BlockText, Text: "preamble", CacheControl: sys}},
+			Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+				{Type: ir.BlockText, Text: "context", CacheControl: msg},
+			}}},
+		}
+	}
+	for _, c := range []struct {
+		name     string
+		model    string
+		sys, msg *ir.CacheControl
+		want     []any
+		warned   bool
+	}{
+		{"hour then five on a 1h model", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", hour, five, []any{"1h", nil}, false},
+		{"hour on an opus 4.6 profile", "global.anthropic.claude-opus-4-6-v1", hour, hour, []any{"1h", "1h"}, false},
+		{"hour on a 5m-only model", "anthropic.claude-3-7-sonnet-20250219-v1:0", hour, five, []any{nil, nil}, true},
+		{"hour on nova", "us.amazon.nova-pro-v1:0", hour, nil, []any{nil}, true},
+		{"five on nova", "us.amazon.nova-pro-v1:0", five, five, []any{nil, nil}, false},
+		{"hour on an application inference profile", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", hour, nil, []any{nil}, true},
+		{"hour after five", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", five, hour, []any{nil, nil}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			body, _, warns := build(t, anthropicTarget(c.model), request(c.model, c.sys, c.msg))
+			got := ttls(body)
+			if len(got) != len(c.want) {
+				t.Fatalf("ttls = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("ttls = %v, want %v", got, c.want)
+					break
+				}
+			}
+			if hasWarning(warns, "cache_control") != c.warned {
+				t.Errorf("warnings = %+v", warns)
+			}
+		})
+	}
 }

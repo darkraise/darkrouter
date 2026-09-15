@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -444,5 +445,75 @@ func TestWriteResponsesEmitsAnEmptyOutputArrayNotNull(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"output":[]`) {
 		t.Errorf("body = %s", w.Body.String())
+	}
+}
+
+func TestParseResponsesKeepsTheSchemaNameAndStrictness(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi",
+	  "text":{"format":{"type":"json_schema","name":"answer","strict":true,"schema":{"type":"object"}}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := req.ResponseFormat
+	if rf == nil || rf.Name != "answer" || rf.Strict == nil || !*rf.Strict {
+		t.Errorf("response format = %+v; strict adherence the client asked for was dropped", rf)
+	}
+}
+
+func TestParseResponsesSplitsAnInlineFileDataURI(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"a.pdf","file_data":"data:application/pdf;base64,JVBERi0="}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
+		t.Errorf("media = %+v; the data URI prefix must not stay inside the base64 payload", m)
+	}
+}
+
+func TestParseResponsesEncodesAPercentEncodedFileDataURI(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"a.txt","file_data":"data:text/plain;charset=utf-8,a%20b%2Cc%zz"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "text/plain" || m.Data != base64.StdEncoding.EncodeToString([]byte("a b,c%zz")) {
+		t.Errorf("media = %+v; a data URI without ;base64 is percent-encoded text, and the IR carries base64", m)
+	}
+}
+
+func TestParseResponsesTakesABareFileDataMIMEFromItsFilename(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"report.PDF","file_data":"JVBERi0="}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
+		t.Errorf("media = %+v; bare base64 must take its MIME type from the filename", m)
+	}
+}
+
+func TestParseResponsesEncodesAPercentEncodedImageURL(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_image","image_url":"data:image/svg+xml,%3Csvg%2F%3E"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "image/svg+xml" || m.Data != base64.StdEncoding.EncodeToString([]byte("<svg/>")) {
+		t.Errorf("media = %+v", m)
+	}
+}
+
+func TestParseResponsesReadsJSONObjectMode(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":"hi","text":{"format":{"type":"json_object"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ResponseFormat == nil || req.ResponseFormat.Type != "json_object" {
+		t.Errorf("response format = %+v", req.ResponseFormat)
 	}
 }

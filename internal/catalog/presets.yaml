@@ -260,7 +260,7 @@ anthropic-oauth:
     - requires-max-tokens
   oauth:
     authorize_url: https://claude.ai/oauth/authorize
-    token_url: https://console.anthropic.com/v1/oauth/token
+    token_url: https://platform.claude.com/v1/oauth/token
     client_id: 9d1c250a-e61b-44d9-88ed-5944d1962f5e
     scopes:
       - org:create_api_key
@@ -1760,7 +1760,7 @@ ollama-cloud:
   litellm_id: ollama
   free_tier: true
   website: https://ollama.com/settings/keys
-  models_url: https://ollama.com/api/tags
+  models_url: https://ollama.com/v1/models
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat
@@ -2413,7 +2413,7 @@ vercel-ai-gateway:
 vertex:
   name: Google Vertex AI
   kind: vertex
-  base_url: https://us-central1-aiplatform.googleapis.com/v1/projects
+  base_url: ""
   auth:
     style: gcp-sa
   surfaces:

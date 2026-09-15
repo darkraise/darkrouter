@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/catalog"
 )
@@ -23,7 +25,10 @@ type Lister struct{ client *http.Client }
 
 func NewLister(c *http.Client) *Lister {
 	if c == nil {
-		c = http.DefaultClient
+		// Matches discovery's default probe timeout. http.DefaultClient has
+		// none, and a control plane that accepts a request and never answers
+		// would otherwise hold its caller forever.
+		c = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &Lister{client: c}
 }
@@ -62,6 +67,9 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 		if p.Region == "" {
 			return nil, errors.New("bedrock discovery needs a region")
 		}
+		if err := CheckRegion(p.Region); err != nil {
+			return nil, err
+		}
 		base = ControlPlaneFor(p.Region)
 	}
 
@@ -71,10 +79,8 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 	if err := l.get(ctx, p, base+"/foundation-models", &models); err != nil {
 		return nil, err
 	}
-	var profiles struct {
-		Summaries []profileSummary `json:"inferenceProfileSummaries"`
-	}
-	if err := l.get(ctx, p, base+"/inference-profiles", &profiles); err != nil {
+	summaries, err := l.profiles(ctx, p, base)
+	if err != nil {
 		return nil, err
 	}
 
@@ -83,8 +89,8 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 	// id returns a 400 telling the operator to use a profile, which is a worse
 	// error than the model simply not being offered.
 	covered := map[string]bool{}
-	out := make([]catalog.Discovered, 0, len(profiles.Summaries)+len(models.ModelSummaries))
-	for _, pr := range profiles.Summaries {
+	out := make([]catalog.Discovered, 0, len(summaries)+len(models.ModelSummaries))
+	for _, pr := range summaries {
 		if pr.Status != "" && pr.Status != "ACTIVE" {
 			continue
 		}
@@ -111,6 +117,42 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 	return out, nil
 }
 
+// profiles reads every page of ListInferenceProfiles. ListFoundationModels has
+// no pagination; this call does, and stopping at the first page drops every
+// profile past it from the catalog.
+func (l *Lister) profiles(ctx context.Context, p catalog.Probe, base string) ([]profileSummary, error) {
+	var (
+		out  []profileSummary
+		seen = map[string]bool{}
+		next string
+	)
+	for page := 0; ; page++ {
+		if page == catalog.MaxListPages {
+			return nil, fmt.Errorf("bedrock inference-profile listing did not end within %d pages", catalog.MaxListPages)
+		}
+		q := url.Values{"maxResults": {"1000"}}
+		if next != "" {
+			q.Set("nextToken", next)
+		}
+		var page struct {
+			Summaries []profileSummary `json:"inferenceProfileSummaries"`
+			NextToken string           `json:"nextToken"`
+		}
+		if err := l.get(ctx, p, base+"/inference-profiles?"+q.Encode(), &page); err != nil {
+			return nil, err
+		}
+		out = append(out, page.Summaries...)
+		if page.NextToken == "" {
+			return out, nil
+		}
+		if seen[page.NextToken] {
+			return nil, errors.New("bedrock inference-profile listing repeated a page token")
+		}
+		seen[page.NextToken] = true
+		next = page.NextToken
+	}
+}
+
 func (l *Lister) get(ctx context.Context, p catalog.Probe, url string, into any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -128,13 +170,62 @@ func (l *Lister) get(ctx context.Context, p catalog.Probe, url string, into any)
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned %s", url, resp.Status)
+		return newListError(url, resp)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(body, into)
+}
+
+// ListError is a control-plane refusal. Type is the AWS error type, which is
+// what separates a key AWS does not recognise from a policy that denies it:
+// both arrive as a 403.
+type ListError struct {
+	URL        string
+	Status     string
+	StatusCode int
+	Type       string
+	Message    string
+}
+
+func (e *ListError) Error() string {
+	msg := fmt.Sprintf("%s returned %s", e.URL, e.Status)
+	if e.Type != "" {
+		msg += ": " + e.Type
+	}
+	if e.Message != "" {
+		msg += ": " + e.Message
+	}
+	return msg
+}
+
+func newListError(url string, resp *http.Response) *ListError {
+	e := &ListError{URL: url, Status: resp.Status, StatusCode: resp.StatusCode}
+	var body struct {
+		Type     string `json:"__type"`
+		Message  string `json:"message"`
+		MessageU string `json:"Message"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body)
+	// restJson1 names the type in X-Amzn-Errortype, optionally followed by
+	// ":" and a namespace URI; __type may carry a "namespace#" prefix.
+	e.Type = resp.Header.Get("X-Amzn-Errortype")
+	if e.Type == "" {
+		e.Type = body.Type
+	}
+	if i := strings.Index(e.Type, ":"); i >= 0 {
+		e.Type = e.Type[:i]
+	}
+	if i := strings.LastIndex(e.Type, "#"); i >= 0 {
+		e.Type = e.Type[i+1:]
+	}
+	e.Message = body.Message
+	if e.Message == "" {
+		e.Message = body.MessageU
+	}
+	return e
 }
 
 // modelIDFromARN takes the identifier off the end of a foundation-model ARN.

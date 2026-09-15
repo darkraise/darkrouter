@@ -128,6 +128,9 @@ type Store struct {
 	// all: unlike models.dev there is nothing embedded to fall back to, because
 	// a price stale enough to have shipped in a binary is billed against.
 	litellm atomic.Pointer[func() LiteLLMDoc]
+	// free supplies the newest curated free-tier catalogue. Nil means the one
+	// embedded at build time.
+	free atomic.Pointer[func() FreeCatalog]
 }
 
 func NewStore(db *store.DB, src provider.Source) *Store {
@@ -139,6 +142,20 @@ func (s *Store) SetDoc(fn func() Doc) { s.doc.Store(&fn) }
 
 // SetLiteLLM names the source of the live LiteLLM price index.
 func (s *Store) SetLiteLLM(fn func() LiteLLMDoc) { s.litellm.Store(&fn) }
+
+// SetFreeTiers names the source of the live free-tier catalogue.
+func (s *Store) SetFreeTiers(fn func() FreeCatalog) { s.free.Store(&fn) }
+
+// liveFree returns the newest catalogue available, or the embedded one when
+// the source has none: the same fallback discovery's import filter applies.
+func (s *Store) liveFree() FreeCatalog {
+	if fn := s.free.Load(); fn != nil && *fn != nil {
+		if c := (*fn)(); len(c.Providers) > 0 {
+			return c
+		}
+	}
+	return FreeModels()
+}
 
 func (s *Store) liveLiteLLM() LiteLLMDoc {
 	if fn := s.litellm.Load(); fn != nil && *fn != nil {
@@ -217,6 +234,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		// rather than the row whenever the join succeeds.
 		Doc:       s.liveDoc(),
 		LiteLLM:   s.liveLiteLLM(),
+		Free:      s.liveFree(),
 		Rows:      rows,
 		Overrides: overrides,
 	})

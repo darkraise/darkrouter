@@ -23,8 +23,9 @@ type ProviderRow struct {
 	Enabled   bool
 	Region    string
 	Project   string
-	// Location is Vertex's regional endpoint. It is set at creation and not
-	// patchable: changing it moves every catalogued model to a different host.
+	// Location is Vertex's regional endpoint. Once set it does not change:
+	// moving it moves every catalogued model to a different host. A patch may
+	// only fill one a row was created without.
 	Location string
 	// FreeModelsOnly narrows what a discovery sweep imports for this provider
 	// to the models it can show are free. It is a filter on the catalogue, not
@@ -47,6 +48,7 @@ type ProviderPatch struct {
 	Enabled  *bool   `json:"enabled"`
 	Region   *string `json:"region"`
 	Project  *string `json:"project"`
+	Location *string `json:"location"`
 	// FreeModelsOnly is patchable so an operator can change their mind without
 	// deleting a provider they cannot recreate: the set is defined in code.
 	FreeModelsOnly *bool `json:"free_models_only"`
@@ -121,6 +123,9 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 	if patch.Project != nil {
 		sets, args = append(sets, "project = ?"), append(args, *patch.Project)
 	}
+	if patch.Location != nil {
+		sets, args = append(sets, "location = ?"), append(args, *patch.Location)
+	}
 	if patch.FreeModelsOnly != nil {
 		sets = append(sets, "free_models_only = ?")
 		args = append(args, boolToInt(*patch.FreeModelsOnly))
@@ -134,10 +139,18 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 		// UI sent a form it did not fill in.
 		return fmt.Errorf("update provider %q: the patch names no fields", id)
 	}
+	where := `id = ?`
 	args = append(args, id)
+	if patch.Location != nil {
+		// A location is filled once. Checked in the write rather than by the
+		// caller alone: two patches can both read an empty location, and the
+		// second would otherwise move the first one's.
+		where += ` AND (location = '' OR location = ?)`
+		args = append(args, *patch.Location)
+	}
 
 	res, err := d.Write.ExecContext(ctx,
-		`UPDATE providers SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+		`UPDATE providers SET `+strings.Join(sets, ", ")+` WHERE `+where, args...)
 	if err != nil {
 		return fmt.Errorf("update provider %q: %w", id, err)
 	}
@@ -146,7 +159,13 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 		return fmt.Errorf("update provider %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("update provider %q: %w", id, ErrNotFound)
+		if patch.Location == nil {
+			return fmt.Errorf("update provider %q: %w", id, ErrNotFound)
+		}
+		if _, err := d.ProviderByID(ctx, id); err != nil {
+			return fmt.Errorf("update provider %q: %w", id, err)
+		}
+		return fmt.Errorf("update provider %q: %w", id, ErrLocationSet)
 	}
 	return nil
 }

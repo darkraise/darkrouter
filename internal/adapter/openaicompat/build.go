@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -188,7 +190,7 @@ func renderResponseFormat(rf *ir.ResponseFormat) map[string]any {
 		if name == "" {
 			name = "response"
 		}
-		schema := map[string]any{"name": name, "schema": rf.Schema}
+		schema := map[string]any{"name": name, "schema": xlate.JSONSchema(rf.Schema, rf.SchemaDialect)}
 		if rf.Strict != nil && *rf.Strict {
 			schema["strict"] = true
 		}
@@ -223,12 +225,20 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 		fn := map[string]any{
 			"name":        t.Name,
 			"description": t.Description,
-			"parameters":  t.Schema,
+			"parameters":  xlate.JSONSchema(t.Schema, t.SchemaDialect),
 		}
-		for k, v := range t.Extra {
-			if _, taken := fn[k]; !taken {
-				fn[k] = v
+		// strict is the one extra an OpenAI function defines. Anything else
+		// came from another dialect, such as Anthropic's cache_control, and
+		// a strict upstream rejects an unknown function field.
+		for _, k := range slices.Sorted(maps.Keys(t.Extra)) {
+			if k == "strict" {
+				fn[k] = t.Extra[k]
+				continue
 			}
+			warns = append(warns, ir.Warning{
+				Field: "tools[]." + k, Target: targetName,
+				Reason: "field has no equivalent in an OpenAI function definition; it was dropped",
+			})
 		}
 		out = append(out, map[string]any{"type": "function", "function": fn})
 	}

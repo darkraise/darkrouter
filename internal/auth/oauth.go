@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,12 +28,19 @@ type OAuthPresets interface {
 	OAuthFor(preset string) (OAuthConfig, bool)
 }
 
-// TokenStore persists a refreshed credential. It is the narrow half of *store.DB
-// this package needs, which keeps auth from importing store.
+// TokenStore reads and persists a credential's stored secret. It is the narrow
+// half of *store.DB this package needs, which keeps auth from importing store.
 type TokenStore interface {
-	ReplaceCredentialSecret(ctx context.Context, id, secret string, expiresAt *int64) error
-	DisableCredential(ctx context.Context, id, reason string) error
+	CredentialSecret(ctx context.Context, id string) (string, error)
+	// ReplaceCredentialSecret and DisableCredential write only while the row
+	// still holds prev, and otherwise fail with ErrCredentialChanged.
+	ReplaceCredentialSecret(ctx context.Context, id, prev, secret string, expiresAt *int64) error
+	DisableCredential(ctx context.Context, id, prev, reason string) error
 }
+
+// ErrCredentialChanged reports a stored credential that no longer holds the
+// secret a write was derived from: it was replaced or deleted meanwhile.
+var ErrCredentialChanged = errors.New("the credential was changed while it was in use")
 
 // ErrNeedsReconnect marks a terminal refusal. The credential is disabled and no
 // retry follows: hammering a refused refresh endpoint is how an account gets
@@ -91,7 +99,11 @@ type wireToken struct {
 // tokenClient is what a caller that supplies none gets. Not http.DefaultClient:
 // that has no timeout, so a token endpoint which accepts the connection and
 // then says nothing hangs any call path whose context carries no deadline.
-var tokenClient = &http.Client{Timeout: 30 * time.Second}
+var tokenClient = &http.Client{Timeout: tokenTimeout}
+
+// tokenTimeout bounds one token exchange, and the renewal that carries one on
+// no caller's context.
+const tokenTimeout = 30 * time.Second
 
 func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Values) (Token, error) {
 	if c == nil {
@@ -121,16 +133,30 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 
 	var w wireToken
 	// A body that is not JSON is still a failure worth reporting by status.
-	_ = json.Unmarshal(raw, &w)
+	decodeErr := json.Unmarshal(raw, &w)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if terminal(resp.StatusCode, w.Error) {
-			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
+		// Whether the body is a JSON object at all, not whether it fits
+		// wireToken: Anthropic refuses with "error" as an object, which fails
+		// the decode above and is still the vendor speaking. A page that is
+		// not JSON came from something in the way.
+		var obj map[string]json.RawMessage
+		// null decodes into a map without error and leaves it nil.
+		fromVendor := json.Unmarshal(raw, &obj) == nil && obj != nil
+		if terminal(resp.StatusCode, w.Error, fromVendor) {
+			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(raw))
 		}
-		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(w))
+		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(raw))
 	}
-	if w.AccessToken == "" {
-		return Token{}, fmt.Errorf("%w: the token endpoint returned no access token", ErrNeedsReconnect)
+	if decodeErr != nil || w.AccessToken == "" {
+		// A success status with no token in it is a page from something in
+		// the way — a captive portal, a CDN, a truncated read — rather than
+		// the provider refusing this credential. Only an explicit refusal
+		// code is evidence enough to disable an account.
+		if decodeErr == nil && terminal(0, w.Error, true) {
+			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(raw))
+		}
+		return Token{}, fmt.Errorf("token endpoint returned %s with no usable token", resp.Status)
 	}
 
 	tok := Token{
@@ -152,24 +178,45 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 // this wrong is bad in both directions: a transient 500 treated as terminal
 // turns a five-minute outage into a manual reconnection, and a terminal refusal
 // treated as transient hammers the endpoint until the account locks.
-func terminal(status int, code string) bool {
+func terminal(status int, code string, jsonBody bool) bool {
 	switch code {
 	case "invalid_grant", "invalid_client", "unauthorized_client", "invalid_scope":
 		return true
 	}
-	// A bare 400 or 401 with no recognizable code is still a refusal of this
-	// credential rather than an outage.
-	return status == http.StatusBadRequest || status == http.StatusUnauthorized
+	// A 400 or 401 with no recognizable code is still a refusal of this
+	// credential rather than an outage, provided the vendor sent it. One whose
+	// body is not JSON is a WAF or proxy page, which says nothing about the
+	// credential.
+	return jsonBody && (status == http.StatusBadRequest || status == http.StatusUnauthorized)
 }
 
 // describe renders the provider's own words without any token material: the
-// error code and description are the useful half of the body.
-func describe(w wireToken) string {
+// error code and description are the useful half of the body. It reads the
+// raw body rather than wireToken because Anthropic sends "error" as an object
+// of its API error shape, which wireToken's string field cannot hold.
+func describe(raw []byte) string {
+	var body struct {
+		Error            json.RawMessage `json:"error"`
+		ErrorDescription string          `json:"error_description"`
+	}
+	_ = json.Unmarshal(raw, &body)
+	code, detail := "", body.ErrorDescription
+	if json.Unmarshal(body.Error, &code) != nil {
+		var obj struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body.Error, &obj) == nil {
+			code, detail = obj.Type, obj.Message
+		}
+	}
 	switch {
-	case w.Error != "" && w.ErrorDescription != "":
-		return w.Error + ": " + w.ErrorDescription
-	case w.Error != "":
-		return w.Error
+	case code != "" && detail != "":
+		return code + ": " + detail
+	case code != "":
+		return code
+	case detail != "":
+		return detail
 	}
 	return "no error detail"
 }
@@ -179,25 +226,50 @@ func describe(w wireToken) string {
 // — and the credential probe takes the same mutex, spec §5.2, because it goes
 // through this same path rather than a private one.
 type oauthAccount struct {
-	mu  sync.Mutex
+	mu  waitMutex
 	tok Token
+	// secret is the stored value tok was read from or last persisted as. A
+	// write from this account lands only while the row still holds it.
+	secret string
+	// unpersisted marks a tok the vendor issued that the store has not yet
+	// accepted. The predecessor in the row may already be dead at the vendor,
+	// so tok is kept and its write retried rather than read back over.
+	unpersisted bool
 	// dead marks a credential whose refresh was terminally refused. Checked
 	// before the endpoint is called again, so "no retries" holds within the
 	// process as well as across ticks.
 	dead bool
+	// stale makes the next caller re-read tok from the store before using it.
+	// Atomic so Forget can set it without waiting out a refresh in flight.
+	stale atomic.Bool
 }
 
-// Forget drops the cached state for one credential.
+// Forget discards what the manager derived from one credential's secret.
 //
 // The cache is keyed on credential id, and both halves of what it holds are
 // derived from a secret that can be replaced underneath it: the access token,
 // which would otherwise go on being presented after a rotation, and the dead
 // mark, which is process-lifetime and would otherwise outlive the credential
 // that earned it. A no-op for a credential never seen.
+//
+// With a store, the account is kept and re-read from its row instead of being
+// dropped. Dropping it let a request still holding the previous provider
+// snapshot build a second account from that snapshot's secret, which can
+// predate a persisted refresh and so name a refresh token the vendor has
+// already rotated away, and let two accounts refresh one grant under two
+// mutexes.
 func (m *Manager) Forget(credID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.oauth, credID)
+	acct, ok := m.oauth[credID]
+	if !ok {
+		return
+	}
+	if m.deps.Tokens == nil {
+		delete(m.oauth, credID)
+		return
+	}
+	acct.stale.Store(true)
 }
 
 func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authorizer, error) {
@@ -216,7 +288,10 @@ func (m *Manager) oauthFor(ctx context.Context, t Target, c Credential) (Authori
 	m.mu.Lock()
 	acct, ok := m.oauth[c.ID]
 	if !ok {
-		acct = &oauthAccount{tok: tok}
+		acct = &oauthAccount{mu: newWaitMutex(), tok: tok, secret: c.Secret}
+		// The row, not the snapshot the caller resolved from, is where a
+		// refreshed pair lives: persisting one does not reload the router.
+		acct.stale.Store(m.deps.Tokens != nil)
 		m.oauth[c.ID] = acct
 	}
 	m.mu.Unlock()
@@ -257,9 +332,44 @@ func mergeBeta(existing []string, beta string) string {
 func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	cfg OAuthConfig, credID string) (string, error) {
 
-	acct.mu.Lock()
-	defer acct.mu.Unlock()
+	if err := acct.mu.lock(ctx); err != nil {
+		return "", err
+	}
+	if !acct.stale.Load() && !acct.unpersisted && !acct.dead && acct.tok.AccessToken != "" &&
+		!acct.tok.Expired(time.Now(), DefaultRefreshDelta) {
+		header := acct.tok.Header()
+		acct.mu.unlock()
+		return header, nil
+	}
+	return detach(ctx, func(ctx context.Context) (string, error) {
+		defer acct.mu.unlock()
+		return m.renew(ctx, acct, cfg, credID)
+	})
+}
 
+// renew brings the account's pair up to date: it retries an unpersisted
+// write, re-reads a stale row, and refreshes an expiring token. Called with
+// the account mutex held, on a context no single caller can cancel.
+func (m *Manager) renew(ctx context.Context, acct *oauthAccount,
+	cfg OAuthConfig, credID string) (string, error) {
+
+	if acct.unpersisted {
+		err := m.persist(ctx, acct, credID, acct.tok)
+		acct.unpersisted = err != nil && !errors.Is(err, ErrCredentialChanged)
+		// An operator changed the row since the rotation, and until the write
+		// lands there is no telling whether the change was a disable, a
+		// delete or a replacement. The rotation is kept for the retry, which
+		// the row's compare-and-swap settles, but it does not serve meanwhile.
+		if acct.unpersisted && acct.stale.Load() {
+			return "", fmt.Errorf("credential %s was changed and its refreshed token is not yet saved: %w",
+				credID, err)
+		}
+	}
+	if acct.stale.Load() && !acct.unpersisted {
+		if err := m.reload(ctx, acct, credID); err != nil {
+			return "", err
+		}
+	}
 	if acct.dead {
 		return "", fmt.Errorf("%w: credential %s", ErrNeedsReconnect, credID)
 	}
@@ -267,16 +377,14 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 		return acct.tok.Header(), nil
 	}
 	if acct.tok.RefreshToken == "" {
-		acct.dead = true
-		m.disable(ctx, credID)
-		return "", fmt.Errorf("%w: credential %s has no refresh token", ErrNeedsReconnect, credID)
+		return "", m.refuse(ctx, acct, credID,
+			fmt.Errorf("%w: credential %s has no refresh token", ErrNeedsReconnect, credID))
 	}
 
 	next, err := refreshToken(ctx, m.deps.HTTP, cfg, acct.tok.RefreshToken)
 	if err != nil {
 		if errors.Is(err, ErrNeedsReconnect) {
-			acct.dead = true
-			m.disable(ctx, credID)
+			return "", m.refuse(ctx, acct, credID, err)
 		}
 		// A transient failure leaves the stored pair alone: the old refresh
 		// token is still the only one that exists.
@@ -297,14 +405,43 @@ func (m *Manager) accessToken(ctx context.Context, acct *oauthAccount,
 	// Persisted BEFORE the in-memory pair is replaced. A crash between the two
 	// then loses a refresh rather than the account: the durable row already
 	// names the token the vendor now expects.
-	if err := m.persist(ctx, credID, next); err != nil {
+	err = m.persist(ctx, acct, credID, next)
+	if errors.Is(err, ErrCredentialChanged) {
+		// The pair just minted descends from a secret the row no longer
+		// holds. It is dropped, and the next caller reads the row.
+		acct.unpersisted = false
 		return "", err
 	}
-	acct.tok = next
+	if err != nil {
+		// The vendor accepted the refresh, so the new pair is the only one
+		// known to work: the one in the row may already be dead. It serves,
+		// and the write is retried on the next call.
+		slog.Error("oauth refresh could not be persisted; retrying on next use",
+			"credential", credID, "err", err)
+	}
+	acct.tok, acct.unpersisted = next, err != nil
 	return next.Header(), nil
 }
 
-func (m *Manager) persist(ctx context.Context, credID string, tok Token) error {
+// reload replaces the account's pair with what its row holds now.
+func (m *Manager) reload(ctx context.Context, acct *oauthAccount, credID string) error {
+	// Cleared before the read, so a Forget that lands during it is not lost.
+	acct.stale.Store(false)
+	secret, err := m.deps.Tokens.CredentialSecret(ctx, credID)
+	if err == nil {
+		var tok Token
+		if tok, err = ParseToken([]byte(secret)); err == nil {
+			acct.tok, acct.secret, acct.dead = tok, secret, false
+			return nil
+		}
+	}
+	acct.stale.Store(true)
+	return fmt.Errorf("load credential %s: %w", credID, err)
+}
+
+// persist writes tok over the secret the account's pair descends from, and on
+// success records it as that secret. Called with the account mutex held.
+func (m *Manager) persist(ctx context.Context, acct *oauthAccount, credID string, tok Token) error {
 	if m.deps.Tokens == nil {
 		return nil
 	}
@@ -312,18 +449,29 @@ func (m *Manager) persist(ctx context.Context, credID string, tok Token) error {
 	if err != nil {
 		return err
 	}
-	// WithoutCancel: this runs on a request's context, and a client that hangs
-	// up mid-refresh must not leave the rotated pair unpersisted.
-	if err := m.deps.Tokens.ReplaceCredentialSecret(
-		context.WithoutCancel(ctx), credID, string(raw), tok.Unix()); err != nil {
-		return fmt.Errorf("persist refreshed credential: %w", err)
+	err = m.deps.Tokens.ReplaceCredentialSecret(ctx, credID, acct.secret, string(raw), tok.Unix())
+	if err == nil {
+		acct.secret = string(raw)
+		return nil
 	}
-	return nil
+	if errors.Is(err, ErrCredentialChanged) {
+		acct.stale.Store(true)
+	}
+	return fmt.Errorf("persist refreshed credential: %w", err)
 }
 
-func (m *Manager) disable(ctx context.Context, credID string) {
-	if m.deps.Tokens == nil {
-		return
+// refuse records a terminal refusal: the account stops calling the endpoint
+// and the credential is disabled pending reconnection — unless the row has
+// moved on from the secret that was refused, which makes the refusal
+// meaningless for what the row now holds.
+func (m *Manager) refuse(ctx context.Context, acct *oauthAccount, credID string, cause error) error {
+	if m.deps.Tokens != nil {
+		err := m.deps.Tokens.DisableCredential(ctx, credID, acct.secret, reconnectReason)
+		if errors.Is(err, ErrCredentialChanged) {
+			acct.stale.Store(true)
+			return fmt.Errorf("credential %s: %w", credID, err)
+		}
 	}
-	_ = m.deps.Tokens.DisableCredential(context.WithoutCancel(ctx), credID, reconnectReason)
+	acct.dead = true
+	return cause
 }

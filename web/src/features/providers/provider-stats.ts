@@ -1,19 +1,20 @@
 import type { BreakerEntry, DiscoveryHealthRow, Model, Provider, UsageRow } from "../../lib/api-types"
 
-/** Daily request totals for one provider, in day order so the sparkline's
- *  x-axis is time. Days the provider served nothing are absent from the
- *  rollup rather than zero, and dropping them would compress the shape. */
-export function requestsByDay(rows: UsageRow[], providerId: string): number[] {
+/** Daily request totals for one provider, one per entry of `days` so the
+ *  sparkline's x-axis is time. Days the provider served nothing are absent
+ *  from the rollup rather than zero, and dropping them would compress the
+ *  shape. */
+export function requestsByDay(rows: UsageRow[], providerId: string, days: string[]): number[] {
   const acc = new Map<string, number>()
   for (const row of rows) {
     if (row.key !== providerId) continue
     acc.set(row.day, (acc.get(row.day) ?? 0) + row.requests)
   }
-  return [...acc.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v)
+  return days.map((day) => acc.get(day) ?? 0)
 }
 
 export function totalRequests(rows: UsageRow[], providerId: string): number {
-  return requestsByDay(rows, providerId).reduce((n, v) => n + v, 0)
+  return rows.reduce((n, row) => (row.key === providerId ? n + row.requests : n), 0)
 }
 
 /** The models this provider serves. The catalog is one row per model listing

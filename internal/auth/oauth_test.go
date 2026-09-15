@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -66,29 +68,59 @@ func (a *authServer) count() int {
 	return a.refreshes
 }
 
-// memTokens is an in-memory TokenStore recording every persist.
+// memTokens is an in-memory TokenStore recording every persist. Its writes
+// compare and swap, as the store's do.
 type memTokens struct {
 	mu       sync.Mutex
 	secrets  map[string]string
 	writes   int
 	disabled map[string]string
+	// failWrites is how many upcoming secret writes fail as a database would.
+	failWrites int
 }
 
 func newMemTokens() *memTokens {
 	return &memTokens{secrets: map[string]string{}, disabled: map[string]string{}}
 }
 
-func (m *memTokens) ReplaceCredentialSecret(_ context.Context, id, secret string, _ *int64) error {
+// seed writes a row directly, as an operator's save or a first connect does.
+func (m *memTokens) seed(id, secret string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.secrets[id] = secret
+}
+
+func (m *memTokens) CredentialSecret(_ context.Context, id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.secrets[id]
+	if !ok {
+		return "", fmt.Errorf("%w: no credential %s", ErrCredentialChanged, id)
+	}
+	return s, nil
+}
+
+func (m *memTokens) ReplaceCredentialSecret(_ context.Context, id, prev, secret string, _ *int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failWrites > 0 {
+		m.failWrites--
+		return errors.New("database is locked")
+	}
+	if s, ok := m.secrets[id]; !ok || s != prev {
+		return fmt.Errorf("%w: credential %s", ErrCredentialChanged, id)
+	}
 	m.secrets[id] = secret
 	m.writes++
 	return nil
 }
 
-func (m *memTokens) DisableCredential(_ context.Context, id, reason string) error {
+func (m *memTokens) DisableCredential(_ context.Context, id, prev, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if s, ok := m.secrets[id]; !ok || s != prev {
+		return fmt.Errorf("%w: credential %s", ErrCredentialChanged, id)
+	}
 	m.disabled[id] = reason
 	return nil
 }
@@ -129,7 +161,19 @@ func expiring(t *testing.T, in time.Duration) string {
 	return string(raw)
 }
 
+// oauthAz resolves cred-1 from a snapshot carrying secret, after writing secret
+// to its row as well: the state right after a connect or an operator's save.
 func oauthAz(t *testing.T, m *Manager, secret string) Authorizer {
+	t.Helper()
+	if tokens, ok := m.deps.Tokens.(*memTokens); ok {
+		tokens.seed("cred-1", secret)
+	}
+	return resolveOAuth(t, m, secret)
+}
+
+// resolveOAuth resolves cred-1 from a snapshot carrying secret, leaving the row
+// alone: a request still holding a provider set older than the row.
+func resolveOAuth(t *testing.T, m *Manager, secret string) Authorizer {
 	t.Helper()
 	az, err := m.For(context.Background(),
 		Target{ProviderID: "sub", Style: StyleOAuth, Preset: "anthropic-oauth"},
@@ -193,6 +237,96 @@ func TestRotationIsPersistedBeforeTheOldPairIsDropped(t *testing.T) {
 	tokens.mu.Unlock()
 	if writes != 1 {
 		t.Errorf("persisted %d times, want exactly 1", writes)
+	}
+}
+
+// The vendor has rotated rt-0 to rt-1, and the database refuses the write. The
+// old refresh token is dead at the vendor, so presenting it again is a refusal
+// that disables an account nothing was wrong with.
+func TestARotationThatFailedToPersistIsNotDiscarded(t *testing.T) {
+	a, srv := newAuthServer(t)
+	// Inside the refresh delta, so every call refreshes.
+	a.expiresIn = 30
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+
+	r := blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if _, disabled := tokens.disabledReason("cred-1"); disabled {
+		t.Fatal("the credential was disabled: the rotated-away refresh token was presented again")
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-2" {
+		t.Errorf("Authorization = %q, want the second rotation's token", got)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-2" {
+		t.Errorf("stored refresh token = %q, want rt-2", stored.RefreshToken)
+	}
+}
+
+// A second rotation lands while the first is still unpersisted, and its own
+// write succeeds. That write covers the first, so nothing is left to retry.
+func TestARotationPersistedOverAnUnpersistedOneClearsIt(t *testing.T) {
+	a, srv := newAuthServer(t)
+	a.expiresIn = 30
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 2 // the first rotation's write and its retry
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	tokens.mu.Lock()
+	before := tokens.writes
+	tokens.mu.Unlock()
+
+	// at-2 is inside the delta too, so this refreshes once more; a stale
+	// retry of an already-covered pair would add a write of its own first.
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	tokens.mu.Lock()
+	after := tokens.writes
+	tokens.mu.Unlock()
+	if after-before != 1 {
+		t.Errorf("writes on the third call = %d, want 1", after-before)
+	}
+}
+
+// Nothing else writes the pair again once the database recovers, and a
+// restart would load the dead predecessor from the row.
+func TestAnUnpersistedRotationIsRetriedOnTheNextCall(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1
+	tokens.mu.Unlock()
+	_ = az(context.Background(), blank(t))
+
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-1" {
+		t.Errorf("stored refresh token = %q, want the rotation persisted on retry", stored.RefreshToken)
 	}
 }
 
@@ -262,16 +396,118 @@ func TestATransientFailureDoesNotDisable(t *testing.T) {
 	}
 }
 
+// A WAF or proxy in front of the token endpoint can answer 400 or 401 with a
+// page of its own. That is not the vendor refusing the credential.
+func TestARefusalStatusWithNoJSONBodyIsTransient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"400 html":  {http.StatusBadRequest, `<html><body>Request blocked</body></html>`},
+		"401 html":  {http.StatusUnauthorized, `<html><body>Unauthorized</body></html>`},
+		"401 empty": {http.StatusUnauthorized, ``},
+		// Valid JSON, but no vendor refuses with a bare null.
+		"400 null": {http.StatusBadRequest, `null`},
+		"401 null": {http.StatusUnauthorized, ` null `},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, srv := newAuthServer(t)
+			a.status, a.errBody = tc.status, tc.body
+			tokens := newMemTokens()
+			az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+			err := az(context.Background(), blank(t))
+			if err == nil {
+				t.Fatal("a failed refresh must be an error")
+			}
+			if errors.Is(err, ErrNeedsReconnect) {
+				t.Fatalf("error = %v; a body that is not JSON is not a refusal", err)
+			}
+			if _, disabled := tokens.disabledReason("cred-1"); disabled {
+				t.Error("a non-JSON 400/401 disabled the credential")
+			}
+		})
+	}
+}
+
+// Anthropic's token endpoint refuses in its API error shape, where "error" is
+// an object rather than an OAuth code string. The body is a live response
+// from 2026-09-15 to a refresh naming an unknown client id.
+func TestAVendorShapedRefusalStillDisables(t *testing.T) {
+	a, srv := newAuthServer(t)
+	a.status = http.StatusBadRequest
+	a.errBody = `{"type":"error","error":{"type":"invalid_request_error","message":"Client with id 00000000-0000-0000-0000-000000000000 not found"},"request_id":"req_011Cf4SsVBLtajXiNZ21v1XB"}`
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	err := az(context.Background(), blank(t))
+	if err == nil {
+		t.Fatal("a refused refresh must be an error")
+	}
+	if _, disabled := tokens.disabledReason("cred-1"); !disabled {
+		t.Error("a JSON 400 from the vendor must still disable the credential")
+	}
+	// The vendor's words are the only clue to what an operator must fix.
+	want := "invalid_request_error: Client with id 00000000-0000-0000-0000-000000000000 not found"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to carry %q", err, want)
+	}
+}
+
+// A captive portal or a CDN error page can answer 200 with HTML. That says
+// nothing about the credential, so it must not end in a disable that only a
+// manual reconnection undoes.
+func TestAMalformedSuccessResponseIsTransient(t *testing.T) {
+	for name, body := range map[string]string{
+		"html":      `<html><body>maintenance</body></html>`,
+		"truncated": `{"access_token":"at-`,
+		"no token":  `{"token_type":"Bearer"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = w.Write([]byte(body))
+			}))
+			t.Cleanup(srv.Close)
+			tokens := newMemTokens()
+			m := NewManager(Deps{
+				Tokens: tokens,
+				OAuth:  fixedPresets{cfg: OAuthConfig{TokenURL: srv.URL, ClientID: "client"}},
+				HTTP:   srv.Client(),
+			})
+			az := oauthAz(t, m, expiring(t, -time.Minute))
+
+			for i := 0; i < 2; i++ {
+				err := az(context.Background(), blank(t))
+				if err == nil {
+					t.Fatal("a response with no usable token must be an error")
+				}
+				if errors.Is(err, ErrNeedsReconnect) {
+					t.Fatalf("error = %v; a malformed response is not a refusal", err)
+				}
+			}
+			if _, disabled := tokens.disabledReason("cred-1"); disabled {
+				t.Error("a malformed token response disabled the credential")
+			}
+			if calls.Load() != 2 {
+				t.Errorf("token endpoint called %d times, want a retry on the second call", calls.Load())
+			}
+		})
+	}
+}
+
 func TestATransientFailureLeavesTheStoredPairAlone(t *testing.T) {
 	// The old refresh token is still the only one that exists. Overwriting it
 	// with nothing would brick the account on a five-minute outage.
 	a, srv := newAuthServer(t)
 	a.status, a.errBody = http.StatusInternalServerError, `{"error":"server_error"}`
 	tokens := newMemTokens()
-	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+	secret := expiring(t, -time.Minute)
+	az := oauthAz(t, oauthManager(t, srv, tokens), secret)
 
 	_ = az(context.Background(), blank(t))
-	if tokens.stored("cred-1") != "" {
+	if tokens.stored("cred-1") != secret {
 		t.Errorf("a transient failure wrote to the store: %q", tokens.stored("cred-1"))
 	}
 }
@@ -364,9 +600,11 @@ func TestTheWorkerRefreshesThroughTheSamePath(t *testing.T) {
 	a, srv := newAuthServer(t)
 	tokens := newMemTokens()
 	m := oauthManager(t, srv, tokens)
+	secret := expiring(t, time.Minute)
+	tokens.seed("cred-1", secret)
 	w := NewRefreshWorker(m, &expiringFake{rows: []StoredCredential{{
 		ID: "cred-1", ProviderID: "sub", Kind: "oauth",
-		Secret: expiring(t, time.Minute), Style: StyleOAuth, Preset: "anthropic-oauth",
+		Secret: secret, Style: StyleOAuth, Preset: "anthropic-oauth",
 	}}}, RefreshOptions{})
 
 	w.Once(context.Background())

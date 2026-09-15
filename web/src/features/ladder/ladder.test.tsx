@@ -117,3 +117,38 @@ describe("the marks read without colour", () => {
     }
   })
 })
+
+/** A class rule's declarations, without its comments. */
+function classRule(css: string, name: string): string {
+  const match = css.match(new RegExp(`(?:^|\\n)\\.${name}\\s*\\{([^}]*)\\}`))
+  return (match?.[1] ?? "").replace(/\/\*[\s\S]*?\*\//g, "")
+}
+
+describe("the ladder in a narrow panel or under a long reason", () => {
+  // A trace row carries the upstream error verbatim, and the trace drawer is
+  // full width on a phone. Rows sized to one line spill wrapped text over the
+  // rows below, and a target that cannot shrink pushes the row past its panel.
+  const testFile = fileURLToPath(import.meta.url)
+  const css = readFileSync(path.resolve(path.dirname(testFile), "../../styles/ladder.css"), "utf8")
+
+  it("lets a row grow past one line rather than fixing its height", () => {
+    const row = classRule(css, "ladder-row")
+    expect(row).not.toMatch(/(^|[\s;])height:/)
+    expect(row).toMatch(/min-height:\s*var\(--lad-row-h\)/)
+  })
+
+  it("scrolls inside its own border when a row is wider than the panel", () => {
+    // The target column is fixed, so a narrow panel cannot hold a row; the
+    // rows share one column as wide as the widest needs, and the ladder
+    // scrolls rather than letting rows spill past it.
+    const ladder = css.match(/\n\.ladder\s*\{([^}]*display:[^}]*)\}/)?.[1] ?? ""
+    expect(ladder).toMatch(/display:\s*grid/)
+    expect(ladder).toMatch(/grid-template-columns:\s*minmax\(min-content,\s*1fr\)/)
+    expect(ladder).toMatch(/overflow-x:\s*auto/)
+  })
+
+  it("keeps a reason wide enough to read, and breaks one with no spaces", () => {
+    expect(classRule(css, "reason")).toMatch(/min-width:\s*12rem/)
+    expect(classRule(css, "reason-prose")).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+})

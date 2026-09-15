@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -16,12 +18,25 @@ type tokenStore struct {
 	key *crypto.Key
 }
 
-func (t tokenStore) ReplaceCredentialSecret(ctx context.Context, id, secret string, expiresAt *int64) error {
-	return t.db.ReplaceCredentialSecret(ctx, t.key, id, secret, expiresAt)
+func (t tokenStore) CredentialSecret(ctx context.Context, id string) (string, error) {
+	secret, err := t.db.CredentialSecret(ctx, t.key, id)
+	return secret, changed(err)
 }
 
-func (t tokenStore) DisableCredential(ctx context.Context, id, reason string) error {
-	return t.db.DisableCredential(ctx, id, reason)
+func (t tokenStore) ReplaceCredentialSecret(ctx context.Context, id, prev, secret string, expiresAt *int64) error {
+	return changed(t.db.ReplaceCredentialSecret(ctx, t.key, id, prev, secret, expiresAt))
+}
+
+func (t tokenStore) DisableCredential(ctx context.Context, id, prev, reason string) error {
+	return changed(t.db.DisableCredential(ctx, t.key, id, prev, reason))
+}
+
+// changed translates the store's "the row moved on" sentinels into auth's.
+func changed(err error) error {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("%w: %w", auth.ErrCredentialChanged, err)
+	}
+	return err
 }
 
 // Expiring lists OAuth credentials due for renewal, joined to the provider row

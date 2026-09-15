@@ -706,3 +706,119 @@ func TestMigration23DropsTheSharedPasswordRows(t *testing.T) {
 		t.Errorf("shared password rows still present: %d", n)
 	}
 }
+
+func TestUpgradeMarksAnExistingTokenAsIssued(t *testing.T) {
+	// A database written before the marker existed: whether it has issued a
+	// token can only be read from the table itself.
+	for _, tc := range []struct {
+		name      string
+		withToken bool
+	}{{"a token exists", true}, {"no token was ever issued", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := openTest(t)
+			ms, err := loadMigrations()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Write.ExecContext(ctx,
+				`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Write.ExecContext(ctx,
+				`INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range ms {
+				if m.version > 23 {
+					continue
+				}
+				if err := db.applyMigration(ctx, m); err != nil {
+					t.Fatalf("apply %04d: %v", m.version, err)
+				}
+			}
+			if tc.withToken {
+				if _, err := db.Write.ExecContext(ctx,
+					`INSERT INTO proxy_tokens (id, name, prefix, hash, created_at)
+					 VALUES ('t', 'laptop', 'dr_abcdef', 'digest', 0)`); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := db.Migrate(ctx); err != nil {
+				t.Fatalf("upgrade from version 23: %v", err)
+			}
+
+			_, issued, err := db.GetSetting(ctx, "proxy_tokens.issued")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issued != tc.withToken {
+				t.Errorf("issued marker present = %v, want %v", issued, tc.withToken)
+			}
+		})
+	}
+}
+
+func TestUpgradeClearsTheVertexURLThePresetShippedByMistake(t *testing.T) {
+	// Providers copy the preset's base URL into their row when created, so a
+	// Vertex row made while the preset carried the truncated URL keeps it, and
+	// the adapter prefers any row URL over the one it builds from project and
+	// location.
+	ctx := context.Background()
+	db := openTest(t)
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Write.ExecContext(ctx, `INSERT INTO schema_version (version) VALUES (0)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version > 24 {
+			continue
+		}
+		if err := db.applyMigration(ctx, m); err != nil {
+			t.Fatalf("apply %04d: %v", m.version, err)
+		}
+	}
+	const shipped = "https://us-central1-aiplatform.googleapis.com/v1/projects"
+	rows := map[string][2]string{
+		"from-preset":   {"vertex", shipped},
+		"operator-url":  {"vertex", "https://europe-west4-aiplatform.googleapis.com/v1/projects/p/locations/europe-west4"},
+		"other-kind":    {"openaicompat", shipped},
+		"already-empty": {"vertex", ""},
+	}
+	for id, r := range rows {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO providers (id, kind, base_url, created_at) VALUES (?, ?, ?, 0)`,
+			id, r[0], r[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("upgrade from version 24: %v", err)
+	}
+
+	want := map[string]string{
+		"from-preset":   "",
+		"operator-url":  rows["operator-url"][1],
+		"other-kind":    shipped,
+		"already-empty": "",
+	}
+	for id, w := range want {
+		var got string
+		if err := db.Read.QueryRowContext(ctx,
+			`SELECT base_url FROM providers WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != w {
+			t.Errorf("%s: base_url = %q, want %q", id, got, w)
+		}
+	}
+}

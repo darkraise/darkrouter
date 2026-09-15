@@ -13,6 +13,7 @@ import {
   PasswordInput,
   PasswordInputControl,
   PasswordInputField,
+  toast,
 } from "darkraise-ui"
 import { useQueryClient } from "@tanstack/react-query"
 import { api } from "../../lib/api"
@@ -36,10 +37,12 @@ import { addLocalRuntime, testLocalRuntime, type LocalOutcome } from "./local-ad
 const CONTAINER_HOST = "host.docker.internal"
 
 function outcomeMessage(o: LocalOutcome): string {
-  if (!o.ok) return o.error
-  return o.modelCount === undefined
-    ? "The endpoint answered."
-    : `The endpoint answered with ${o.modelCount} models.`
+  const message = !o.ok
+    ? o.error
+    : o.modelCount === undefined
+      ? "The endpoint answered."
+      : `The endpoint answered with ${o.modelCount} models.`
+  return o.leftBehind ? `${message} ${o.leftBehind}` : message
 }
 
 /**
@@ -140,7 +143,13 @@ export function AddLocalDialog({
     // Both paths create and may delete a provider, so the list is stale
     // either way — including after a rollback, which removed one.
     void queryClient.invalidateQueries({ queryKey: keys.providers })
-    if (action === "add" && result.ok) onDone(selected.id)
+    if (action === "add" && result.ok) {
+      // The dialog closes on success, so the outcome line would never be read.
+      if (result.routingNotUpdated) {
+        toast.warning(`${selected.name} added, but not yet in use: ${result.routingNotUpdated}`)
+      }
+      onDone(selected.id)
+    }
   }
 
   return (

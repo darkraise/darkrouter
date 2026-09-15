@@ -2,6 +2,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -197,14 +198,15 @@ func ParseRequest(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthroug
 
 // parseTool reads one tools[] entry. A typed entry is a provider-run tool and
 // is carried whole; a plain one keeps its cache_control marker, which the IR
-// has no field for, in Extra.
+// has no field for, in Extra. Type "custom" is Anthropic's explicit name for a
+// plain client function, so it is not a typed entry.
 func parseTool(raw json.RawMessage) (ir.Tool, error) {
 	var t wireTool
 	if err := json.Unmarshal(raw, &t); err != nil {
 		return ir.Tool{}, fmt.Errorf("invalid tool: %w", err)
 	}
 	tool := ir.Tool{Name: t.Name, Description: t.Description, Schema: t.InputSchema}
-	if t.Type != "" {
+	if t.Type != "" && t.Type != "custom" {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			return ir.Tool{}, fmt.Errorf("invalid tool: %w", err)
@@ -290,5 +292,9 @@ func sourceToMedia(s *wireSource) *ir.Media {
 	if s == nil {
 		return nil
 	}
-	return &ir.Media{MIME: s.MediaType, Data: s.Data, URL: s.URL, FileID: s.FileID}
+	data := s.Data
+	if s.Type == "text" {
+		data = base64.StdEncoding.EncodeToString([]byte(s.Data))
+	}
+	return &ir.Media{MIME: s.MediaType, Data: data, URL: s.URL, FileID: s.FileID}
 }

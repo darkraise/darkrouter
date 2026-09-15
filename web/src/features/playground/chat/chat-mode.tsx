@@ -16,7 +16,7 @@ import {
 } from "../lib/conversations"
 import { useChatRun, type CompletedTurn } from "../lib/use-chat-run"
 import { emptyConfig, type PlaygroundConfig } from "../config"
-import { parseTools, seedFromTrace } from "../lib/request"
+import { requestProblem, seedFromTrace } from "../lib/request"
 import { ConfigPane } from "../config-pane/config-pane"
 import { NO_METRICS, type StreamMetrics } from "../metrics"
 import { TokenPanel, consumptionOf } from "../token-panel"
@@ -25,6 +25,7 @@ import { Composer } from "../composer"
 import { HistoryRail } from "./history-rail"
 import { ConversationHeader } from "./conversation-header"
 import { NewConversationDialog } from "./new-conversation-dialog"
+import { ApiError } from "../../../lib/api"
 import type {
   PlaygroundConversation,
   PlaygroundConversationDetail,
@@ -64,6 +65,37 @@ import { PanelLeft } from "lucide-react"
 /** The name a conversation carries until it has one. Anything else in the
  *  field is the operator's own, and outranks a title derived from the prompt. */
 const UNTITLED = "New chat"
+
+/** The thread an exchange was sent from, as of the render that sent it. */
+type ExchangeOwner = { id: string; selection: number; title: string; config: PlaygroundConfig }
+
+type PendingExchange = {
+  turn: CompletedTurn
+  owner: ExchangeOwner
+  /** The conversation it is stored in, once one exists. */
+  id: string
+  /** Set once the question is stored, so a retry sends only the answer. */
+  userSeq: number | null
+  /** Its last save failed in a way that may pass on retry. */
+  failed: boolean
+}
+
+/** Exchanges of one thread share a key before and after its conversation is
+ *  created, so one still waiting on the create cannot jump ahead of one that
+ *  already has the id. */
+function queueOf(exchange: PendingExchange): string {
+  return exchange.id !== "" ? exchange.id : `selection:${exchange.owner.selection}`
+}
+
+/** A held exchange, as the banner needs to describe it. */
+type HeldExchange = { id: string; selection: number; failed: boolean; questionStored: boolean }
+
+/** A network failure, a server fault, a timeout or a rate limit can pass on a
+ *  later try; any other refusal answers the same way every time. */
+function mayPassOnRetry(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return true
+  return err.status >= 500 || err.status === 408 || err.status === 429
+}
 
 export function ChatMode({ active = true }: { active?: boolean }) {
   const [config, setConfig] = useState<PlaygroundConfig>(emptyConfig)
@@ -114,31 +146,150 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // The create is memoized on its own promise rather than on the id it
   // resolves to: two exchanges completing while the first create is still in
   // flight would both read an empty conversationRef and make two
-  // conversations for one thread.
-  const creating = useRef<Promise<PlaygroundConversation> | null>(null)
+  // conversations for one thread. Keyed by selection, because a thread left
+  // mid-answer still creates its conversation after the next thread has
+  // started, and that create is not the next thread's.
+  const creating = useRef(new Map<number, Promise<PlaygroundConversation>>())
+  // What each selection's create resolved to. An exchange sent before the id
+  // arrived and finished after it would otherwise queue under the selection
+  // while its thread's earlier exchanges queue under the id, and could be
+  // saved past one of them that is held.
+  const createdIds = useRef(new Map<number, string>())
   // Changes whenever the operator chooses which conversation owns the
   // screen. A create may still finish after that choice; it should persist
   // the completed turn, but it must not move the screen back to the thread it
   // created.
   const selectionGeneration = useRef(0)
+  // The same count as of the render a send starts from, which is the thread
+  // its turn belongs to however far the ref has moved on by the time it ends.
+  const [selection, setSelection] = useState(0)
 
-  async function persistTurn(turn: CompletedTurn, ownerId: string) {
+  // Every completed exchange, oldest first, until it is stored whole. One
+  // drain saves them one exchange at a time: seq is assigned in arrival
+  // order and an exchange is two writes, so saving per write let a second
+  // exchange's question land between the first one's question and answer.
+  // An exchange records how far it got, so a retry resumes rather than
+  // storing its question twice.
+  const backlog = useRef<PendingExchange[]>([])
+  const draining = useRef(false)
+  // A drain asked for while one runs starts another pass once it ends rather
+  // than being dropped.
+  const drainAgain = useRef(false)
+  // What is held, as of the last drain. Later exchanges of a conversation wait
+  // behind one of its failed ones, because saving past it would scramble the
+  // order too; other conversations' exchanges do not.
+  const [unsaved, setUnsaved] = useState<HeldExchange[]>([])
+
+  function publishBacklog() {
+    setUnsaved(
+      backlog.current.map((exchange) => ({
+        id: exchange.id,
+        selection: exchange.owner.selection,
+        failed: exchange.failed,
+        questionStored: exchange.userSeq !== null,
+      })),
+    )
+  }
+
+  function persistTurn(turn: CompletedTurn, owner: ExchangeOwner) {
+    const id = owner.id || (createdIds.current.get(owner.selection) ?? "")
+    backlog.current.push({ turn, owner, id, userSeq: null, failed: false })
+    void drain()
+  }
+
+  async function drain() {
+    if (draining.current) {
+      drainAgain.current = true
+      return
+    }
+    draining.current = true
+    try {
+      for (;;) {
+        // A failed exchange keeps its conversation held until the operator
+        // retries or discards it. Any drain may start a pass -- another
+        // conversation's exchange finishing does -- and retrying on that
+        // would repeat a failing request and its error toast each time.
+        const blocked = new Set(backlog.current.filter((e) => e.failed).map(queueOf))
+        const next = backlog.current.find((exchange) => !blocked.has(queueOf(exchange)))
+        if (next === undefined) {
+          if (!drainAgain.current) break
+          drainAgain.current = false
+          continue
+        }
+        next.failed = false
+        try {
+          await saveExchange(next)
+        } catch (err) {
+          // useApiMutation has already reported it through the toaster.
+          // Losing a saved turn must not take the transcript on screen down
+          // with it. A refusal -- saving switched off, the conversation
+          // deleted -- will refuse again, so only a failure that can pass is
+          // held for another try.
+          if (mayPassOnRetry(err)) {
+            next.failed = true
+            continue
+          }
+        }
+        backlog.current = backlog.current.filter((exchange) => exchange !== next)
+      }
+    } finally {
+      draining.current = false
+      publishBacklog()
+    }
+  }
+
+  function retryFailed() {
+    for (const exchange of backlog.current) exchange.failed = false
+    void drain()
+  }
+
+  // Only exchanges whose last save failed: one mid-save has failed cleared,
+  // and one merely waiting behind a failure was never tried. One whose
+  // question is stored stays, since there is no way to remove that question
+  // and dropping the answer would leave the next question straight after it.
+  function discardFailed() {
+    backlog.current = backlog.current.filter(
+      (exchange) =>
+        !(exchange.failed && exchange.userSeq === null && onScreen(exchange.id, exchange.owner.selection)),
+    )
+    publishBacklog()
+    void drain()
+  }
+
+  /** Whether an exchange belongs to the conversation the screen shows. */
+  function onScreen(id: string, owner: number): boolean {
+    return id !== "" ? id === activeId : owner === selection
+  }
+
+  async function saveExchange(exchange: PendingExchange) {
+    const { turn, owner } = exchange
     try {
       // Ownership is captured by the render that starts the request. Reading
       // conversationRef here would file a slow answer under whichever thread
       // the operator selected while it was still streaming.
-      let id = ownerId
+      let id = exchange.id
       if (id === "") {
-        if (creating.current === null) {
-          creating.current = create.mutateAsync({
-            title: titleRef.current === UNTITLED ? titleFromPrompt(turn.prompt) : titleRef.current,
-            config: configRef.current,
+        let pending = creating.current.get(owner.selection)
+        if (pending === undefined) {
+          // The refs carry a rename made while the answer streamed, but once
+          // another thread has been chosen they hold that thread's title and
+          // settings instead.
+          const onScreen = selectionGeneration.current === owner.selection
+          const title = onScreen ? titleRef.current : owner.title
+          pending = create.mutateAsync({
+            title: title === UNTITLED ? titleFromPrompt(turn.prompt) : title,
+            config: onScreen ? configRef.current : owner.config,
           })
+          creating.current.set(owner.selection, pending)
         }
-        const createGeneration = selectionGeneration.current
-        const made = await creating.current
+        const made = await pending
         id = made.id
-        if (selectionGeneration.current === createGeneration) {
+        createdIds.current.set(owner.selection, id)
+        for (const waiting of backlog.current) {
+          if (waiting.id === "" && waiting.owner.selection === owner.selection) waiting.id = id
+        }
+        exchange.id = id
+        if (selectionGeneration.current === owner.selection) {
           conversationRef.current = id
           setActiveId(id)
           // Marked loaded at creation, so the read below does not fetch the row
@@ -147,9 +298,13 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           setTitle(made.title)
         }
       }
-      const user = await append.mutateAsync({
-        id, role: "user", content: turn.prompt, requestId: "",
-      })
+      if (exchange.userSeq === null) {
+        const user = await append.mutateAsync({
+          id, role: "user", content: turn.prompt, requestId: "",
+        })
+        exchange.userSeq = user.seq
+      }
+      const userSeq = exchange.userSeq
       const assistant = await append.mutateAsync({
         id, role: "assistant", content: turn.answer, requestId: turn.requestId,
       })
@@ -167,7 +322,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
             preview: turn.prompt,
             messages: [
               ...old.messages,
-              { seq: user.seq, role: "user", content: turn.prompt, request_id: "", created_at: at },
+              { seq: userSeq, role: "user", content: turn.prompt, request_id: "", created_at: at },
               {
                 seq: assistant.seq,
                 role: "assistant",
@@ -179,16 +334,19 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           },
       )
       void queryClient.invalidateQueries({ queryKey: keys.playgroundConversation(id) })
-    } catch {
-      // useApiMutation has already reported it through the toaster. Losing a
-      // saved turn must not take the transcript on screen down with it.
+    } catch (err) {
       // Cleared so a failed create does not make every later send await the
       // same rejected promise.
-      creating.current = null
+      if (exchange.id === "") creating.current.delete(owner.selection)
+      throw err
     }
   }
 
-  const run = useChatRun(config, setMetrics, (turn) => void persistTurn(turn, activeId))
+  const run = useChatRun(
+    config,
+    setMetrics,
+    (turn) => persistTurn(turn, { id: activeId, selection, title, config }),
+  )
 
   useEffect(() => {
     if (!active) run.stop()
@@ -200,8 +358,9 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   // What fixes the settings is a turn existing, not the send that made it:
   // a conversation reopened from the rail has turns and no send behind it,
-  // and its settings are every bit as committed to.
-  const locked = run.messages.length > 0
+  // and its settings are every bit as committed to. A send that ended with
+  // nothing said is on screen but in no conversation, so it fixes nothing.
+  const locked = run.history.length > 0
 
   // The trace drawer's "Open in playground" arrives as ?seed=. It carried
   // its model and dialect into Lab's request pane, which is this screen now.
@@ -257,13 +416,13 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   function startNew() {
     selectionGeneration.current += 1
+    setSelection(selectionGeneration.current)
     // Seeded from the conversation being left rather than from the defaults:
     // the model an operator has been working with is almost always the one
     // they want next, and every value it carries is on screen in the dialog
     // rather than inherited invisibly. Cancel takes none of it.
     setSettingsSeed(config)
     conversationRef.current = ""
-    creating.current = null
     setActiveId("")
     setLoadedId("")
     setTitle(UNTITLED)
@@ -291,6 +450,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   function select(id: string) {
     if (id === activeId) return
     selectionGeneration.current += 1
+    setSelection(selectionGeneration.current)
     conversationRef.current = id
     setActiveId(id)
   }
@@ -317,6 +477,10 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   function removeConversation(c: PlaygroundConversation) {
     remove.mutate({ id: c.id, title: c.title })
+    // Its held exchanges have nowhere left to be saved, and the banner names
+    // deleting the conversation as the way to be rid of them.
+    backlog.current = backlog.current.filter((exchange) => exchange.id !== c.id)
+    publishBacklog()
     if (c.id === conversationRef.current) startNew()
   }
 
@@ -356,6 +520,14 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           <p role="alert" className="text-sm text-[hsl(var(--destructive))]">
             Could not load the selected conversation. Select another conversation and try again.
           </p>
+        ) : null}
+        {unsaved.length > 0 ? (
+          <UnsavedBanner
+            held={unsaved}
+            onScreen={onScreen}
+            onRetry={retryFailed}
+            onDiscard={discardFailed}
+          />
         ) : null}
         <ConversationHeader
           config={config}
@@ -405,7 +577,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
                     model={config.model}
                     busy={run.busy}
                     error={run.error}
-                    toolsError={parseTools(config.toolsRaw).error}
+                    problem={requestProblem(config)}
                     disabled={selectionPending}
                     onSend={(p) => void run.send(p)}
                     onStop={run.stop}
@@ -479,5 +651,64 @@ export function ChatMode({ active = true }: { active?: boolean }) {
         </SheetContent>
       </Sheet>
     </>
+  )
+}
+
+function UnsavedBanner({
+  held,
+  onScreen,
+  onRetry,
+  onDiscard,
+}: {
+  held: HeldExchange[]
+  onScreen: (id: string, selection: number) => boolean
+  onRetry: () => void
+  onDiscard: () => void
+}) {
+  const count = held.length
+  const elsewhere = held.filter((h) => !onScreen(h.id, h.selection)).length
+  const here = held.filter((h) => h.failed && onScreen(h.id, h.selection))
+  const discardable = here.filter((h) => !h.questionStored).length
+  const answerOnly = here.length - discardable
+
+  const sentences = [
+    count === 1
+      ? "1 exchange was not saved. Newer exchanges in its conversation wait for it, so the stored conversation keeps the order they were sent in."
+      : `${count} exchanges were not saved. Newer exchanges in the same conversation wait for them, so the stored conversation keeps the order they were sent in.`,
+  ]
+  if (elsewhere > 0) {
+    sentences.push(
+      count === 1
+        ? "It is in another conversation."
+        : elsewhere === 1
+          ? "1 of them is in another conversation."
+          : `${elsewhere} of them are in other conversations.`,
+    )
+  }
+  if (discardable > 0) {
+    sentences.push(
+      "Discard drops this conversation's failed exchanges that have nothing stored yet: they stay on screen but out of the stored conversation.",
+    )
+  }
+  if (answerOnly > 0) {
+    sentences.push(
+      answerOnly === 1
+        ? "One exchange here cannot be discarded because its question is already stored: retrying saves its answer, and deleting the conversation removes both."
+        : `${answerOnly} exchanges here cannot be discarded because their question is already stored: retrying saves their answers, and deleting the conversation removes them.`,
+    )
+  }
+
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2">
+      <p className="text-sm text-[hsl(var(--destructive))]">{sentences.join(" ")}</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Retry saving
+      </Button>
+      {discardable > 0 ? (
+        <Button variant="outline" size="sm" onClick={onDiscard}>
+          Discard
+        </Button>
+      ) : null}
+    </div>
   )
 }

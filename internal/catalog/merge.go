@@ -16,6 +16,9 @@ type MergeInput struct {
 	Presets   Presets
 	Doc       Doc
 	LiteLLM   LiteLLMDoc
+	// Free is the curated free-tier catalogue. Empty means the one embedded at
+	// build time.
+	Free      FreeCatalog
 	Rows      []store.ModelRow
 	Overrides []store.ModelOverride
 }
@@ -36,6 +39,11 @@ func Merge(in MergeInput) []Model {
 		overrides[[2]string{o.ProviderID, o.ModelID}] = o
 	}
 
+	free := in.Free
+	if len(free.Providers) == 0 {
+		free = FreeModels()
+	}
+
 	out := make([]Model, 0, len(in.Rows))
 	for _, row := range in.Rows {
 		p, ok := byID[row.ProviderID]
@@ -45,8 +53,17 @@ func Merge(in MergeInput) []Model {
 			continue
 		}
 		preset := in.Presets[p.Preset] // the zero Preset for an uncatalogued provider
-		out = append(out, mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM,
-			overrides[[2]string{row.ProviderID, row.ModelID}]))
+		m := mergeOne(row, freeCatalogKey(p), preset, in.Doc, in.LiteLLM, free,
+			overrides[[2]string{row.ProviderID, row.ModelID}])
+		// Bedrock, the subscription preset and Vertex's Anthropic publisher
+		// declare no rules of their own. The Claude models they serve are
+		// Anthropic's generations whichever endpoint answers, and every
+		// anthropic rule names a Claude-only fragment, so another publisher's
+		// id matches none of them and stays unknown.
+		if len(preset.ModelTraits) == 0 && servesAnthropicShape(p, preset) {
+			m.Traits = traitsFor(in.Presets["anthropic"], row.ModelID)
+		}
+		out = append(out, m)
 	}
 	// Deterministic order: a snapshot rebuild must not reorder the candidate
 	// list a request sees.
@@ -57,6 +74,20 @@ func Merge(in MergeInput) []Model {
 		return out[i].ModelID < out[j].ModelID
 	})
 	return out
+}
+
+// servesAnthropicShape reports whether a provider's requests go through an
+// Anthropic request builder, which is where the anthropic preset's traits are
+// read. Vertex shares one kind across publishers, so its preset's publisher
+// decides.
+func servesAnthropicShape(p provider.Provider, preset Preset) bool {
+	switch p.Kind {
+	case "anthropic", "bedrock":
+		return true
+	case "vertex":
+		return preset.Publisher == "publishers/anthropic"
+	}
+	return false
 }
 
 // freeCatalogKey is the catalogue entry a provider row reads.
@@ -73,7 +104,7 @@ func freeCatalogKey(p provider.Provider) string {
 }
 
 func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
-	litellm LiteLLMDoc, override store.ModelOverride) Model {
+	litellm LiteLLMDoc, free FreeCatalog, override store.ModelOverride) Model {
 
 	m := Model{
 		ProviderID: row.ProviderID,
@@ -126,6 +157,9 @@ func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
 	}
 	if stored.Source.Authoritative() {
 		m.Pricing = resolvePrice(stored, fromDoc, fromLiteLLM)
+		if stored.Known {
+			m.Pricing = withUnquotedCacheRates(m.Pricing, row, fromDoc, fromLiteLLM)
+		}
 	} else {
 		m.Pricing = resolvePrice(fromDoc, fromLiteLLM, stored)
 	}
@@ -137,7 +171,7 @@ func mergeOne(row store.ModelRow, presetID string, preset Preset, doc Doc,
 	// Carried on the model rather than looked up per request: the router reads
 	// the vendor's grading of this access before it selects the model, and a
 	// lookup at that point would put the curated catalogue on the request path.
-	if tier, ok := FreeModels().Tier(presetID, row.ModelID); ok {
+	if tier, ok := free.Tier(presetID, row.ModelID); ok {
 		m.FreeTier = tier
 	}
 
@@ -303,6 +337,39 @@ func priceSource(stored string) Source {
 	default:
 		return SourceInferred
 	}
+}
+
+// withUnquotedCacheRates fills the cache rates an authoritative row does not
+// hold from the directories below it, leaving every rate the row does hold,
+// zero included. A directory's zero cache rate is its spelling of "not
+// published", so only a nonzero one fills.
+//
+// A row priced free at both input and output takes nothing: syncs before
+// cache columns were tracked stored a quoted zero cache rate as unset, and a
+// free model is free for cached tokens too.
+func withUnquotedCacheRates(p Pricing, row store.ModelRow, lower ...Pricing) Pricing {
+	if row.InputMicrosPerMTok == 0 && row.OutputMicrosPerMTok == 0 {
+		return p
+	}
+	for _, c := range lower {
+		if !c.Known {
+			continue
+		}
+		if !row.CacheReadKnown && p.CacheReadMicrosPerMTok == 0 && c.CacheReadMicrosPerMTok != 0 {
+			p.CacheReadMicrosPerMTok, p.CacheReadSource = c.CacheReadMicrosPerMTok, c.Source
+		}
+		if !row.CacheWriteKnown && p.CacheWriteMicrosPerMTok == 0 && c.CacheWriteMicrosPerMTok != 0 {
+			p.CacheWriteMicrosPerMTok, p.CacheWriteSource = c.CacheWriteMicrosPerMTok, c.Source
+		}
+	}
+	// Still unquoted, the rate costs its tokens at zero, which no one stated.
+	if !row.CacheReadKnown && p.CacheReadSource == "" {
+		p.CacheReadSource = SourceInferred
+	}
+	if !row.CacheWriteKnown && p.CacheWriteSource == "" {
+		p.CacheWriteSource = SourceInferred
+	}
+	return p
 }
 
 // resolvePrice returns the first candidate whose price is known. Callers pass

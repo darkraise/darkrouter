@@ -55,6 +55,60 @@ export type Turn = {
   content: string
   model?: string
   failed?: boolean
+  /** A reply the operator cut short. Shown as far as it got, never sent. */
+  stopped?: boolean
+  /** Shown, never sent: a provider is not handed its own reasoning back. */
+  reasoning?: string
+}
+
+/**
+ * The turns a provider is sent as the conversation so far.
+ *
+ * A failed or empty assistant turn is a diagnostic the drawer drew, not
+ * something the model said, and the prompt it failed to answer goes with it:
+ * sent on, the error text reads to the model as its own previous reply. A
+ * stopped reply is left out the same way: it ends where the operator cut it,
+ * not where the model did.
+ *
+ * A reply that carried only reasoning did answer its prompt, so the prompt
+ * stays; there is just no text to send back. The prompt after it is folded
+ * into the same user turn, because two user turns in a row are refused by a
+ * provider that holds to strict alternation. A failure after that takes back
+ * only the prompt it failed to answer, not the answered ones it was folded
+ * into; leaving it unfolded instead would send two user turns in a row.
+ */
+export function conversationHistory(turns: Turn[]): Turn[] {
+  const out: Turn[] = []
+  // The prompts each user turn in `out` was folded from, so the last one can
+  // be taken back out.
+  const prompts: string[][] = []
+  for (const turn of turns) {
+    const prev = out[out.length - 1]
+    if (turn.role === "assistant") {
+      const reasoningOnly = turn.content === "" && !!turn.reasoning && !turn.failed && !turn.stopped
+      if (reasoningOnly) continue
+      if (turn.failed || turn.stopped || turn.content === "") {
+        if (prev?.role === "user") {
+          const parts = prompts[prompts.length - 1]!
+          parts.pop()
+          if (parts.length === 0) {
+            out.pop()
+            prompts.pop()
+          } else {
+            out[out.length - 1] = { ...prev, content: parts.join("\n\n") }
+          }
+        }
+        continue
+      }
+    } else if (prev?.role === "user") {
+      prompts[prompts.length - 1]!.push(turn.content)
+      out[out.length - 1] = { ...prev, content: `${prev.content}\n\n${turn.content}` }
+      continue
+    }
+    out.push(turn)
+    prompts.push(turn.role === "user" ? [turn.content] : [])
+  }
+  return out
 }
 
 /** The message the composer opens with. A test tool that made an operator
@@ -69,6 +123,7 @@ export type Verdict =
   | { kind: "running" }
   | { kind: "served"; totalMs: number }
   | { kind: "refused"; reason: string }
+  | { kind: "stopped" }
 
 /**
  * The one sentence the drawer exists to produce.
@@ -91,6 +146,14 @@ function VerdictLine({ verdict }: { verdict: Verdict }) {
       <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
         <span className="size-[var(--icon-size)] animate-pulse rounded-full bg-[hsl(var(--muted-foreground))]" />
         Waiting for the provider…
+      </p>
+    )
+  }
+  if (verdict.kind === "stopped") {
+    return (
+      <p className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+        <CircleSlash className="size-[var(--icon-size)]" aria-hidden="true" />
+        Stopped before the reply finished
       </p>
     )
   }
@@ -163,7 +226,22 @@ function Bubble({
               : "rounded-[var(--radius)] rounded-bl-sm border bg-[hsl(var(--muted))] px-3 py-2 text-sm whitespace-pre-wrap break-words"
           }
         >
+          {turn.reasoning && (
+            <span className="mb-1 block text-[hsl(var(--muted-foreground))] italic">
+              {turn.reasoning}
+            </span>
+          )}
+          {turn.reasoning && turn.content === "" && !streaming && !turn.failed && (
+            <span className="block text-[hsl(var(--legend))]">
+              Only reasoning arrived; the reply carried no text.
+            </span>
+          )}
           {turn.content}
+          {turn.stopped && (
+            <span className="mt-1 block text-[hsl(var(--legend))]">
+              Stopped here; not sent with the next message.
+            </span>
+          )}
           {streaming && (
             // The caret is the difference between "thinking" and "stopped".
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-[hsl(var(--foreground))] align-text-bottom" />
@@ -228,22 +306,57 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   const [verdict, setVerdict] = useState<Verdict>({ kind: "idle" })
   const [running, setRunning] = useState(false)
   const [tab, setTab] = useState("chat")
-  const abort = useRef(false)
+  // `row` is the snapshot the drawer was opened with, and refetching the
+  // provider list does not replace it, so the row this drawer made is
+  // remembered here or the next send would try to make it again.
+  const [created, setCreated] = useState(false)
+  const needsCreating = !!row?.keyless && !row.provider && !created
+  const inFlight = useRef<AbortController | null>(null)
   const transcript = useRef<HTMLDivElement>(null)
 
   // A functional update: a stream appends many times inside one render, and a
   // version that read the turns this render closed over would append every
   // chunk to the same stale array.
-  function appendToOpenTurn(text: string) {
+  function appendToOpenTurn(text: string, reasoning = "") {
     setMessages((prev) => {
       const next = prev.slice()
       const lastIndex = next.length - 1
       const last = next[lastIndex]
       if (!last) return prev
-      next[lastIndex] = { ...last, content: last.content + text }
+      next[lastIndex] = {
+        ...last,
+        content: last.content + text,
+        ...(reasoning ? { reasoning: (last.reasoning ?? "") + reasoning } : {}),
+      }
       return next
     })
   }
+
+  // In the transcript too: the conversation is where an operator is looking,
+  // and a turn that simply never arrives reads as a hang. A partial reply is
+  // kept on screen but marked failed, so the next message does not send it
+  // to the model as an answer it gave. A stop keeps its partial reply as it
+  // read, marked stopped rather than failed, and unsent for the same reason.
+  function failOpenTurn(reason: string, partial: "fail" | "keep" = "fail") {
+    setMessages((prev) => {
+      const next = prev.slice()
+      const last = next[next.length - 1]
+      if (!last || last.role !== "assistant" || last.failed) return prev
+      if (last.content === "") {
+        next[next.length - 1] = { ...last, content: reason, failed: true }
+      } else if (partial === "fail") {
+        next[next.length - 1] = { ...last, content: `${last.content}\n\n${reason}`, failed: true }
+      } else {
+        next[next.length - 1] = { ...last, stopped: true }
+      }
+      return next
+    })
+  }
+
+  // Closing the drawer, or aiming it at another provider, unmounts this
+  // session; a request left running would go on generating, and billing, for
+  // a transcript nobody can see.
+  useEffect(() => () => inFlight.current?.abort(), [])
 
   // Follows the reply as it arrives, which is what makes a transcript feel
   // live rather than something to scroll after the fact.
@@ -262,7 +375,8 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   async function run() {
     const prompt = draft.trim()
     if (!row || !target || !prompt || running) return
-    abort.current = false
+    const controller = new AbortController()
+    inFlight.current = controller
     setRunning(true)
     setDraft("")
     setMetrics(NO_METRICS)
@@ -272,8 +386,9 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     // The turns the provider will see, and the empty one it is about to fill.
     // History goes with the request: a second question that could not refer to
     // the first would not be a conversation.
-    const history: Turn[] = [...messages, { role: "user", content: prompt }]
-    setMessages([...history, { role: "assistant", content: "", model }])
+    const asked: Turn = { role: "user", content: prompt }
+    const history = conversationHistory([...messages, asked])
+    setMessages([...messages, asked, { role: "assistant", content: "", model }])
 
     const started = performance.now()
     const at = () => `${Math.round(performance.now() - started)} ms`
@@ -288,20 +403,28 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     // and a preset alone is not something a request can be routed to. Creating
     // it here is the setup, done in the one click that was going to happen
     // anyway rather than as a step in front of it.
-    if (row.keyless && !row.provider) {
+    if (needsCreating) {
       try {
         await api.post("/api/providers", { id: row.id, preset: row.preset || row.id })
+        setCreated(true)
         say("info", `added ${row.name} to your providers`)
         void queryClient.invalidateQueries({ queryKey: keys.providers })
       } catch (err) {
         const reason = err instanceof Error ? err.message : "could not add the provider"
         say("error", reason)
         setVerdict({ kind: "refused", reason })
+        failOpenTurn(reason)
         setRunning(false)
         return
       }
     }
     say("info", `POST /api/playground → ${target}`)
+
+    const stopped = () => {
+      say("info", `stopped at ${at()}`)
+      setVerdict({ kind: "stopped" })
+      failOpenTurn("Stopped before the provider answered", "keep")
+    }
 
     let firstToken = 0
     let liveRequestId = ""
@@ -319,21 +442,30 @@ function TestSession({ row }: { row: ProviderRow | null }) {
           liveRequestId = s.requestId
           say("info", `request ${s.requestId} · headers at ${at()}`)
         },
+        controller.signal,
       )) {
-        if (abort.current) break
+        if (controller.signal.aborted) break
         buffer += chunk
-        const { text, rest } = drainSSE(buffer, "openai")
+        const { text, reasoning, rest, error } = drainSSE(buffer, "openai")
         buffer = rest
-        if (text) {
+        if (text || reasoning) {
           if (firstToken === 0) {
             firstToken = performance.now()
             say("info", `first token at ${at()}`)
           }
-          appendToOpenTurn(text)
+          appendToOpenTurn(text, reasoning)
         }
+        // A provider failing after the 200 went out can only say so in the
+        // stream, so this frame is the run's real outcome.
+        if (error !== undefined) throw new Error(error)
       }
+      if (controller.signal.aborted) {
+        stopped()
+        return
+      }
+      if (firstToken === 0) throw new Error("The stream ended without a reply")
       const totalMs = performance.now() - started
-      say("info", abort.current ? `stopped at ${at()}` : `complete in ${at()}`)
+      say("info", `complete in ${at()}`)
       const measured: StreamMetrics = {
         ...NO_METRICS,
         ttftMs: firstToken === 0 ? null : firstToken - started,
@@ -342,26 +474,21 @@ function TestSession({ row }: { row: ProviderRow | null }) {
       setMetrics(measured)
       setVerdict({ kind: "served", totalMs })
       if (liveRequestId) {
-        const trace = await traceWhenWritten(liveRequestId)
+        const trace = await traceWhenWritten(liveRequestId, controller.signal)
         if (trace) setMetrics(metricsFromTrace(measured, trace))
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        stopped()
+        return
+      }
       // The failure is the answer here as often as the reply is: a refused
       // credential, a model the provider does not serve, a base URL that is a
       // web page. The verdict says which without opening the log.
       const reason = err instanceof Error ? err.message : "the request failed"
       say("error", reason)
       setVerdict({ kind: "refused", reason })
-      // In the transcript too: the conversation is where an operator is
-      // looking, and a turn that simply never arrives reads as a hang.
-      setMessages((prev) => {
-        const next = prev.slice()
-        const last = next[next.length - 1]
-        if (last && last.role === "assistant" && last.content === "") {
-          next[next.length - 1] = { ...last, content: reason, failed: true }
-        }
-        return next
-      })
+      failOpenTurn(reason)
     } finally {
       setRunning(false)
     }
@@ -411,7 +538,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
             </Button>
           )}
         </div>
-        {row?.keyless && !row.provider && (
+        {needsCreating && (
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
             {row.name} asks for no credential. Sending adds it to your providers and
             routes through it — nothing else to set up.
@@ -486,7 +613,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
               className="max-h-32 min-h-0 flex-1 resize-none"
             />
             {running ? (
-              <Button variant="secondary" onClick={() => (abort.current = true)}>
+              <Button variant="secondary" onClick={() => inFlight.current?.abort()}>
                 <Square className="size-[var(--icon-size)]" />
                 Stop
               </Button>

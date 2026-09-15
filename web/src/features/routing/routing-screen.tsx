@@ -1,9 +1,10 @@
 import { useId, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronUp, Plus } from "lucide-react"
-import { Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { Banner, Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useAliases, useModels, usePolicy, useProviders } from "../../lib/queries"
+import { keys, useAliasesForEditing, useModels, usePolicy, useProviders } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
@@ -165,16 +166,81 @@ function reorderRows(rows: DraftRow[], from: number, to: number): DraftRow[] {
   ).map((id) => ({ id, value: valueById.get(id) ?? "" }))
 }
 
+function cleanRows(rows: DraftRow[] | undefined): string[] | undefined {
+  return rows?.map((r) => r.value.trim()).filter(Boolean)
+}
+
+/** Absent and empty are different chains: one is not in the map at all. */
+function sameChain(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.length === b.length && a.every((t, i) => t === b[i])
+}
+
+/**
+ * Moves a draft from the saved map it was seeded from onto a newer one.
+ *
+ * A chain the operator has not touched -- its rows still spell exactly what
+ * `base` held -- takes whatever `incoming` holds, and disappears if `incoming`
+ * dropped it. A touched chain, including one the operator removed or added,
+ * is kept as it is. Touched is judged on the raw rows rather than the cleaned
+ * ones, so a blank row just added counts as an edit and survives.
+ *
+ * `conflicts` names the touched chains `incoming` also changed. That includes
+ * the operator's own save coming back, which the caller filters out.
+ */
+function rebaseDraft(
+  draft: Record<string, DraftRow[]>,
+  base: Aliases,
+  incoming: Aliases,
+  makeId: (name: string, index: number) => string,
+): { draft: Record<string, DraftRow[]>; conflicts: string[] } {
+  const next: Record<string, DraftRow[]> = {}
+  const conflicts: string[] = []
+  const names = new Set([...Object.keys(draft), ...Object.keys(incoming), ...Object.keys(base)])
+  for (const name of names) {
+    const rows = draft[name]
+    const theirs = incoming[name]
+    if (sameChain(rows?.map((r) => r.value), base[name])) {
+      if (theirs === undefined) continue
+      next[name] =
+        rows && sameChain(rows.map((r) => r.value), theirs)
+          ? rows
+          : theirs.map((value, index) => ({ id: makeId(name, index), value }))
+      continue
+    }
+    if (rows) next[name] = rows
+    if (!sameChain(base[name], theirs)) {
+      conflicts.push(name)
+    }
+  }
+  return { draft: next, conflicts }
+}
+
 const EMPTY_CONTEXT: ChainContext = { providers: [], models: [] }
+
+/** What PUT /api/aliases answers -- the same shape every commitConfig write
+ *  answers with, since the alias endpoint is a view over one write path. */
+type AliasesSaveResult = {
+  valid: boolean
+  error?: string
+  serving?: string
+  restart_required?: string[]
+}
 
 export function AliasEditor({
   aliases,
+  revision = null,
   knownProviders,
   context = EMPTY_CONTEXT,
   candidates = [],
   onPreview,
 }: {
   aliases: Aliases
+  /** The ETag `aliases` was read against. Sent back as If-Match on Save, so
+   *  a draft built from a copy another admin has since changed is refused
+   *  rather than silently overwriting their edit. Null skips the check --
+   *  a caller with no revision to offer gets today's unguarded write. */
+  revision?: string | null
   knownProviders: string[]
   /** Live provider, catalogue and breaker state, so each target can say what
    *  the router would make of it right now rather than only whether it parses. */
@@ -200,31 +266,65 @@ export function AliasEditor({
     toDraftRows(aliases, seedId),
   )
   // What the draft was seeded from. `PUT /api/aliases` replaces the whole map
-  // rather than merging, so a draft that never notices an alias added
-  // elsewhere will delete it on the next Save and report success. Adopting
-  // chains the draft has never seen keeps the write additive without
-  // discarding whatever is being typed.
+  // rather than merging, so every chain in the draft is written on Save --
+  // including ones the operator never opened. A refetch therefore rebases the
+  // draft instead of only adopting new names: an untouched chain holding a
+  // stale copy would overwrite another admin's edit under a fresh If-Match.
   const [seededFrom, setSeededFrom] = useState(aliases)
+  const [overwrites, setOverwrites] = useState<string[]>([])
   if (aliases !== seededFrom) {
+    const rebased = rebaseDraft(draft, seededFrom, aliases, seedId)
     setSeededFrom(aliases)
-    setDraft((d) => {
-      const next = { ...d }
-      for (const [name, targets] of Object.entries(aliases)) {
-        if (!(name in next))
-          next[name] = targets.map((value, index) => ({ id: seedId(name, index), value }))
-      }
-      return next
-    })
+    setDraft(rebased.draft)
+    // Kept only while the draft still differs from the server. A chain the
+    // server now holds exactly as drafted is the operator's own save coming
+    // back, or an overwrite already made -- nothing is left to warn about.
+    setOverwrites((prev) =>
+      [...new Set([...prev, ...rebased.conflicts])]
+        .filter((name) => !sameChain(cleanRows(rebased.draft[name]), aliases[name]))
+        .sort(),
+    )
   }
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [dragTarget, setDragTarget] = useState<{ name: string; index: number } | null>(null)
 
+  const queryClient = useQueryClient()
   const save = useApiMutation({
-    mutationFn: (next: Aliases) => api.put("/api/aliases", next),
+    mutationFn: async (next: Aliases) => {
+      try {
+        const res = await api.put<AliasesSaveResult>("/api/aliases", next, {
+          ifMatch: revision ?? undefined,
+        })
+        // A 200 here can still mean the write never took effect: the rows
+        // committed but the router could not republish, and the previous
+        // configuration is still what is serving. Thrown so the mutation
+        // reports it as the failure it is instead of toasting "saved".
+        if (!res.valid) {
+          // The rows did commit, so the stored table and its revision moved
+          // even though the router did not. Left cached, the revision 409s
+          // the next save and Settings keeps calling the config valid.
+          for (const key of [keys.aliases, keys.config, keys.models]) {
+            void queryClient.invalidateQueries({ queryKey: key })
+          }
+          const reason = res.error ?? "the new aliases did not take effect"
+          throw new Error(res.serving ? `${reason}; ${res.serving}` : reason)
+        }
+        return res
+      } catch (err) {
+        // Another admin's edit landed first. The draft that was just
+        // refused is against a table that no longer exists; refetching is
+        // how the next Save gets one it can actually be pinned to.
+        if (err instanceof ApiError && err.status === 409) {
+          void queryClient.invalidateQueries({ queryKey: keys.aliases })
+        }
+        throw err
+      }
+    },
     success: "Aliases saved",
     // The catalogue too: its alias column is read from the same map.
     invalidates: [keys.aliases, keys.config, keys.models],
+    onSuccess: () => setOverwrites([]),
   })
 
   // Trimmed and stripped of in-progress blanks: what would actually be sent,
@@ -277,6 +377,18 @@ export function AliasEditor({
         </span>
       </div>
 
+      {overwrites.length > 0 && (
+        <Banner variant="warning" role="alert" className="mb-3">
+          <p className="text-sm font-medium">
+            Changed elsewhere since you started editing:{" "}
+            <span className="font-mono">{overwrites.join(", ")}</span>
+          </p>
+          <p className="mt-1 text-sm">
+            Your version is kept. Saving replaces the other change; Revert takes it instead.
+          </p>
+        </Banner>
+      )}
+
       {names.length === 0 && (
         <EmptyState
           title="An alias is a name your clients ask for"
@@ -305,7 +417,12 @@ export function AliasEditor({
                 <span className="w-32 shrink-0 truncate font-mono text-sm" title={name}>
                   {name}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {/* A real basis, not flex-1's zero: with no width of its own
+                    to claim, the list never pushed the buttons onto the next
+                    line and shrank to nothing under them instead. The buttons
+                    are one group so a narrow row wraps them together rather
+                    than stranding one beside a truncated target. */}
+                <span className="flex min-w-0 grow basis-48 flex-wrap items-center gap-1.5">
                   {rows.length === 0 ? (
                     <span className="text-sm text-[hsl(var(--muted-foreground))]">
                       no targets yet
@@ -320,52 +437,54 @@ export function AliasEditor({
                     ))
                   )}
                 </span>
-                {onPreview && (
+                <span className="ml-auto flex items-center gap-2">
+                  {onPreview && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onPreview(name)}
+                      // The endpoint resolves what is stored, so a chain with
+                      // unsaved edits would be previewed as it was, beside pills
+                      // drawn from the draft.
+                      title={
+                        unsaved
+                          ? "Previews the saved chain — this one has unsaved changes"
+                          : undefined
+                      }
+                    >
+                      Preview{unsaved ? " (saved)" : ""}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => onPreview(name)}
-                    // The endpoint resolves what is stored, so a chain with
-                    // unsaved edits would be previewed as it was, beside pills
-                    // drawn from the draft.
-                    title={
-                      unsaved
-                        ? "Previews the saved chain — this one has unsaved changes"
-                        : undefined
+                    onClick={() => setEditing(open ? null : name)}
+                    aria-expanded={open}
+                  >
+                    {open ? "Done" : "Edit"}
+                  </Button>
+                  {/* A whole chain is worth asking about; a single target row is
+                      not — that is one click of Add target to put back, and a
+                      prompt per row would make the editor unusable. */}
+                  <ConfirmButton
+                    size="sm"
+                    variant="ghost"
+                    className="text-[hsl(var(--destructive))]"
+                    title={`Remove the ${name} chain?`}
+                    description={`Requests asking for ${name} stop resolving through it and fall back to whatever a bare model name of that spelling finds. Nothing is written until you save.`}
+                    confirmLabel="Remove chain"
+                    destructive
+                    onConfirm={() =>
+                      setDraft((d) => {
+                        const next = { ...d }
+                        delete next[name]
+                        return next
+                      })
                     }
                   >
-                    Preview{unsaved ? " (saved)" : ""}
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setEditing(open ? null : name)}
-                  aria-expanded={open}
-                >
-                  {open ? "Done" : "Edit"}
-                </Button>
-                {/* A whole chain is worth asking about; a single target row is
-                    not — that is one click of Add target to put back, and a
-                    prompt per row would make the editor unusable. */}
-                <ConfirmButton
-                  size="sm"
-                  variant="ghost"
-                  className="text-[hsl(var(--destructive))]"
-                  title={`Remove the ${name} chain?`}
-                  description={`Requests asking for ${name} stop resolving through it and fall back to whatever a bare model name of that spelling finds. Nothing is written until you save.`}
-                  confirmLabel="Remove chain"
-                  destructive
-                  onConfirm={() =>
-                    setDraft((d) => {
-                      const next = { ...d }
-                      delete next[name]
-                      return next
-                    })
-                  }
-                >
-                  Remove
-                </ConfirmButton>
+                    Remove
+                  </ConfirmButton>
+                </span>
               </div>
 
               {open && (
@@ -501,6 +620,7 @@ export function AliasEditor({
             variant="ghost"
             onClick={() => {
               setDraft(toDraftRows(aliases, seedId))
+              setOverwrites([])
               setEditing(null)
             }}
           >
@@ -518,7 +638,7 @@ const ROUTING_FIELDS = ["alias"] as const
 
 export function RoutingScreen() {
   const [filters, setFilter] = useSearchFilters(ROUTING_FIELDS)
-  const aliases = useAliases()
+  const aliases = useAliasesForEditing()
   const providers = useProviders()
   const models = useModels()
   const policy = usePolicy()
@@ -549,7 +669,7 @@ export function RoutingScreen() {
   // router expands targets through rules 2 and 3 only, so an alias suggested
   // there could never resolve; the preview box answers rule 1 as well.
   const chainCandidates = useMemo(() => modelCandidates({ models: modelRows }), [modelRows])
-  const aliasNames = useMemo(() => Object.keys(aliases.data ?? {}), [aliases.data])
+  const aliasNames = useMemo(() => Object.keys(aliases.data?.aliases ?? {}), [aliases.data])
   const previewCandidates = useMemo(
     () => modelCandidates({ models: modelRows, aliases: aliasNames }),
     [modelRows, aliasNames],
@@ -569,7 +689,8 @@ export function RoutingScreen() {
 
       {aliases.data && (
         <AliasEditor
-          aliases={aliases.data}
+          aliases={aliases.data.aliases}
+          revision={aliases.data.revision}
           knownProviders={providerRows.map((p) => p.id)}
           context={context}
           candidates={chainCandidates}
