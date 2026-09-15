@@ -343,7 +343,14 @@ func priceSource(stored string) Source {
 // hold from the directories below it, leaving every rate the row does hold,
 // zero included. A directory's zero cache rate is its spelling of "not
 // published", so only a nonzero one fills.
+//
+// A row priced free at both input and output takes nothing: syncs before
+// cache columns were tracked stored a quoted zero cache rate as unset, and a
+// free model is free for cached tokens too.
 func withUnquotedCacheRates(p Pricing, row store.ModelRow, lower ...Pricing) Pricing {
+	if row.InputMicrosPerMTok == 0 && row.OutputMicrosPerMTok == 0 {
+		return p
+	}
 	for _, c := range lower {
 		if !c.Known {
 			continue
