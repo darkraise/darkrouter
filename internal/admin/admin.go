@@ -111,6 +111,9 @@ type Server struct {
 	// because both the server's shutdown path and a test's cleanup reach it.
 	stopSweep chan struct{}
 	closeOnce sync.Once
+
+	// now is the clock the usage endpoints draw their calendar days from.
+	now func() time.Time
 }
 
 // New builds the admin server, sweeps expired sessions once, and starts the
@@ -128,6 +131,7 @@ func New(deps Deps) (*Server, error) {
 		deps: deps, csrf: csrf,
 		logins:    newLoginLimiter(loginRate, loginBurst, loginConcurrency),
 		stopSweep: make(chan struct{}),
+		now:       time.Now,
 	}
 	if _, err := deps.DB.SweepSessions(ctx); err != nil {
 		return nil, fmt.Errorf("admin: sweep sessions: %w", err)

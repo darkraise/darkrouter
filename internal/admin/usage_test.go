@@ -201,6 +201,7 @@ func TestAnEmptyLogReportsZeroRatherThanFailing(t *testing.T) {
 
 func TestUsageRollsUpByDay(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, tokens_in, tokens_out)
@@ -239,10 +240,18 @@ func TestUsageRollsUpByDay(t *testing.T) {
 	}
 }
 
-// daysAgo is a usage_daily day relative to the real clock, which the handler
-// windows by.
+// usageClock is the instant a pinned server windows usage by. Fixed rather
+// than read from the wall clock, so a test run spanning UTC midnight cannot put
+// a seeded day on the other side of the handler's window.
+var usageClock = time.Date(2026, time.March, 14, 12, 0, 0, 0, time.UTC)
+
+func pinClock(s *Server) {
+	s.now = func() time.Time { return usageClock }
+}
+
+// daysAgo is a usage_daily day relative to usageClock.
 func daysAgo(n int) string {
-	return time.Now().UTC().AddDate(0, 0, -n).Format(time.DateOnly)
+	return usageClock.AddDate(0, 0, -n).Format(time.DateOnly)
 }
 
 // The chart and its Requests drilldown must share one window, so the handler
@@ -250,6 +259,7 @@ func daysAgo(n int) string {
 // guess them from its own clock.
 func TestUsageServesTheCalendarWindowItCovered(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests)
@@ -405,6 +415,7 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 	// name slipping into the same payload as "requests_per_min" would
 	// fossilize an inconsistency no consumer asked for.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
@@ -469,6 +480,7 @@ func TestOverviewSeriesAndFailoversUseSnakeCaseKeys(t *testing.T) {
 
 func TestUsageGroupByAlias(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
@@ -504,6 +516,7 @@ func TestUsageGroupByCarriesAttemptsAlongsideRequests(t *testing.T) {
 	// looks like the provider did nothing rather than having burned tokens on
 	// every failed try.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, requests, attempts, tokens_in, tokens_out)
@@ -546,6 +559,7 @@ func TestUsageRejectsAnUnknownGroupBy(t *testing.T) {
 
 func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
 	if _, err := db.Write.Exec(
 		`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
