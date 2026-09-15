@@ -151,6 +151,9 @@ export function RequestsScreen() {
   // started under earlier ones. A page requested under the previous filters
   // is thrown away when it lands rather than appended.
   const latestFilterKey = useRef(filterKey)
+  // Bumped when the loaded pages are thrown away for a new first page, so an
+  // older page still in flight does not land after rows it no longer follows.
+  const pagesReset = useRef(0)
   const [pagedUnder, setPagedUnder] = useState(filterKey)
 
   // Both adjustments run during render rather than after it. An effect would
@@ -211,21 +214,44 @@ export function RequestsScreen() {
     const from = cursor === undefined ? held?.nextCursor : cursor
     if (!from || loadingMore) return
     const requestedUnder = filterKey
+    const requestedAfter = pagesReset.current
+    const current = () =>
+      latestFilterKey.current === requestedUnder && pagesReset.current === requestedAfter
     setLoadingMore(true)
     setLoadMoreError(null)
     try {
       const page = await api.get<RequestPage>(
         `/api/requests${filterQuery({ ...apiFilters(filters), limit: "50", cursor: from })}`,
       )
-      if (latestFilterKey.current !== requestedUnder) return
-      setOlder((p) => [...p, ...dedupeAppend([...(held?.requests ?? []), ...p], page.requests)])
+      if (!current()) return
+      setOlder((p) => [...p, ...dedupeAppend(p, page.requests)])
       setCursor(page.next_cursor ?? null)
     } catch (err) {
-      if (latestFilterKey.current !== requestedUnder) return
+      if (!current()) return
       setLoadMoreError((err as Error).message)
     } finally {
-      if (latestFilterKey.current === requestedUnder) setLoadingMore(false)
+      if (current()) setLoadingMore(false)
     }
+  }
+
+  function showNewer() {
+    const page = first.data
+    const newest = held?.requests[0]?.id
+    if (!page || newest === undefined) return
+    const at = page.requests.findIndex((r) => r.id === newest)
+    if (at !== -1) {
+      const newer = page.requests.slice(0, at)
+      setHeld((prev) => prev && { ...prev, requests: [...newer, ...prev.requests] })
+      return
+    }
+    // The new first page does not reach the rows on screen, so appending
+    // those after it would hide the gap between them. Paging starts over.
+    pagesReset.current += 1
+    setHeld({ requests: page.requests, nextCursor: page.next_cursor ?? null })
+    setOlder([])
+    setCursor(undefined)
+    setLoadingMore(false)
+    setLoadMoreError(null)
   }
 
   function openRowUnderPointer(e: MouseEvent<HTMLDivElement>) {
@@ -243,7 +269,10 @@ export function RequestsScreen() {
     void navigate({ to: "/requests", search: true })
   }
 
-  const pageRows = [...(held?.requests ?? []), ...older]
+  // Deduplicated here rather than when a page lands: `held` can gain newer
+  // rows while an older page is in flight.
+  const heldRows = held?.requests ?? []
+  const pageRows = [...heldRows, ...dedupeAppend(heldRows, older)]
   const rows = pageRows.map(facetRow)
   // navigate is stable for the router's life, so the columns build once.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -372,10 +401,7 @@ export function RequestsScreen() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() =>
-              first.data &&
-              setHeld({ requests: first.data.requests, nextCursor: first.data.next_cursor ?? null })
-            }
+            onClick={showNewer}
           >
             {newer} newer
           </Button>
