@@ -54,12 +54,20 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// Only enabled credentials count, as on the Providers screen: the router
 	// drops a disabled one, so its cooldown says nothing about whether the
 	// provider can be sent to.
+	//
+	// A keyless provider with no enabled credential is sent one attempt keyed
+	// on the empty credential id, so that is the id its cooldowns carry.
 	enabled := map[health.Key]bool{}
-	for providerID, creds := range summaries {
-		for _, c := range creds {
+	for _, p := range rows {
+		usable := false
+		for _, c := range summaries[p.ID] {
 			if c.Enabled {
-				enabled[health.Key{ProviderID: providerID, KeyID: c.ID}] = true
+				enabled[health.Key{ProviderID: p.ID, KeyID: c.ID}] = true
+				usable = true
 			}
+		}
+		if !usable && auth.IsKeyless(p.AuthStyle) {
+			enabled[health.Key{ProviderID: p.ID}] = true
 		}
 	}
 	cooling := map[string]int{}
@@ -88,19 +96,17 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 				usable++
 			}
 		}
+		keyless := auth.IsKeyless(p.AuthStyle)
 		switch {
 		case !p.Enabled:
 			t.State = "disabled"
 		// A keyless provider with no credentials is configured: there is
 		// nothing left for an operator to add, and calling it unconfigured
-		// sends them looking for a key that does not exist.
-		case t.Credentials == 0 && auth.IsKeyless(p.AuthStyle):
-			t.State = "healthy"
-		case t.Credentials == 0:
+		// sends them looking for a key that does not exist. It still falls
+		// through to the cooling check, since it routes without a key.
+		case t.Credentials == 0 && !keyless:
 			t.State = "unconfigured"
-		case usable == 0 && auth.IsKeyless(p.AuthStyle):
-			t.State = "healthy"
-		case usable == 0:
+		case usable == 0 && !keyless:
 			t.State = "degraded"
 		case t.Cooling > 0:
 			t.State = "degraded"
