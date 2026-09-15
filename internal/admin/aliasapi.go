@@ -22,7 +22,21 @@ func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
 		return
 	}
+	// The stored table rather than the live snapshot, because it is what PUT
+	// checks If-Match against. The two diverge after a save whose rows
+	// committed but whose republish failed, and an ETag taken from the
+	// snapshot would then never match: every guarded save would 409 until
+	// some other reload succeeded. The body comes from the same read, since
+	// an ETag has to describe the body it is sent with.
 	aliases := s.deps.Config.Current().Aliases
+	if s.deps.DB != nil {
+		stored, err := s.deps.DB.Aliases(r.Context())
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		aliases = stored
+	}
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}

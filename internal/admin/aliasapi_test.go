@@ -127,6 +127,37 @@ func TestPutAliasesTreatsAStarIfMatchAsNoPin(t *testing.T) {
 	}
 }
 
+// The ETag GET hands out has to be computed from the same table PUT checks
+// it against. A save whose rows committed but whose republish failed leaves
+// the stored table ahead of the live snapshot; an ETag taken from the snapshot
+// then never matches, and every guarded save 409s until something else
+// manages a reload. The stored table is written directly here to produce
+// exactly that divergence.
+func TestAliasesETagDescribesTheStoredTable(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	if err := db.PutAliases(t.Context(), map[string][]string{"stored": {"groq/a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, live := s.deps.Config.Current().Aliases["stored"]; live {
+		t.Fatal("setup: the live snapshot already carries the stored write")
+	}
+
+	get := do(t, s, cookie, token, "GET", "/api/aliases", "")
+	var body map[string][]string
+	if err := json.Unmarshal(get.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	// The body is what the ETag names, so it has to be the stored table too.
+	if len(body["stored"]) != 1 {
+		t.Errorf("GET /api/aliases = %v, want the stored table", body)
+	}
+	if w := putIfMatch(t, s, cookie, token, get.Header().Get("ETag"), `{"fast":["groq/b"]}`); w.Code != 200 {
+		t.Fatalf("PUT with the ETag GET just served = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
 // A save carrying no If-Match at all -- a caller that never read the ETag --
 // keeps working exactly as before: the check is opt-in, not a new
 // requirement every caller of this endpoint must satisfy.
