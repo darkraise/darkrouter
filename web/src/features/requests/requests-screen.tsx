@@ -156,7 +156,7 @@ export function RequestsScreen() {
   // older page still in flight does not land after rows it no longer follows.
   const pagesReset = useRef(0)
   const tableRef = useRef<HTMLDivElement>(null)
-  const rowHeight = useRowHeight(tableRef)
+  const rowHeight = useRowHeight(tableRef, [held, older])
   const [pagedUnder, setPagedUnder] = useState(filterKey)
 
   // Both adjustments run during render rather than after it. An effect would
