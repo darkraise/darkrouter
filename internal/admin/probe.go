@@ -15,6 +15,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -271,7 +272,7 @@ func classifyProbeListing(resp *http.Response) error {
 	}
 	// Google refuses an unknown or expired API key with a 400, naming the
 	// refusal only in the ErrorInfo reason.
-	if catalog.GoogleAPIKeyInvalid(raw) {
+	if geminiadapter.APIKeyInvalid(raw) {
 		return rejectedCredential{errors.New(
 			"the provider rejected this credential: " + resp.Status + ": " +
 				upstreamMessage(bytes.NewReader(raw)))}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
@@ -460,7 +461,7 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		refused := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
 		if !refused && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-			refused = GoogleAPIKeyInvalid(raw)
+			refused = geminiadapter.APIKeyInvalid(raw)
 		}
 		if refused {
 			// A rejected key on a probe is the same evidence as a rejected key on
