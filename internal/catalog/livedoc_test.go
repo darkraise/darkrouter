@@ -410,4 +410,47 @@ func TestAFreeListedPriceTakesNoCacheRates(t *testing.T) {
 		t.Errorf("cache = %d/%d, want 0/0 for a model listed free",
 			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
 	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000, CacheWrite: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cached tokens = %q, want measured: free is a real price", got)
+	}
+}
+
+// A cache rate nobody quoted costs its tokens at zero, and zero is a guess,
+// not the listing's measurement.
+func TestAnUnpricedCacheRateGradesItsTokensAsGuessed(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+			CacheWriteMicrosPerMTok: &zero,
+		}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	cat.SetDoc(func() Doc { return Doc{} })
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || m.Pricing.CacheReadMicrosPerMTok != 0 {
+		t.Fatalf("pricing = %+v, want the listing's price with no cache read rate", m.Pricing)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000}); got != GradeMeasured {
+		t.Errorf("grade without cached tokens = %q, want measured", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeGuessed {
+		t.Errorf("grade with cache reads = %q, want guessed: no one priced them", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cache writes = %q, want measured: the listing quoted 0", got)
+	}
 }
