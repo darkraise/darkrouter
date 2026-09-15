@@ -151,6 +151,25 @@ func TestWriteStreamOpensABlockForAnOrphanDelta(t *testing.T) {
 	}
 }
 
+// Bedrock ships a redacted payload in a delta, but Anthropic has no delta for
+// it: the payload must land in the block start or the next turn cannot replay it.
+func TestWriteStreamPutsAnIncrementalRedactedPayloadInTheStart(t *testing.T) {
+	got := streamed(t, []ir.StreamEvent{
+		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
+		{Type: ir.EventContentDelta, Delta: &ir.Delta{Type: ir.BlockRedactedThinking, Thinking: "EmwKAhgB"}},
+		{Type: ir.EventMessageStop, StopReason: ir.StopEndTurn},
+	}, nil)
+	want := []string{"message_start", "content_block_start", "content_block_stop",
+		"message_delta", "message_stop"}
+	if strings.Join(names(got), ",") != strings.Join(want, ",") {
+		t.Fatalf("events = %v, want %v", names(got), want)
+	}
+	cb := got[1].body["content_block"].(map[string]any)
+	if cb["type"] != "redacted_thinking" || cb["data"] != "EmwKAhgB" {
+		t.Errorf("content_block = %v, want the redacted payload", cb)
+	}
+}
+
 func TestWriteStreamClosesOpenBlocksBeforeTheEnd(t *testing.T) {
 	got := streamed(t, []ir.StreamEvent{
 		{Type: ir.EventMessageStart, ID: "m", Model: "c"},
