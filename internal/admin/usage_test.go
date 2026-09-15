@@ -294,8 +294,9 @@ func TestTodaySpendAgreesWithTheUsageChartAcrossAFailover(t *testing.T) {
 	// this, never reached today_spend -- the tile and the chart answered a
 	// different question about the same day.
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now()
+	now := usageClock
 	failedCost := int64(500)
 	servedCost := int64(1200)
 	storetest.WriteBatch(t, db, []*store.RequestRecord{{
@@ -343,8 +344,9 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	// window makes it report a few minutes and read as "today was nearly
 	// free".
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now().UTC()
+	now := usageClock
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	c := int64(4200)
@@ -358,14 +360,6 @@ func TestTodaySpendIsNotTheFiveMinuteWindow(t *testing.T) {
 	}})
 
 	rr := do(t, s, cookie, token, "GET", "/api/overview", "")
-
-	// The handler computes its own start-of-today a moment after this test
-	// did; a UTC midnight landing between the two would put the seeded row
-	// in what the handler now considers yesterday. That is a clock race, not
-	// a bug the assertion below should absorb, so detect it and skip.
-	if end := time.Now().UTC(); end.Year() != now.Year() || end.YearDay() != now.YearDay() {
-		t.Skip("UTC day boundary crossed during the test")
-	}
 
 	var got struct {
 		TodaySpend struct {
@@ -583,8 +577,9 @@ func TestUsageWithoutGroupByIsUnchanged(t *testing.T) {
 
 func TestTodaySpendReportsWhetherAnEstimateContributed(t *testing.T) {
 	s, db := testServerFull(t)
+	pinClock(s)
 	cookie, token := login(t, s)
-	now := time.Now()
+	now := usageClock
 	measured, indexed := int64(1200), int64(300)
 	write := func(id, grade string, cost *int64) {
 		storetest.WriteBatch(t, db, []*store.RequestRecord{{
