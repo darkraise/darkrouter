@@ -485,7 +485,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		cancel(errDarkrouterTimeout)
 	})
 	defer timer.Stop()
-	ac.Timer = timer
+	ac.Timer, ac.deadline = timer, bud.deadline
 	ac.inbound, ac.upstream = r.Context(), ctx
 
 	path := PathIR
