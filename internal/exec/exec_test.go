@@ -650,6 +650,113 @@ func TestAClientHangUpAfterCommitIsRecordedAsCancelled(t *testing.T) {
 	}
 }
 
+// At shutdown the server cancels every request context with ErrShutdown while
+// the clients are still connected. A response cut that way was ended by the
+// gateway: the row must not say the client cancelled it, and the provider did
+// nothing wrong either.
+func TestAResponseCutAtShutdownIsNotAClientCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		dialect          edge.Dialect
+	}{
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`, openaiedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger, h := &captureLogger{}, &captureHealth{}
+			e := newExecutorWith(t, up.URL, Deps{Log: logger, Health: h}, 0)
+			ctx, cancel := context.WithCancelCause(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &firstWrite{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the response never committed")
+			}
+			cancel(ErrShutdown)
+			<-done
+
+			got := logger.only(t)
+			// success is what every committed response records, its failure
+			// carried by the error code, as a provider's post-commit fault is.
+			if got.Status != "success" || got.ErrorCode != string(ir.ErrDarkrouter) {
+				t.Errorf("record = status %q error %q, want success with error %q",
+					got.Status, got.ErrorCode, ir.ErrDarkrouter)
+			}
+			if _, sig := h.only(t); sig.Outcome != adapter.OutcomeClientCancelled {
+				t.Errorf("breaker heard %q, want %q — the provider was still sending",
+					sig.Outcome, adapter.OutcomeClientCancelled)
+			}
+			if !strings.Contains(w.Body.String(), "error") {
+				t.Errorf("client saw %q, want the stream to end with an error event", w.Body.String())
+			}
+		})
+	}
+}
+
+// Before commit a shutdown cut still leaves a client waiting for an answer, and
+// that answer must not tell it that it cancelled its own request.
+func TestARequestCutAtShutdownBeforeCommitIsNotAClientCancel(t *testing.T) {
+	sent := make(chan struct{})
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(sent)
+		<-release
+	}))
+	defer up.Close()
+	defer close(release)
+
+	logger, h := &captureLogger{}, &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger, Health: h}, 0)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"ping"}]}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Handle(w, r, openaiedge.New())
+	}()
+	select {
+	case <-sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the provider")
+	}
+	cancel(ErrShutdown)
+	<-done
+
+	got := logger.only(t)
+	if got.Status != "error" || got.ErrorCode != string(ir.ErrDarkrouter) {
+		t.Errorf("record = status %q error %q, want error %q", got.Status, got.ErrorCode, ir.ErrDarkrouter)
+	}
+	if _, sig := h.only(t); sig.Outcome != adapter.OutcomeClientCancelled {
+		t.Errorf("breaker heard %q, want %q", sig.Outcome, adapter.OutcomeClientCancelled)
+	}
+	if body := w.Body.String(); strings.Contains(body, "client cancelled") || !strings.Contains(body, "shutting down") {
+		t.Errorf("client saw %q, want an answer naming the shutdown", body)
+	}
+}
+
 // sawMarker is a recorder that reports when a write carrying marker reaches it.
 type sawMarker struct {
 	*httptest.ResponseRecorder

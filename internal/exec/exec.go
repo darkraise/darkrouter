@@ -392,7 +392,14 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			return
 		case actionReturn:
 			if res.Outcome == adapter.OutcomeClientCancelled {
-				rec.Status = "cancelled"
+				if shutDown(r.Context()) {
+					lastErr = shutdownError()
+					if n := len(rec.Attempts); n > 0 {
+						rec.Attempts[n-1].Error = lastErr.Message
+					}
+				} else {
+					rec.Status = "cancelled"
+				}
 			}
 			if lastErr != nil {
 				rec.ErrorCode = string(lastErr.Type)
@@ -446,6 +453,7 @@ const (
 	msgCredentialUnavailable = "credential unavailable"
 	msgRenderFailed          = "request could not be rendered for this provider"
 	msgUpstreamReadFailed    = "upstream read failed"
+	msgShuttingDown          = "gateway is shutting down"
 )
 
 // maxErrorBodyBytes bounds what is read from a non-2xx body: to classify a
@@ -684,7 +692,11 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			cause = aerr
 		}
 		ac.recordFailure(outcome, resp, cause)
-		if outcome != adapter.OutcomeClientCancelled {
+		gone := outcome == adapter.OutcomeClientCancelled
+		if gone && cw.Err() == nil && shutDown(r.Context()) {
+			gone, aerr = false, shutdownError()
+		}
+		if !gone {
 			code := ir.ErrAPI
 			if aerr != nil && aerr.Type != "" {
 				code = aerr.Type
@@ -695,8 +707,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			}
 		}
 		return attemptResult{Outcome: adapter.OutcomeSuccess, Status: statusCode,
-			Path: path, Committed: true, Issued: true,
-			ClientGone: outcome == adapter.OutcomeClientCancelled}
+			Path: path, Committed: true, Issued: true, ClientGone: gone}
 	}
 	if outcome == adapter.OutcomeRetryableProvider && aerr != nil {
 		// An in-body rate limit steps to the next credential as a 429 would.
@@ -906,6 +917,18 @@ func (ac *AttemptCtx) recordFailure(o adapter.Outcome, resp *http.Response, err 
 	}
 	ac.recordHealth(o, resp)
 }
+
+// ErrShutdown is the cause the server cancels request contexts with once the
+// shutdown drain has run out. A request cut by it was ended by the gateway,
+// not by its client.
+var ErrShutdown = errors.New("darkrouter: shutting down")
+
+// shutDown reports that ctx was cancelled by the gateway shutting down. The
+// breaker still hears client_cancelled for such a request, the one outcome
+// that says nothing about the provider, but its row must not blame the client.
+func shutDown(ctx context.Context) bool { return errors.Is(context.Cause(ctx), ErrShutdown) }
+
+func shutdownError() *ir.Error { return &ir.Error{Type: ir.ErrDarkrouter, Message: msgShuttingDown} }
 
 // errDarkrouterTimeout is what every attempt-timer cause matches with
 // errors.Is, whichever bound fired.
