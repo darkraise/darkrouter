@@ -112,10 +112,12 @@ func (d *DB) RecentStats(ctx context.Context, window time.Duration) (RecentStats
 	var s RecentStats
 	s.WindowSec = int64(window.Seconds())
 	// coalesce on the sums: SUM over no rows is NULL, and scanning that into an
-	// int64 fails rather than yielding zero.
+	// int64 fails rather than yielding zero. A cancelled request is the
+	// client's own hang-up, so it is not an error; any other status that did
+	// not succeed still is.
 	err := d.Read.QueryRowContext(ctx,
 		`SELECT count(*),
-		        coalesce(sum(CASE WHEN status != 'success' THEN 1 ELSE 0 END), 0)
+		        coalesce(sum(CASE WHEN status NOT IN ('success', 'cancelled') THEN 1 ELSE 0 END), 0)
 		   FROM requests WHERE ts >= ?`, since).
 		Scan(&s.Requests, &s.Errors)
 	if err != nil {

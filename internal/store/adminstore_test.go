@@ -1169,3 +1169,30 @@ func TestSpendSinceIsNotEstimatedWhenEveryPriceIsFirsthand(t *testing.T) {
 		t.Fatal("estimated must be false when every contributing price was measured or declared")
 	}
 }
+
+// A client that hangs up is not a failure of the gateway or of a provider, and
+// a chat UI's stop button would otherwise read on the overview as an outage.
+func TestRecentStatsCountsOnlyFailuresAsErrors(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now()
+	var recs []*RequestRecord
+	for _, status := range []string{"success", "error", "cancelled", "cancelled"} {
+		recs = append(recs, &RequestRecord{
+			ID: "r-" + status + "-" + time.Now().Format("150405.000000000"), TS: now.Add(-time.Minute),
+			Status: status,
+		})
+	}
+	if _, err := w.WriteBatch(ctx, recs); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := db.RecentStats(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Requests != 4 || s.Errors != 1 {
+		t.Fatalf("stats = %+v, want 4 requests and 1 error", s)
+	}
+}
