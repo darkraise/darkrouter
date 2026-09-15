@@ -84,3 +84,45 @@ func TestALANsIPv6DevicesDoNotShareABucket(t *testing.T) {
 		t.Errorf("one address keyed %q and %q; want one bucket", a, b)
 	}
 }
+
+// A local /64 is keyed per address so one mistyping device cannot lock out its
+// neighbours, but a host there can give itself as many addresses as it likes.
+// The /64 as a whole is still bounded, at a multiple of one address's allowance.
+func TestALocalIPv6RangeIsBoundedAsAWhole(t *testing.T) {
+	for name, format := range map[string]string{
+		"unique local": "[fd00:1:2:3::%x]:4000",
+		"link-local":   "[fe80::%x%%eth0]:4000",
+	} {
+		t.Run(name, func(t *testing.T) {
+			now := time.Unix(1_800_000_000, 0)
+			l := newLoginLimiter(loginRate, loginBurst, loginConcurrency)
+			l.now = func() time.Time { return now }
+
+			allowed := 0
+			for i := 1; i <= 1000; i++ {
+				if ok, _ := l.allow(fmt.Sprintf(format, i)); ok {
+					allowed++
+				}
+			}
+			if want := loginBurst * localPrefixFactor; allowed != want {
+				t.Errorf("allowed %d attempts across the /64, want %d", allowed, want)
+			}
+		})
+	}
+}
+
+func TestOneLocalDeviceDoesNotLockOutItsNeighbour(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	l := newLoginLimiter(loginRate, loginBurst, loginConcurrency)
+	l.now = func() time.Time { return now }
+
+	for i := 0; i < loginBurst; i++ {
+		l.allow("[fd00:1:2:3::1]:4000")
+	}
+	if ok, _ := l.allow("[fd00:1:2:3::1]:4000"); ok {
+		t.Fatal("the mistyping device was not limited")
+	}
+	if ok, _ := l.allow("[fd00:1:2:3::2]:4000"); !ok {
+		t.Error("a neighbour on the same /64 was locked out")
+	}
+}
