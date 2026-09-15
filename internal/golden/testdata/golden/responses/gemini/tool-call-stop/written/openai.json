@@ -14,7 +14,7 @@
                 "arguments": "{\"city\":\"Oslo\"}",
                 "name": "lookup"
               },
-              "id": "",
+              "id": "call_r-1_1",
               "type": "function"
             }
           ]
@@ -26,7 +26,7 @@
     "model": "target-model",
     "object": "chat.completion",
     "usage": {
-      "completion_tokens": 6,
+      "completion_tokens": 11,
       "completion_tokens_details": {
         "reasoning_tokens": 5
       },
@@ -34,7 +34,7 @@
       "prompt_tokens_details": {
         "cached_tokens": 4
       },
-      "total_tokens": 18
+      "total_tokens": 23
     }
   },
   "status": 200

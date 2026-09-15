@@ -7,12 +7,14 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // testKey is generated once per test binary. A 2048-bit RSA keygen is about a
@@ -262,5 +264,66 @@ func TestGCPIsRaceFree(t *testing.T) {
 	wg.Wait()
 	if f.count() != 1 {
 		t.Errorf("exchanged %d times under concurrency, want 1", f.count())
+	}
+}
+
+// hungTokenEndpoint accepts a connection and answers only once released.
+func hungTokenEndpoint(t *testing.T) (url string, arrived chan struct{}) {
+	t.Helper()
+	release := make(chan struct{})
+	arrived = make(chan struct{}, 8)
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		arrived <- struct{}{}
+		<-release
+	}))
+	// Released before the server is closed: Close waits on active handlers.
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	return srv.URL, arrived
+}
+
+// The exchange went through oauth2's fallback client, http.DefaultClient, with
+// no timeout and no context. A service-account endpoint that never answered
+// held the credential's mutex for the life of the process.
+func TestGCPExchangeIsBoundedWithoutACallerDeadline(t *testing.T) {
+	restore := tokenClient.Timeout
+	tokenClient.Timeout = 100 * time.Millisecond
+	defer func() { tokenClient.Timeout = restore }()
+
+	url, _ := hungTokenEndpoint(t)
+	az := gcpAuthorizer(t, serviceAccount(t, url))
+
+	done := make(chan error, 1)
+	go func() { done <- az(context.Background(), gcpRequest(t)) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a hung token endpoint produced no error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the exchange never returned against a hung token endpoint")
+	}
+}
+
+// A request queued behind a stalled exchange must still fail at its own
+// deadline, not whenever the exchange ahead of it gives up.
+func TestGCPWaiterStopsWaitingAtItsDeadline(t *testing.T) {
+	url, arrived := hungTokenEndpoint(t)
+	az := gcpAuthorizer(t, serviceAccount(t, url))
+
+	go func() { _ = az(context.Background(), gcpRequest(t)) }()
+	<-arrived
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- az(ctx, gcpRequest(t)) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiter error = %v, want its deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter was held past its deadline by a stalled exchange")
 	}
 }

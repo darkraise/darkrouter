@@ -65,6 +65,9 @@ func (o *speechOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx
 		return failedParse(ac, resp, err)
 	}
 	ac.served(ac.Warns)
+	if err != nil {
+		return ac.failedAfterCommit(err)
+	}
 	return adapter.OutcomeSuccess, nil
 }
 

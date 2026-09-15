@@ -41,6 +41,10 @@ export type UsageDimension = "provider" | "model" | "alias"
 export type UsageResponse = {
   days: UsageRow[]
   priced: boolean
+  /** The UTC calendar days the window covers, inclusive. `days` holds only
+   *  the ones that had traffic. */
+  first_day: string
+  last_day: string
   group_by?: UsageDimension
 }
 
@@ -335,6 +339,12 @@ export type ModelOverride = {
   context_window?: number
 }
 
+/** GET only. `catalog_capabilities` is what the merged catalog holds for this
+ *  one provider, absent when the catalog does not list the model there. */
+export type ModelOverrideView = ModelOverride & {
+  catalog_capabilities?: ModelCapabilities
+}
+
 // --- health ---
 
 export type BreakerEntry = {
@@ -383,6 +393,12 @@ export type ProbeResult = {
   latency_ms: number
   model_count?: number
   error?: string
+  /** Set on a failure when the provider refused the credential itself, as
+   *  opposed to a check that could not complete. */
+  rejected?: boolean
+  /** The style the probe authenticated with, the preset's where the provider
+   *  names none. Sent on a failure. */
+  auth_style?: string
 }
 
 // --- playground ---

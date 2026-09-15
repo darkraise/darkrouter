@@ -20,6 +20,9 @@ export function useApiMutation<TData, TVars>(opts: {
   mutationFn: (vars: TVars) => Promise<TData>
   /** Shown on success. Omit for an action whose effect is already visible. */
   success?: string | ((data: TData, vars: TVars) => string)
+  /** Shown instead of `success` when it returns a message: a write that
+   *  went through with a caveat the operator has to hear. */
+  warning?: (data: TData, vars: TVars) => string | undefined
   /** Cache entries the write invalidates. */
   invalidates?: QueryKey[]
   /** Runs writes sharing this id one at a time, in the order they were made.
@@ -36,7 +39,10 @@ export function useApiMutation<TData, TVars>(opts: {
     mutationFn: opts.mutationFn,
     scope: opts.scope,
     onSuccess: (data, vars, ctx, mutation) => {
-      if (opts.success) {
+      const warning = opts.warning?.(data, vars)
+      if (warning) {
+        toast.warning(warning)
+      } else if (opts.success) {
         toast.success(
           typeof opts.success === "function" ? opts.success(data, vars) : opts.success,
         )

@@ -79,6 +79,18 @@ func TestRecognizeEventFollowsPhase3sCommitRule(t *testing.T) {
 	}
 }
 
+func TestRecognizeEventReadsMessageStopAsTerminal(t *testing.T) {
+	stop := New().RecognizeEvent(sse.Event{Type: "message_stop", Data: `{"type":"message_stop"}`})
+	if !stop.Terminal || stop.Content {
+		t.Errorf("message_stop recognized as %+v, want terminal and not content", stop)
+	}
+	delta := New().RecognizeEvent(sse.Event{Type: "message_delta",
+		Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`})
+	if delta.Terminal {
+		t.Error("message_delta recognized as terminal; message_stop still follows it")
+	}
+}
+
 func TestRecognizeEventReportsUsageFromBothEvents(t *testing.T) {
 	// spec §7: message_start carries input and cache, message_delta output.
 	start := New().RecognizeEvent(sse.Event{Type: "message_start", Data: `{"type":"message_start",

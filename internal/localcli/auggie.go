@@ -55,17 +55,66 @@ func (a *Auggie) WithSession(secret string) CLI {
 	return &c
 }
 
-// env is the child's environment: this process's, plus the session when one is
-// configured.
+// envAllowlist is what the child needs to start and find its own state: a
+// binary to exec (PATH), a home directory to read ~/.augment and
+// ~/.local/share/auggie from (HOME), the rest is locale and terminal
+// behavior. Augment's own environment-variable reference
+// (https://docs.augmentcode.com/cli/reference#environment-variables) names
+// nothing else the CLI needs to start or authenticate: AUGMENT_SESSION_AUTH is
+// handled separately below, GITHUB_API_TOKEN configures an unrelated optional
+// tool, and AUGMENT_DISABLE_AUTO_UPDATE is not required for the CLI to run.
+var envAllowlist = []string{"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "TERM"}
+
+// env is the child's environment: an explicit allowlist rather than this
+// process's own, plus the session when one is configured. The gateway's
+// environment can hold its master key and provider credentials; none of that
+// has any business reaching a prompt-driven CLI.
 //
 // AUGMENT_SESSION_AUTH rather than the CLI's --augment-session-json flag: an
 // argument is visible in the process table to every other process on the box,
 // and this value is the whole credential.
 func (a *Auggie) env() []string {
-	if a.session == "" {
-		return nil
+	var env []string
+	for _, k := range envAllowlist {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
 	}
-	return append(os.Environ(), "AUGMENT_SESSION_AUTH="+a.session)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "LC_") {
+			env = append(env, kv)
+		}
+	}
+	if a.session != "" {
+		env = append(env, "AUGMENT_SESSION_AUTH="+a.session)
+	}
+	return env
+}
+
+// withheldTools is every tool of the pinned CLI (AUGGIE_VERSION in the
+// Dockerfile) that reaches files, processes, the network or other sessions,
+// named as `auggie tools list` prints them. Removal is used, not --permission
+// deny rules: the CLI accepts a rule for a tool name it does not have without
+// complaint, and the names its permissions docs use (terminal, read, edit,
+// write) are not the names 0.36.0 lists. A version bump must re-list them.
+var withheldTools = []string{
+	"view", "save-file", "remove-files", "str-replace-editor", "apply_patch",
+	"launch-process", "kill-process", "read-process", "write-process", "list-processes",
+	"web-fetch", "grep-search", "view-range-untruncated", "search-untruncated",
+	"codebase-retrieval-raw", "view-session",
+}
+
+// runDir creates an empty directory for one invocation to run in, so a CLI
+// asked to read a file finds nothing of the gateway's, and returns a cleanup
+// that removes it. The caller must defer the cleanup only after the process
+// has been waited on: removing a directory a running process still has as its
+// cwd is asking for trouble on some platforms.
+func runDir() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "auggie-run-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create run directory: %w", err)
+	}
+	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // NewAuggie returns the CLI with the timeouts the gateway uses.
@@ -83,10 +132,10 @@ func (a *Auggie) Scheme() string { return AuggieScheme }
 // the CLI, or mounts it, has to restart the gateway before it is found.
 func (a *Auggie) resolveBin() string {
 	if a.Bin != "" {
-		return a.Bin
+		return absPath(a.Bin)
 	}
 	if env := strings.TrimSpace(os.Getenv("AUGGIE_BIN")); env != "" {
-		return env
+		return absPath(env)
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		for _, c := range []string{
@@ -101,6 +150,19 @@ func (a *Auggie) resolveBin() string {
 	// PATH last. LookPath failing is not decided here: the spawn reports it,
 	// with the message the operator needs.
 	return "auggie"
+}
+
+// absPath anchors a relative path with a separator to this process's working
+// directory. Each run's working directory is its own temp directory, and exec
+// resolves such a path against that instead. A bare name is left for PATH.
+func absPath(p string) string {
+	if filepath.IsAbs(p) || !strings.ContainsRune(p, filepath.Separator) {
+		return p
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // modelName is the shape a model id may take before it is placed in argv.
@@ -138,8 +200,15 @@ func (a *Auggie) Models(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout(a.ListTimeout, 15*time.Second))
 	defer cancel()
 
+	dir, cleanup, err := runDir()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	var out, errb bytes.Buffer
 	cmd := exec.CommandContext(ctx, a.resolveBin(), "model", "list")
+	cmd.Dir = dir
 	cmd.Env = a.env()
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -194,15 +263,28 @@ func (a *Auggie) Run(ctx context.Context, model, prompt string, out io.Writer) e
 	ctx, cancel := context.WithTimeout(ctx, a.timeout(a.Timeout, 10*time.Minute))
 	defer cancel()
 
+	dir, cleanup, err := runDir()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// The prompt is arbitrary user text reaching an agentic CLI, so its tools
+	// are withheld rather than trusted to refuse on their own: a proxied
+	// request has no business running shell commands or touching files.
 	// The trailing -- ends the options, so nothing after it can be read as a
 	// flag even if the CLI's parser changes.
 	args := []string{"--print", "--quiet"}
+	for _, tool := range withheldTools {
+		args = append(args, "--remove-tool", tool)
+	}
 	if safe != "" {
 		args = append(args, "--model", safe)
 	}
 	args = append(args, "--")
 
 	cmd := exec.CommandContext(ctx, a.resolveBin(), args...)
+	cmd.Dir = dir
 	cmd.Env = a.env()
 	// Kill the whole run rather than only the parent: a CLI that spawns a
 	// helper leaves it holding the pipe, and the read below would block on a

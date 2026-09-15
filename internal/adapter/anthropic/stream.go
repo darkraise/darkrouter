@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 
@@ -53,7 +54,14 @@ func blockStart(raw json.RawMessage) *ir.Delta {
 	case "thinking":
 		d.Type = ir.BlockThinking
 	case "redacted_thinking":
+		// The payload arrives whole here and never in a delta, so the wire
+		// fields must ride along: they are what the Anthropic writer re-emits,
+		// data included.
 		d.Type = ir.BlockRedactedThinking
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) == nil {
+			d.Extra = fields
+		}
 	case "tool_use":
 		d.Type = ir.BlockToolUse
 	default:
@@ -88,6 +96,8 @@ func errorType(t string) ir.ErrorType {
 	}
 }
 
+var errStreamTruncated = fmt.Errorf("upstream stream ended before message_stop: %w", io.ErrUnexpectedEOF)
+
 // ParseStream converts Anthropic's SSE events to the IR's. The event model is
 // the same, so the interesting parts are the two that are not: usage arrives
 // split across message_start and message_delta and has to be accumulated, and
@@ -98,10 +108,16 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		var (
 			usage ir.Usage
 			stop  = ir.StopEndTurn
+			// done accepts a stop reason as well as message_stop: a stream
+			// cut between the two has lost nothing a writer cannot rebuild.
+			done bool
 		)
 		for {
 			raw, err := reader.Next()
 			if errors.Is(err, io.EOF) {
+				if !done {
+					yield(ir.StreamEvent{}, errStreamTruncated)
+				}
 				return
 			}
 			if err != nil {
@@ -168,6 +184,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			case "message_delta":
 				var warns []ir.Warning
 				if ev.Delta != nil && ev.Delta.StopReason != "" {
+					done = true
 					var known bool
 					stop, known = stopReason(ev.Delta.StopReason)
 					if !known {
@@ -206,6 +223,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				}
 
 			case "message_stop":
+				done = true
 				if !yield(ir.StreamEvent{Type: ir.EventMessageStop, StopReason: stop}, nil) {
 					return
 				}

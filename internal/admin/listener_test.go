@@ -67,6 +67,34 @@ func TestCallbackCompletesAListenerFlow(t *testing.T) {
 	_ = port
 }
 
+// The page the browser lands on is all the operator sees of a listener flow.
+// A stored account the router did not load must not read as a failure there,
+// or the operator connects it again and it is stored twice.
+func TestCallbackTheRouterDidNotLoadStillReadsAsConnected(t *testing.T) {
+	s, cookie, token, _, _ := serverWithListener(t)
+	id := oauthProvider(t, s, cookie, token)
+	breakNextReload(t, s, cookie, token)
+	start := startFlow(t, s, cookie, token, id, `{}`)
+	if start.Style != "localhost" {
+		t.Fatalf("style = %q, listener_error = %q", start.Style, start.ListenerError)
+	}
+
+	resp, err := http.Get(start.RedirectURI + "?code=the-code&state=" + url.QueryEscape(start.State))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("listener returned %d: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"Connected", "saved", "not connect this account again"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("page %q does not say %q", body, want)
+		}
+	}
+}
+
 func TestTheListenerBindsLoopbackOnly(t *testing.T) {
 	// Binding 0.0.0.0 would put a code-accepting endpoint on the LAN for the
 	// duration of the flow.

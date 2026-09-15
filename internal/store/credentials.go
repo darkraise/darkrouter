@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -144,27 +145,95 @@ func scanCredentials(rows *sql.Rows, key *crypto.Key) ([]Credential, error) {
 	return out, nil
 }
 
-// ReplaceCredentialSecret rewrites one credential's sealed payload in place.
+// CredentialSecret returns one credential's decrypted secret.
+func (d *DB) CredentialSecret(ctx context.Context, key *crypto.Key, id string) (string, error) {
+	return credentialSecret(ctx, d.Read, key, id)
+}
+
+func credentialSecret(ctx context.Context, q interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}, key *crypto.Key, id string) (string, error) {
+	var ciphertext, nonce []byte
+	err := q.QueryRowContext(ctx,
+		`SELECT ciphertext, nonce FROM provider_keys WHERE id = ?`, id).Scan(&ciphertext, &nonce)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("credential %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read credential %s: %w", id, err)
+	}
+	plaintext, err := key.Open(ciphertext, nonce, []byte(id))
+	if err != nil {
+		return "", fmt.Errorf("credential %s could not be decrypted: %w", id, err)
+	}
+	return string(plaintext), nil
+}
+
+// ReplaceCredentialSecret rewrites one credential's sealed payload in place,
+// provided the row still holds prev. A row holding anything else fails with
+// ErrConflict and a missing one with ErrNotFound, and neither is written.
 //
 // In place matters: the ciphertext is bound to the credential id as additional
 // authenticated data, so a rotation that inserted a new row and deleted the old
 // would change the AAD and produce something nothing can open. It is also what
 // makes spec §5.2's ordering hold — one row, one column, one write, so a crash
 // leaves either the old pair or the new one and never a mixture.
+//
+// The prev check is what keeps a refresh that started before an operator
+// replaced the credential from landing on top of the replacement: its tokens
+// descend from the secret that was replaced.
 func (d *DB) ReplaceCredentialSecret(ctx context.Context, key *crypto.Key,
-	id, secret string, expiresAt *int64) error {
-	return d.replaceSecret(ctx, key, "", id, secret, expiresAt)
+	id, prev, secret string, expiresAt *int64) error {
+
+	if secret == "" {
+		return fmt.Errorf("refusing to store an empty credential for %s", id)
+	}
+	return d.whileSecretIs(ctx, key, id, prev, func(tx *sql.Tx) error {
+		ciphertext, nonce, err := key.Seal([]byte(secret), []byte(id))
+		if err != nil {
+			return fmt.Errorf("seal credential %s: %w", id, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ?`,
+			ciphertext, nonce, expiresAt, id); err != nil {
+			return fmt.Errorf("replace credential %s: %w", id, err)
+		}
+		return nil
+	})
 }
 
-// ReplaceProviderCredentialSecret is ReplaceCredentialSecret scoped to one
-// provider, for a caller whose credential id arrived in a URL beside the
+// whileSecretIs runs write in one transaction with the read that confirms the
+// row still holds prev. The sync handle begins immediately, so no other writer
+// can change the row between the comparison and the write.
+func (d *DB) whileSecretIs(ctx context.Context, key *crypto.Key, id, prev string,
+	write func(tx *sql.Tx) error) error {
+
+	tx, err := d.Sync.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin credential write: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := credentialSecret(ctx, tx, key, id)
+	if err != nil {
+		return err
+	}
+	if current != prev {
+		return fmt.Errorf("credential %s was changed by another writer: %w", id, ErrConflict)
+	}
+	if err := write(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit credential write: %w", err)
+	}
+	return nil
+}
+
+// ReplaceProviderCredentialSecret rewrites a credential unconditionally, scoped
+// to one provider, for a caller whose credential id arrived in a URL beside the
 // provider's: an id that exists under another provider must not match.
 func (d *DB) ReplaceProviderCredentialSecret(ctx context.Context, key *crypto.Key,
-	providerID, id, secret string, expiresAt *int64) error {
-	return d.replaceSecret(ctx, key, providerID, id, secret, expiresAt)
-}
-
-func (d *DB) replaceSecret(ctx context.Context, key *crypto.Key,
 	providerID, id, secret string, expiresAt *int64) error {
 
 	if secret == "" {
@@ -174,13 +243,9 @@ func (d *DB) replaceSecret(ctx context.Context, key *crypto.Key,
 	if err != nil {
 		return fmt.Errorf("seal credential %s: %w", id, err)
 	}
-	q := `UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ?`
-	args := []any{ciphertext, nonce, expiresAt, id}
-	if providerID != "" {
-		q += ` AND provider_id = ?`
-		args = append(args, providerID)
-	}
-	res, err := d.Sync.ExecContext(ctx, q, args...)
+	res, err := d.Sync.ExecContext(ctx,
+		`UPDATE provider_keys SET ciphertext = ?, nonce = ?, expires_at = ? WHERE id = ? AND provider_id = ?`,
+		ciphertext, nonce, expiresAt, id, providerID)
 	if err != nil {
 		return fmt.Errorf("replace credential %s: %w", id, err)
 	}
@@ -189,9 +254,6 @@ func (d *DB) replaceSecret(ctx context.Context, key *crypto.Key,
 		return fmt.Errorf("replace credential %s: %w", id, err)
 	}
 	if n == 0 {
-		// The credential was deleted while a refresh was in flight. Silently
-		// succeeding would leave the worker believing it had persisted a token
-		// that does not exist.
 		return fmt.Errorf("credential %s no longer exists: %w", id, ErrNotFound)
 	}
 	return nil
@@ -256,19 +318,23 @@ func (d *DB) ExpiringCredentials(ctx context.Context, key *crypto.Key,
 	return scanCredentials(rows, key)
 }
 
-// DisableCredential takes a credential out of rotation and records why.
+// DisableCredential takes a credential out of rotation and records why,
+// provided the row still holds prev; otherwise it fails as
+// ReplaceCredentialSecret does. A refusal earned by a secret that has since
+// been replaced says nothing about the replacement.
 //
 // The reason lands in scope, which is the column master design §11 already
 // gives to per-credential text and which nothing else writes for an OAuth row.
 // Adding a column for a string the dashboard renders once would be schema churn
 // for a display concern.
-func (d *DB) DisableCredential(ctx context.Context, id, reason string) error {
-	_, err := d.Sync.ExecContext(ctx,
-		`UPDATE provider_keys SET enabled = 0, scope = ? WHERE id = ?`, reason, id)
-	if err != nil {
-		return fmt.Errorf("disable credential %s: %w", id, err)
-	}
-	return nil
+func (d *DB) DisableCredential(ctx context.Context, key *crypto.Key, id, prev, reason string) error {
+	return d.whileSecretIs(ctx, key, id, prev, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE provider_keys SET enabled = 0, scope = ? WHERE id = ?`, reason, id); err != nil {
+			return fmt.Errorf("disable credential %s: %w", id, err)
+		}
+		return nil
+	})
 }
 
 type sealedRow struct {

@@ -51,11 +51,16 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		// iteration must be copied — which is why the JSON is unmarshalled
 		// immediately rather than stashed.
 		payload := make([]byte, 0, 8<<10)
+		stopped := false
 
 		for {
 			msg, err := dec.Decode(r, payload)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
+					if !stopped {
+						yield(ir.StreamEvent{}, fmt.Errorf(
+							"upstream stream ended before messageStop: %w", io.ErrUnexpectedEOF))
+					}
 					return
 				}
 				yield(ir.StreamEvent{}, fmt.Errorf("decode eventstream frame: %w", err))
@@ -76,7 +81,11 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 				return
 			}
 
-			evs, err := decodeEvent(headerValue(msg.Headers, ":event-type"), msg.Payload)
+			eventType := headerValue(msg.Headers, ":event-type")
+			if eventType == "messageStop" {
+				stopped = true
+			}
+			evs, err := decodeEvent(eventType, msg.Payload)
 			if err != nil {
 				yield(ir.StreamEvent{}, err)
 				return

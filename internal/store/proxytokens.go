@@ -53,14 +53,41 @@ func (d *DB) CreateProxyToken(ctx context.Context, name string) (ProxyToken, err
 		CreatedAt: time.Now().UTC(),
 		Secret:    secret,
 	}
-	_, err := d.Write.ExecContext(ctx,
-		`INSERT INTO proxy_tokens (id, name, prefix, hash, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		tok.ID, tok.Name, tok.Prefix, hashProxyToken(secret), tok.CreatedAt.Unix())
+	tx, err := d.Write.BeginTx(ctx, nil)
 	if err != nil {
 		return ProxyToken{}, fmt.Errorf("store proxy token: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO proxy_tokens (id, name, prefix, hash, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		tok.ID, tok.Name, tok.Prefix, hashProxyToken(secret), tok.CreatedAt.Unix()); err != nil {
+		return ProxyToken{}, fmt.Errorf("store proxy token: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO settings (key, value) VALUES (?, '1')`,
+		settingProxyTokensIssued); err != nil {
+		return ProxyToken{}, fmt.Errorf("store proxy token: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return ProxyToken{}, fmt.Errorf("store proxy token: %w", err)
+	}
 	return tok, nil
+}
+
+// settingProxyTokensIssued is present once any proxy token has been created,
+// and is never removed: revoking the last token must not turn authentication
+// off. Migration 0024 writes it for a database that already held a token.
+const settingProxyTokensIssued = "proxy_tokens.issued"
+
+// ProxyTokensIssued reports whether a proxy token has ever been created, which
+// is what decides whether an unauthenticated proxy request is refused.
+func (d *DB) ProxyTokensIssued(ctx context.Context) (bool, error) {
+	_, ok, err := d.GetSetting(ctx, settingProxyTokensIssued)
+	if err != nil {
+		return false, fmt.Errorf("check proxy tokens issued: %w", err)
+	}
+	return ok, nil
 }
 
 // ProxyTokens lists what exists without reproducing any of it.

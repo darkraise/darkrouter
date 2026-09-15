@@ -186,17 +186,16 @@ func (t *Transport) chat(r *http.Request, body []byte) (*http.Response, error) {
 			_ = pw.Close()
 			return
 		}
-		if err == nil {
-			_ = w.finish()
-		}
-		_, _ = io.WriteString(pw, "data: [DONE]\n\n")
-		// A mid-stream failure closes the pipe with the error, so the executor
-		// sees a truncated stream rather than a clean end it would record as a
-		// complete answer.
 		if err != nil {
+			// An error event and no [DONE]: the stream parser stops at [DONE]
+			// and would never read a failure announced after it, so the
+			// truncated answer would pass for a complete one.
+			_ = writeEvent(pw, errorBody(err.Error()))
 			_ = pw.CloseWithError(err)
 			return
 		}
+		_ = w.finish()
+		_, _ = io.WriteString(pw, "data: [DONE]\n\n")
 		_ = pw.Close()
 	}()
 

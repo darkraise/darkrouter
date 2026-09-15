@@ -68,6 +68,10 @@ func TestRecognizeEventOnCandidates(t *testing.T) {
 			`{"candidates":[{"content":{"role":"model","parts":[{"text":"hm","thought":true}]}}]}`, true},
 		{"a function call commits",
 			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"f","args":{}}}]}}]}`, true},
+		{"a generated image commits",
+			`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0K"}}]}}]}`, true},
+		{"a literal inlineData null does not commit",
+			`{"candidates":[{"content":{"role":"model","parts":[{"inlineData":null}]}}]}`, false},
 		{"a literal functionCall null does not commit",
 			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":null}]}}]}`, false},
 		{"a bare thought signature does not commit",
@@ -93,7 +97,7 @@ func TestRecognizeEventReportsUsageMetadata(t *testing.T) {
 	if got.Usage == nil {
 		t.Fatal("no usage")
 	}
-	if got.Usage.InputTokens != 5 || got.Usage.OutputTokens != 2 ||
+	if got.Usage.InputTokens != 5 || got.Usage.OutputTokens != 6 ||
 		got.Usage.CacheReadTokens != 3 || got.Usage.ReasoningTokens != 4 {
 		t.Errorf("usage = %+v", *got.Usage)
 	}

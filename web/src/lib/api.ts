@@ -28,9 +28,47 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The parsed JSON error body, for a caller that needs more of it than
+     *  the message -- such as whether a failed write had in fact committed. */
+    readonly body?: unknown,
   ) {
     super(message)
   }
+}
+
+/** A write the server committed but could not load into routing. It answers
+ *  as an error because the gateway still serves the previous settings, yet
+ *  repeating it would repeat a change that already happened. */
+export function committedButNotRouted(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    typeof err.body === "object" &&
+    err.body !== null &&
+    (err.body as { routing_updated?: unknown }).routing_updated === false
+  )
+}
+
+/** Runs a write, resolving with the server's reason when it committed but did
+ *  not reach routing, and undefined when it fully applied. Anything else still
+ *  rejects. */
+export async function routingNotUpdated(write: Promise<unknown>): Promise<string | undefined> {
+  try {
+    await write
+    return undefined
+  } catch (err) {
+    if (committedButNotRouted(err)) return (err as Error).message
+    throw err
+  }
+}
+
+/** The server's warning when a create committed but did not reach routing.
+ *  A create answers that as a 201 rather than an error, since an error
+ *  invites the retry that stores a second copy, so it only shows in the body. */
+export function createdButNotRouted(reply: unknown): string | undefined {
+  if (typeof reply !== "object" || reply === null) return undefined
+  const { routing_updated, warning } = reply as { routing_updated?: unknown; warning?: unknown }
+  if (routing_updated !== false) return undefined
+  return typeof warning === "string" && warning !== "" ? warning : "the gateway did not load the change"
 }
 
 /** A failure the next attempt might not repeat: the network dropped, or the
@@ -100,6 +138,9 @@ export type RequestOptions = {
   /** TanStack Query's, so a query whose screen unmounted stops mid-flight
    *  rather than landing in a cache nobody is reading. */
   signal?: AbortSignal
+  /** Sent as If-Match, for a route that refuses a write pinned to a table
+   *  another admin has since changed. */
+  ifMatch?: string
 }
 
 /** Peeks at a 401 body without consuming it, to tell the two reasons apart. */
@@ -112,12 +153,14 @@ async function isExpectedRejection(res: Response, expected: string): Promise<boo
   }
 }
 
-async function request<T>(
+/** Sends one admin request and hands back its response once it is known to
+ *  be OK, having turned a failure into the ApiError every caller shares. */
+async function send(
   method: string,
   path: string,
   body?: unknown,
   opts?: RequestOptions,
-): Promise<T> {
+): Promise<Response> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
   if (method !== "GET") {
@@ -125,6 +168,7 @@ async function request<T>(
     // is worthless and one the client never received cannot be guessed.
     headers["X-CSRF-Token"] = csrfToken
   }
+  if (opts?.ifMatch !== undefined) headers["If-Match"] = opts.ifMatch
 
   const res = await fetch(path, {
     method,
@@ -142,17 +186,41 @@ async function request<T>(
   }
   if (!res.ok) {
     let message = res.statusText
+    let parsed: { error?: string } | undefined
     try {
-      const parsed = (await res.json()) as { error?: string }
+      parsed = (await res.json()) as { error?: string }
       if (parsed.error) message = parsed.error
     } catch {
       // A non-JSON error body means something upstream of the API answered.
       // The status line is all there is to report.
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, parsed)
   }
+  return res
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: RequestOptions,
+): Promise<T> {
+  const res = await send(method, path, body, opts)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/**
+ * Like api.get, but also hands back the response's ETag — request() has no
+ * way to return headers alongside its parsed body, and only a route that
+ * hands the ETag back as If-Match on a later write needs one.
+ */
+export async function getWithETag<T>(
+  path: string,
+  opts?: RequestOptions,
+): Promise<{ data: T; etag: string | null }> {
+  const res = await send("GET", path, undefined, opts)
+  return { data: (await res.json()) as T, etag: res.headers.get("ETag") }
 }
 
 export const api = {

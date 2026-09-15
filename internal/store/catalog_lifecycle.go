@@ -161,11 +161,13 @@ func (d *DB) RecordDiscoverySuccess(ctx context.Context, providerID string,
 		`UPDATE models
 		    SET input_price_micros_per_mtok      = ?,
 		        output_price_micros_per_mtok     = ?,
-		        -- An unquoted cache rate leaves the column as it was. Writing
-		        -- the NULL would discard a figure models.dev knows and this
-		        -- listing simply does not mention.
-		        cache_read_price_micros_per_mtok  = coalesce(?, cache_read_price_micros_per_mtok),
-		        cache_write_price_micros_per_mtok = coalesce(?, cache_write_price_micros_per_mtok),
+		        -- An unquoted cache rate is written as NULL even over a figure
+		        -- models.dev supplied. The stamp below makes every later sync
+		        -- keep these columns, so a directory figure left here would be
+		        -- frozen as quoted; the merge fills a NULL from the directories'
+		        -- current rates instead.
+		        cache_read_price_micros_per_mtok  = ?,
+		        cache_write_price_micros_per_mtok = ?,
 		        price_known  = 1,
 		        price_source = 'discovered'
 		  WHERE provider_id = ? AND model_id = ?`)

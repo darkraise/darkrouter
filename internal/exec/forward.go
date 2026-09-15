@@ -1,6 +1,9 @@
 package exec
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +11,7 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/sse"
 )
 
 // forwardStream pipes a forwarded SSE response to the client, recognizing
@@ -35,6 +39,10 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		pendingBytes int
 		committed    bool
 		usage        ir.Usage
+		// failed is an error event the provider sent after commit.
+		failed error
+		// terminated records that the event ending the response went out.
+		terminated bool
 	)
 
 	// recordWarning notes a post-commit fault on the row. Failover is
@@ -48,6 +56,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 	commit := func() {
 		committed = true
+		// Before the replay rather than after it, so the replay's writes to
+		// the client are held off idle like every later one.
+		ac.resetIdle()
 		ac.served(ac.Warns)
 		copyResponseHeaders(cw.Header(), resp.Header)
 		e.writeDiagnostics(cw, rec.ID, c, ac.Seq)
@@ -57,7 +68,6 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		}
 		pending, pendingBytes = nil, 0
 		cw.Flush()
-		ac.resetIdle()
 	}
 
 	// step handles one whole event. A non-nil error ends the attempt.
@@ -73,7 +83,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 		if !committed {
 			if re.ErrPayload != "" {
-				return adapter.OutcomeRetryableProvider, ac.reclassifyStream(re.ErrPayload)
+				return ac.reclassifyStream(forwardedStreamError(fw, raw, maxLine, re.ErrPayload))
 			}
 			if re.Content {
 				commit()
@@ -82,8 +92,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				return adapter.OutcomeSuccess, nil
 			}
 			if cap := cfg.Server.SSE.MaxPrecommitBytes; cap > 0 && pendingBytes+len(raw) > cap {
-				return adapter.OutcomeRetryableProvider,
-					ac.reclassifyStream(ErrPreCommitBufferFull.Error())
+				return ac.reclassifyStream(ErrPreCommitBufferFull)
 			}
 			// Counted against the cap either way — a flood shaped like the
 			// injected summary must still trip it — but only kept for replay
@@ -98,13 +107,28 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 			return adapter.OutcomeSuccess, nil
 		}
 
+		if re.ErrPayload != "" && failed == nil {
+			// Forwarded verbatim like every event after commit, and still
+			// the provider failing this response.
+			failed = forwardedStreamError(fw, raw, maxLine, re.ErrPayload)
+		}
 		if strip && re.UsageOnly {
 			return adapter.OutcomeSuccess, nil
 		}
 		_, _ = cw.Write(raw)
 		cw.Flush()
 		ac.resetIdle()
+		terminated = terminated || re.Terminal
 		return adapter.OutcomeSuccess, nil
+	}
+
+	// clientGone ends a response the client stopped taking. An error event
+	// the provider already sent came first, and is what the breaker hears.
+	clientGone := func(werr error) (adapter.Outcome, *ir.Error) {
+		if failed != nil {
+			return ac.failedAfterCommit(failed)
+		}
+		return ac.clientFailed(werr)
 	}
 
 	buf := make([]byte, copyChunkBytes)
@@ -116,10 +140,13 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				if out, ierr := step(raw); ierr != nil {
 					return out, ierr
 				}
+				if werr := cw.Err(); werr != nil {
+					return clientGone(werr)
+				}
 			}
 			if serr != nil {
 				if !committed {
-					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(serr.Error())
+					return ac.reclassifyStream(serr)
 				}
 				// Spec §6: past commit the recognizer's opinion no longer
 				// matters. What is already in the carry still owes the client
@@ -129,15 +156,49 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					_, _ = cw.Write(tail)
 				}
 				recordWarning("scanner error after commit, forwarding raw: " + serr.Error())
-				_, _ = io.Copy(cw, resp.Body)
 				cw.Flush()
+				// A cut here is not rendered as an error event: past the
+				// overflow there is no event boundary to put one on.
+				if _, err := copyFlushing(cw, resp.Body); err != nil {
+					return ac.failedAfterCommit(err)
+				}
+				if werr := cw.Err(); werr != nil {
+					return clientGone(werr)
+				}
 				return adapter.OutcomeSuccess, nil
 			}
 		}
 		if rerr != nil {
 			if rerr != io.EOF {
 				if !committed {
-					return adapter.OutcomeRetryableProvider, ac.reclassifyStream(rerr.Error())
+					return ac.reclassifyStream(rerr)
+				}
+				// A provider that announced its failure in an error event and
+				// then dropped the connection has already told the client, and
+				// the event says more than the close that followed it.
+				cause := rerr
+				if failed != nil {
+					cause = failed
+				}
+				// Classified before anything more is written, since a client
+				// that is gone fails those writes as well. A cancelled request
+				// context still gets the error event: at shutdown the server
+				// cancels it while the client is connected and reading.
+				out, ierr := ac.failedAfterCommit(cause)
+				if terminated && failed == nil {
+					// The whole response had already gone out: either the
+					// client closed before the provider's connection finished
+					// closing, or the provider dropped the connection after
+					// its terminal event. Neither is a failure of the response,
+					// and an error event after the end would reach a client
+					// that has finished reading.
+					if tail := sp.flush(); len(tail) > 0 {
+						_, _ = cw.Write(tail)
+					}
+					if werr := cw.Err(); werr != nil {
+						return clientGone(werr)
+					}
+					return adapter.OutcomeSuccess, nil
 				}
 				// Spec §9: after commit a failure becomes an in-stream error.
 				// Whatever the splitter still holds goes out first, so the
@@ -147,8 +208,10 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					_, _ = cw.Write(tail)
 				}
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
-				se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
-				return adapter.OutcomeSuccess, nil
+				if failed == nil {
+					se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
+				}
+				return out, ierr
 			}
 			break
 		}
@@ -167,7 +230,56 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		// would burn the whole chain every time a model stops immediately.
 		commit()
 	}
+	if werr := cw.Err(); werr != nil {
+		return clientGone(werr)
+	}
+	if failed != nil {
+		return ac.failedAfterCommit(failed)
+	}
 	return adapter.OutcomeSuccess, nil
+}
+
+// forwardedStreamError types an error event the recognizer flagged by reading
+// it back through the adapter's own stream parser, which is where the
+// provider's error vocabulary is mapped on the translated path. The two paths
+// then classify the same event the same way. A payload the parser does not
+// turn into an error stays untyped, which classifies as a provider fault.
+func forwardedStreamError(fw adapter.Forwarder, raw []byte, maxLine int, payload string) error {
+	if ad, ok := fw.(adapter.Adapter); ok {
+		for _, err := range ad.ParseStream(bytes.NewReader(raw), maxLine) {
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return errors.New(payload)
+}
+
+// errUnservableJSON is a 2xx body that is not JSON at all.
+var errUnservableJSON = errors.New("upstream returned a 2xx body that is not valid JSON")
+
+// unservableBody reports why a complete 2xx JSON body must not be forwarded
+// as an answer: it is not JSON, or it is the provider's error envelope. The
+// envelope is recognized by the same adapter code that finds an error event
+// in a forwarded stream, whose payload is the same JSON object, and typed by
+// the adapter's response parser where that parser types it. Forwarded, either
+// is recorded as a success and resets the breaker for a provider that failed.
+func unservableBody(fw adapter.Forwarder, resp *http.Response, body []byte) error {
+	if !json.Valid(body) {
+		return errUnservableJSON
+	}
+	if fw == nil || fw.RecognizeEvent(sse.Event{Data: string(body)}).ErrPayload == "" {
+		return nil
+	}
+	if ad, ok := fw.(adapter.Adapter); ok {
+		parsed := *resp
+		parsed.Body = io.NopCloser(bytes.NewReader(body))
+		var ie *ir.Error
+		if _, err := ad.ParseResponse(&parsed); errors.As(err, &ie) {
+			return ie
+		}
+	}
+	return fmt.Errorf("upstream returned an error body under status %d", resp.StatusCode)
 }
 
 // streamErrorWriter renders a terminal in-stream error in the inbound
@@ -236,6 +348,12 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 		return failedParse(ac, resp, fmt.Errorf("%s: %w", msgUpstreamReadFailed, rerr))
 	}
 
+	if !oversize {
+		if err := unservableBody(fw, resp, body); err != nil {
+			return failedParse(ac, resp, err)
+		}
+	}
+
 	warns := ac.Warns
 	if oversize {
 		warns = append(warns, ir.Warning{
@@ -258,7 +376,9 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 	_, _ = cw.Write(body)
 	if oversize {
 		// Committed already: a truncated body would be worse than a slow one.
-		_, _ = io.Copy(cw, resp.Body)
+		if _, err := copyFlushing(cw, resp.Body); err != nil {
+			return ac.failedAfterCommit(err)
+		}
 	}
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import { AddLocalDialog } from "./add-local-dialog"
 import type { Preset, Provider } from "../../lib/api-types"
 
@@ -138,6 +139,26 @@ describe("adding a local runtime", () => {
       base_url: "http://localhost:11434/v1",
       enabled: true,
     })
+  })
+
+  it("warns when the runtime was stored but the gateway did not load it", async () => {
+    const warning = vi.spyOn(toast, "warning")
+    stub()
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      String(url) === "/api/providers" && init?.method === "POST"
+        ? new Response(
+            JSON.stringify({ id: "ollama", routing_updated: false, warning: "the gateway is still routing with the previous settings" }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          )
+        : routes(url, init),
+    )
+    const onDone = mount()
+    const user = await choose("Ollama")
+    await user.click(screen.getByRole("button", { name: /^Add/ }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("ollama"))
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("still routing with the previous settings"))
   })
 
   it("reports why an unreachable endpoint was refused, and adds nothing", async () => {

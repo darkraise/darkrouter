@@ -71,6 +71,50 @@ func TestShippedAnthropicTraits(t *testing.T) {
 	}
 }
 
+// The subscription preset and Vertex's Anthropic publisher declare no rules of
+// their own either, and reach the same Claude generations through the same
+// request builder. Unknown traits there sent assistant prefill to models that
+// refuse it.
+func TestAlternateAnthropicPresetsTakeAnthropicTraits(t *testing.T) {
+	presets, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	merge := func(kind, preset, model string) Traits {
+		t.Helper()
+		got := Merge(MergeInput{
+			Providers: []provider.Provider{{ID: "p", Kind: kind, Preset: preset}},
+			Presets:   presets,
+			Rows:      []store.ModelRow{{ProviderID: "p", ModelID: model, State: "live"}},
+		})
+		if len(got) != 1 {
+			t.Fatalf("%s: merged to %d models", model, len(got))
+		}
+		return got[0].Traits
+	}
+	for _, c := range []struct{ kind, preset, model, anthropic string }{
+		{"anthropic", "anthropic-oauth", "claude-opus-4-7", "claude-opus-4-7"},
+		{"anthropic", "anthropic-oauth", "claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		{"vertex", "vertex-anthropic", "claude-opus-4-7@default", "claude-opus-4-7"},
+		{"vertex", "vertex-anthropic", "claude-opus-4-6@eu", "claude-opus-4-6"},
+	} {
+		got := merge(c.kind, c.preset, c.model)
+		want := merge("anthropic", "anthropic", c.anthropic)
+		if !got.Known {
+			t.Errorf("%s on %s: traits unknown", c.model, c.preset)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s on %s: traits = %+v, want the anthropic preset's %+v", c.model, c.preset, got, want)
+		}
+	}
+
+	// Vertex's Google publisher shares the kind and must not borrow Claude's.
+	if got := merge("vertex", "vertex", "claude-opus-4-7"); got.Known {
+		t.Errorf("the Google publisher lent Claude traits: %+v", got)
+	}
+}
+
 func TestUnknownAnthropicModelHasNoTraits(t *testing.T) {
 	// A proxied model whose name says nothing about its generation is the case
 	// the deleted name heuristic got wrong. Unknown is the honest answer: the
@@ -83,5 +127,61 @@ func TestUnknownAnthropicModelHasNoTraits(t *testing.T) {
 	})
 	if got[0].Traits.Known {
 		t.Errorf("traits invented for an unrecognized name: %+v", got[0].Traits)
+	}
+}
+
+// Bedrock serves Claude under its own ids, bare or behind a geo inference
+// profile, and its preset declares no trait rules of its own. The generation
+// facts are Anthropic's whichever endpoint serves the model, so each id must
+// resolve to exactly what the anthropic preset says for the same generation.
+func TestBedrockClaudeModelsTakeAnthropicTraits(t *testing.T) {
+	presets, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	merge := func(kind, preset, model string) Traits {
+		t.Helper()
+		got := Merge(MergeInput{
+			Providers: []provider.Provider{{ID: "p", Kind: kind, Preset: preset}},
+			Presets:   presets,
+			Rows:      []store.ModelRow{{ProviderID: "p", ModelID: model, State: "live"}},
+		})
+		if len(got) != 1 {
+			t.Fatalf("%s: merged to %d models", model, len(got))
+		}
+		return got[0].Traits
+	}
+	cases := []struct{ bedrock, anthropic string }{
+		{"us.anthropic.claude-opus-4-7", "claude-opus-4-7"},
+		{"anthropic.claude-opus-5", "claude-opus-5"},
+		{"global.anthropic.claude-sonnet-5", "claude-sonnet-5"},
+		{"anthropic.claude-fable-5", "claude-fable-5"},
+		{"us.anthropic.claude-mythos-5", "claude-mythos-5"},
+		{"us.anthropic.claude-opus-4-6-v1", "claude-opus-4-6"},
+		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"},
+		{"anthropic.claude-3-7-sonnet-20250219-v1:0", "claude-3-7-sonnet-20250219"},
+	}
+	for _, c := range cases {
+		got := merge("bedrock", "bedrock", c.bedrock)
+		want := merge("anthropic", "anthropic", c.anthropic)
+		if !got.Known {
+			t.Errorf("%s: traits unknown on Bedrock", c.bedrock)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: traits = %+v, want the anthropic preset's %+v", c.bedrock, got, want)
+		}
+	}
+
+	// Bedrock reads every model through the anthropic rules, so a rule whose
+	// fragment also names another publisher's model would lend it Claude's
+	// shape.
+	for _, model := range []string{
+		"amazon.nova-pro-v1:0", "meta.llama3-70b-instruct-v1:0",
+		"mistral.mistral-large-2407-v1:0", "us.deepseek.r1-v1:0",
+	} {
+		if got := merge("bedrock", "bedrock", model); got.Known {
+			t.Errorf("%s: traits invented for a non-Anthropic model: %+v", model, got)
+		}
 	}
 }

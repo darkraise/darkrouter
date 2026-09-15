@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -162,6 +163,164 @@ func TestAProbeAgainstABadCredentialReportsFailureNot500(t *testing.T) {
 	}
 }
 
+func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
+	// The console deletes a just-added key the probe marks rejected. A rate
+	// limit, an outage or an unreachable host says nothing about the key, and
+	// deleting on those loses a secret the operator may not have elsewhere.
+	//
+	// Nor does a bare 403: OpenAI answers one for an unsupported country and
+	// Anthropic for a key lacking a permission, both of which a new key would
+	// meet again. Their bad-key answer is a 401.
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		down     bool
+		rejected bool
+		probe    string
+	}{
+		{name: "401", status: http.StatusUnauthorized, rejected: true},
+		{name: "401 bad key", status: http.StatusUnauthorized, rejected: true,
+			body: `{"error":{"message":"Incorrect API key provided: sk-abc***xyz.","type":"invalid_request_error","code":"invalid_api_key"}}`},
+		// OpenAI answers these with a 401 too, for a key that is fine: the
+		// request came from outside the project's IP allowlist, or the account
+		// is not in an organization. A new key would meet the same answer.
+		{name: "401 ip allowlist", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"IP not authorized: your request IP does not match the configured IP allowlist for your project or organization."}}`},
+		{name: "401 organization", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"You must be a member of an organization to use the API."}}`},
+		// A restricted key without the Models read permission. The key is
+		// real; its scopes are not, and a new key with the same scopes would
+		// meet the same answer.
+		{name: "401 missing scopes", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"You have insufficient permissions for this operation. Missing scopes: api.model.read. Check that you have the correct role in your organization (Reader, Writer, Owner) and project (Member, Owner), and if you're using a restricted API key, that it has the necessary scopes.","type":"invalid_request_error","param":null,"code":null}}`},
+		{name: "403", status: http.StatusForbidden, probe: "permission"},
+		{name: "429", status: http.StatusTooManyRequests},
+		{name: "503", status: http.StatusServiceUnavailable},
+		{name: "unreachable", down: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+			if tc.down {
+				upstream.Close()
+			}
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			seedProviderWithKey(t, s, cookie, token, "p1", upstream.URL)
+
+			w := do(t, s, cookie, token, "POST", "/api/providers/p1/test", "")
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			var body struct {
+				OK       bool   `json:"ok"`
+				Rejected bool   `json:"rejected"`
+				Probe    string `json:"probe"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if body.OK {
+				t.Fatalf("ok = true: %s", w.Body.String())
+			}
+			if body.Rejected != tc.rejected {
+				t.Errorf("rejected = %v, want %v: %s", body.Rejected, tc.rejected, w.Body.String())
+			}
+			if tc.probe != "" && body.Probe != tc.probe {
+				t.Errorf("probe = %q, want %q: %s", body.Probe, tc.probe, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAGeminiKeyRefusalMarksTheCredentialRejected(t *testing.T) {
+	// Gemini answers an unknown API key with a 400, not a 401: the refusal is
+	// in the ErrorInfo reason. Any other 400 says nothing about the key.
+	//
+	// Its 403s are a disabled API or a key restriction, fixed in the Cloud
+	// project rather than by a new key. A key reported as leaked is a 403 too,
+	// and Google has flagged working keys that way on one endpoint only.
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		rejected bool
+	}{
+		{name: "API_KEY_INVALID", rejected: true, body: `{"error":{"code":400,
+			"message":"API Key not found. Please pass a valid API key.","status":"INVALID_ARGUMENT",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID",
+			"domain":"googleapis.com","metadata":{"service":"generativelanguage.googleapis.com"}},
+			{"@type":"type.googleapis.com/google.rpc.LocalizedMessage","locale":"en-US",
+			"message":"API Key not found. Please pass a valid API key."}]}}`},
+		{name: "other 400", body: `{"error":{"code":400,
+			"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}`},
+		{name: "SERVICE_DISABLED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Generative Language API has not been used in project 123 before or it is disabled.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"SERVICE_DISABLED","domain":"googleapis.com",
+			"metadata":{"service":"generativelanguage.googleapis.com","consumer":"projects/123"}}]}}`},
+		{name: "API_KEY_SERVICE_BLOCKED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.ModelService.ListModels are blocked.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_SERVICE_BLOCKED","domain":"googleapis.com",
+			"metadata":{"service":"generativelanguage.googleapis.com"}}]}}`},
+		{name: "API_KEY_IP_ADDRESS_BLOCKED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"The provided API key has an IP address restriction.","status":"PERMISSION_DENIED",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_IP_ADDRESS_BLOCKED","domain":"googleapis.com"}]}}`},
+		{name: "reported as leaked", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Your API key was reported as leaked. Please use another API key.",
+			"status":"PERMISSION_DENIED"}}`},
+		{name: "API_KEY_INVALID on a 403", status: http.StatusForbidden, rejected: true,
+			body: `{"error":{"code":403,"message":"API key expired. Please renew the API key.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				status := tc.status
+				if status == 0 {
+					status = http.StatusBadRequest
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer upstream.Close()
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers",
+				`{"id":"g","name":"g","kind":"gemini","auth_style":"query-param","base_url":"`+
+					upstream.URL+`/v1beta"}`); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			if w := do(t, s, cookie, token, "POST", "/api/providers/g/keys",
+				`{"label":"k","secret":"AIza-canary"}`); w.Code != http.StatusCreated {
+				t.Fatalf("key: %d %s", w.Code, w.Body.String())
+			}
+
+			got := probeProvider(t, s, cookie, token, "g")
+			if got.OK {
+				t.Fatal("a refusal must not report success")
+			}
+			if got.Rejected != tc.rejected {
+				t.Errorf("rejected = %v, want %v: %s", got.Rejected, tc.rejected, got.Error)
+			}
+			if tc.status == http.StatusForbidden && !tc.rejected && got.Probe != "permission" {
+				t.Errorf("probe = %q, want permission: %s", got.Probe, got.Error)
+			}
+		})
+	}
+}
+
 func TestASuccessfulProbeClearsTheCredentialCooldown(t *testing.T) {
 	// The whole reason the probe exists. A credential-level cooldown lives
 	// under a key with an EMPTY model, so clearing only the triples would
@@ -317,5 +476,107 @@ func TestASuccessfulProbeClearsTripleCooldownsToo(t *testing.T) {
 		if !br.Available(health.Key{ProviderID: "p1", KeyID: keyID, Model: model}) {
 			t.Errorf("%s is still cooling after a successful probe", model)
 		}
+	}
+}
+
+// Viewing the providers screen reads the breaker. It must not claim the
+// credential's half-open probe: nothing on a read path ever records an
+// outcome, so the credential would stay shut to every request.
+func TestListingProvidersDoesNotClaimTheProbe(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p1", "http://127.0.0.1:1")
+
+	br := s.deps.Breaker
+	br.Configure(func() (int, time.Duration) { return 3, 10 * time.Millisecond })
+	credKey := health.Key{ProviderID: "p1", KeyID: keyID}
+	br.Record(credKey, health.Signal{Outcome: adapter.OutcomeRetryableCredential})
+	time.Sleep(30 * time.Millisecond)
+
+	if w := do(t, s, cookie, token, "GET", "/api/providers", ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !br.Available(credKey) {
+		t.Error("listing providers claimed the probe; no request can reach the credential")
+	}
+}
+
+func TestAProbeCountsEveryPageOfTheListing(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("after_id") == "m2" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m3"}],"has_more":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"},{"id":"m2"}],"has_more":true,"last_id":"m2"}`))
+	}))
+	defer upstream.Close()
+
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"an","name":"an","kind":"anthropic","base_url":"`+upstream.URL+`","auth_style":"x-api-key"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers/an/keys",
+		`{"label":"primary","secret":"sk-seed-abcdef1234"}`); w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	got := probeProvider(t, s, cookie, token, "an")
+	if !got.OK || got.ModelCount != 3 {
+		t.Errorf("ok = %v, model_count = %d, error = %q; want all 3 models across both pages",
+			got.OK, got.ModelCount, got.Error)
+	}
+}
+
+// headerGatedUpstream lists models only to a request carrying want in header.
+func headerGatedUpstream(header, want string, models ...string) http.HandlerFunc {
+	list := listingUpstream(models...)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(header) != want {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		list(w, r)
+	}
+}
+
+func TestAProbeSendsTheKeyWhereTheProvidersOwnStyleSays(t *testing.T) {
+	cases := []struct {
+		name, body, header, want string
+	}{
+		{
+			// A token-protected vLLM: the preset ships style none, and the row
+			// overrides it to bearer.
+			name:   "bearer over a keyless preset",
+			body:   `{"id":"vl","preset":"vllm","base_url":"URL","auth_style":"bearer"}`,
+			header: "Authorization", want: "Bearer sk-seed-abcdef1234",
+		},
+		{
+			name:   "x-api-key on a custom provider",
+			body:   `{"id":"vl","name":"vl","kind":"openaicompat","base_url":"URL","auth_style":"x-api-key"}`,
+			header: "x-api-key", want: "sk-seed-abcdef1234",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(headerGatedUpstream(tc.header, tc.want, "m1"))
+			defer upstream.Close()
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers",
+				strings.Replace(tc.body, "URL", upstream.URL, 1)); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			if w := do(t, s, cookie, token, "POST", "/api/providers/vl/keys",
+				`{"label":"primary","secret":"sk-seed-abcdef1234"}`); w.Code != http.StatusCreated {
+				t.Fatalf("key: %d %s", w.Code, w.Body.String())
+			}
+			got := probeProvider(t, s, cookie, token, "vl")
+			if !got.OK || got.ModelCount != 1 {
+				t.Errorf("ok = %v, model_count = %d, error = %q", got.OK, got.ModelCount, got.Error)
+			}
+		})
 	}
 }

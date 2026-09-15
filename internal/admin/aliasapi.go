@@ -2,8 +2,10 @@ package admin
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -16,19 +18,29 @@ import (
 // designing out.
 
 func (s *Server) handleAliases(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Config == nil {
-		writeError(w, http.StatusServiceUnavailable, "no configuration store")
+	// The stored table rather than the live snapshot, because it is what PUT
+	// checks If-Match against. The two diverge after a save whose rows
+	// committed but whose republish failed, and an ETag taken from the
+	// snapshot would then never match: every guarded save would 409 until
+	// some other reload succeeded. The body comes from the same read, since
+	// an ETag has to describe the body it is sent with.
+	aliases, err := s.deps.DB.Aliases(r.Context())
+	if err != nil {
+		internalError(w, r, err)
 		return
 	}
-	aliases := s.deps.Config.Current().Aliases
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}
+	// Lets a save name the exact table it was read against: PUT echoes this
+	// back as If-Match, and a table another admin has since changed answers
+	// 409 rather than silently taking the edit.
+	w.Header().Set("ETag", `"`+config.AliasesRevision(aliases)+`"`)
 	writeJSON(w, http.StatusOK, aliases)
 }
 
 func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Config == nil || s.deps.DB == nil {
+	if s.deps.Config == nil {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
 		return
 	}
@@ -41,7 +53,38 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 	if aliases == nil {
 		aliases = map[string][]string{}
 	}
-	s.commitConfig(w, r, config.Patch{Aliases: aliases})
+	patch := config.Patch{Aliases: aliases}
+	// Optional: a caller that never read the ETag gets today's behaviour
+	// rather than a refusal it has no way to satisfy.
+	patch.AliasesRevisions = aliasesIfMatch(r.Header.Values("If-Match"))
+	s.commitConfig(w, r, patch)
+}
+
+// aliasesIfMatch reads the revisions If-Match pins, nil when it pins none. The
+// header is a comma-separated list and may repeat; a revision is hex, so a
+// comma never falls inside one.
+//
+// A weak validator is accepted as its strong form. A compressing reverse proxy
+// rewrites the ETag it forwards to W/"...", the browser echoes that back, and
+// refusing it would 409 every save made through the proxy. Weak comparison is
+// sound here because the revision fingerprints the table itself, not a byte
+// encoding of it. "*" only asks that the resource exist, which the alias table
+// always does, so on its own it pins nothing. The grammar forbids mixing it
+// with tags; a header that does is read by its tags, since treating the "*" as
+// the answer would let a stale save through.
+func aliasesIfMatch(headers []string) []string {
+	var revisions []string
+	for _, header := range headers {
+		for _, match := range strings.Split(header, ",") {
+			match = strings.TrimSpace(match)
+			if match == "*" || match == "" {
+				continue
+			}
+			match = strings.TrimPrefix(match, "W/")
+			revisions = append(revisions, strings.Trim(match, `"`))
+		}
+	}
+	return revisions
 }
 
 func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +96,7 @@ func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutPolicy(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Config == nil || s.deps.DB == nil {
+	if s.deps.Config == nil {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
 		return
 	}
@@ -105,6 +148,16 @@ type overrideBody struct {
 	ContextWindow *int                     `json:"context_window,omitempty"`
 }
 
+// overrideView is the GET shape: the override plus the catalog's own
+// capabilities for this (provider, model). The stored capabilities are three
+// plain bools, so an editor that changes one has to fill in the other two, and
+// the model list folds providers together and cannot say what this one
+// serves. PUT refuses the extra field as unknown.
+type overrideView struct {
+	overrideBody
+	CatalogCapabilities *store.ModelCapabilities `json:"catalog_capabilities,omitempty"`
+}
+
 // validSurfaces is the closed surface vocabulary an override may name.
 var validSurfaces = map[string]bool{
 	string(ir.SurfaceLLM): true, string(ir.SurfaceEmbedding): true,
@@ -120,19 +173,38 @@ func (s *Server) handleGetOverride(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
+	view := overrideView{CatalogCapabilities: s.catalogCapabilities(providerID, modelID)}
 	for _, o := range rows {
 		if o.ProviderID == providerID && o.ModelID == modelID {
-			writeJSON(w, http.StatusOK, overrideBody{
+			view.overrideBody = overrideBody{
 				Surfaces: o.Surfaces, Capabilities: o.Capabilities,
 				ContextWindow: o.ContextWindow,
-			})
-			return
+			}
+			break
 		}
 	}
 	// An absent override is the ordinary state of most catalog rows, so it
-	// is an empty body rather than a 404: browsers log every 404 as an
-	// error, and the console opens this for any model an operator inspects.
-	writeJSON(w, http.StatusOK, overrideBody{})
+	// is a body without override fields rather than a 404: browsers log
+	// every 404 as an error, and the console opens this for any model an
+	// operator inspects.
+	writeJSON(w, http.StatusOK, view)
+}
+
+// catalogCapabilities is what the merged catalog holds for one (provider,
+// model), or nil when it holds nothing. Under a capabilities override it is
+// the override itself, since the override wins the merge.
+func (s *Server) catalogCapabilities(providerID, modelID string) *store.ModelCapabilities {
+	if s.deps.Catalog == nil {
+		return nil
+	}
+	m, ok := s.deps.Catalog.Snapshot().Lookup(providerID, modelID)
+	if !ok {
+		return nil
+	}
+	return &store.ModelCapabilities{
+		Tools: m.Capabilities.Tools, Vision: m.Capabilities.Vision,
+		Reasoning: m.Capabilities.Reasoning,
+	}
 }
 
 func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +237,10 @@ func (s *Server) handlePutOverride(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(afterCommit(r))
+	if err := s.rebuildCatalog(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	writeJSON(w, http.StatusOK, body)
 }
 
@@ -175,7 +250,10 @@ func (s *Server) handleDeleteOverride(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	s.rebuildCatalog(afterCommit(r))
+	if err := s.rebuildCatalog(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -189,8 +267,13 @@ func afterCommit(r *http.Request) context.Context {
 // rebuildCatalog folds the write into the merged snapshot the router reads.
 // Without it an override sits in a table nothing consults until an unrelated
 // worker next rebuilds, which is up to a discovery interval away.
-func (s *Server) rebuildCatalog(ctx context.Context) {
-	if s.deps.Catalog != nil {
-		_ = s.deps.Catalog.Rebuild(ctx)
+func (s *Server) rebuildCatalog(ctx context.Context) error {
+	if s.deps.Catalog == nil {
+		return nil
 	}
+	if err := s.deps.Catalog.Rebuild(ctx); err != nil {
+		slog.Error("catalog rebuild after a committed change failed", "err", err)
+		return errRoutingNotUpdated
+	}
+	return nil
 }

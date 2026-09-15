@@ -4,9 +4,13 @@ import "net/http"
 
 // contentSecurityPolicy is what the console needs and nothing else. Scripts
 // come only from the bundle; inline styles are what the component library
-// emits; the two font origins are the only third parties the page reaches.
+// emits; the two font origins are the only third parties the page reaches for
+// its own sake. Images from any https origin and blob media exist because the
+// playground displays what a model returned: a hosted image URL and a speech
+// clip held in an object URL.
 const contentSecurityPolicy = "default-src 'self'; " +
-	"img-src 'self' data:; " +
+	"img-src 'self' data: https:; " +
+	"media-src 'self' blob:; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src 'self' https://fonts.gstatic.com; " +

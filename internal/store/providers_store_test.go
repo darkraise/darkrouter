@@ -220,3 +220,37 @@ func TestCreateProviderCarriesTheUnsanctionedOptIn(t *testing.T) {
 		t.Errorf("ProviderRows = %+v", rows)
 	}
 }
+
+// Two patches can both read a row with no location before either writes. The
+// write itself has to refuse moving a location the other one set.
+func TestALocationIsFilledOnlyOnce(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "vx", Name: "V", Kind: "vertex", BaseURL: "https://x", AuthStyle: "gcp-sa",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := "us-central1", "europe-west4"
+	if err := db.UpdateProvider(ctx, "vx", ProviderPatch{Location: &first}); err != nil {
+		t.Fatal(err)
+	}
+	name := "renamed"
+	err := db.UpdateProvider(ctx, "vx", ProviderPatch{Name: &name, Location: &second})
+	if !errors.Is(err, ErrLocationSet) {
+		t.Errorf("moving a set location: err = %v, want ErrLocationSet", err)
+	}
+	row, err := db.ProviderByID(ctx, "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != first || row.Name != "V" {
+		t.Errorf("location, name = %q, %q; a refused patch wrote", row.Location, row.Name)
+	}
+	if err := db.UpdateProvider(ctx, "vx", ProviderPatch{Location: &first}); err != nil {
+		t.Errorf("restating the location: %v", err)
+	}
+	if err := db.UpdateProvider(ctx, "missing", ProviderPatch{Location: &first}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown provider: err = %v, want ErrNotFound", err)
+	}
+}

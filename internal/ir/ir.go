@@ -228,10 +228,19 @@ type Message struct {
 	Content []ContentBlock
 }
 
+// SchemaOpenAPI marks a schema written in Gemini's OpenAPI 3.0 subset —
+// uppercase type names, nullable — which a Gemini client sends in
+// responseSchema and a function declaration's parameters. An unmarked schema
+// is JSON Schema. Gemini takes the two in different fields, and neither field
+// is documented to accept the other form.
+const SchemaOpenAPI = "openapi"
+
 type Tool struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	// SchemaDialect is SchemaOpenAPI or empty for JSON Schema.
+	SchemaDialect string `json:",omitempty"`
 
 	// Extra carries tool fields the IR has no slot for, keyed by their wire
 	// name: OpenAI's strict flag on a function, or the body of a provider
@@ -242,9 +251,16 @@ type Tool struct {
 	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
-// BuiltIn reports whether the tool is a provider-side capability rather than
-// a function the client implements.
-func (t Tool) BuiltIn() bool { return t.Name == "" && len(t.Extra) > 0 }
+// BuiltIn reports whether the tool is another dialect's built-in, such as
+// Gemini's googleSearch, rather than a function the client implements.
+//
+// A typed tool is not one, even without a name: Anthropic's mcp_toolset is
+// nameless, and it is Anthropic's own tool, which its dialect renders whole
+// and every other target handles as a typed server tool.
+func (t Tool) BuiltIn() bool {
+	_, typed := t.Extra["type"]
+	return t.Name == "" && len(t.Extra) > 0 && !typed
+}
 
 type ToolChoice struct {
 	Mode string // "auto" | "none" | "any" | "tool"
@@ -264,6 +280,8 @@ type Reasoning struct {
 type ResponseFormat struct {
 	Type   string // "json_schema" | "json_object"
 	Schema json.RawMessage
+	// SchemaDialect is SchemaOpenAPI or empty for JSON Schema.
+	SchemaDialect string `json:",omitempty"`
 	// Name and Strict travel with a json_schema format. Strict is a pointer
 	// because OpenAI's strict mode changes what schemas are accepted, so a
 	// client that did not ask for it must not be given it.
@@ -306,6 +324,12 @@ type Request struct {
 	Warnings []Warning
 }
 
+// Usage is one response's token counts.
+//
+// OutputTokens includes ReasoningTokens, which is only the breakdown of it a
+// provider reported. That is how OpenAI, Anthropic and Bedrock count; an
+// adapter for a provider that counts reasoning beside its output, as Gemini
+// does, adds the two together, and a writer for such a dialect splits them.
 type Usage struct {
 	InputTokens      int
 	OutputTokens     int
@@ -365,9 +389,13 @@ const (
 	EventContentDelta EventType = "content_delta"
 	EventBlockStop    EventType = "content_block_stop"
 	EventMessageDelta EventType = "message_delta"
-	EventMessageStop  EventType = "message_stop"
-	EventPing         EventType = "ping"
-	EventError        EventType = "error"
+	// EventMessageStop ends the content, not the stream: OpenAI-compatible
+	// and Bedrock upstreams report usage in a message_delta after it. A
+	// writer whose terminal frame carries usage writes that frame when the
+	// sequence ends.
+	EventMessageStop EventType = "message_stop"
+	EventPing        EventType = "ping"
+	EventError       EventType = "error"
 )
 
 // Delta carries incremental content for exactly one block kind.

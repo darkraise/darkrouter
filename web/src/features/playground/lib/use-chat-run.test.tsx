@@ -118,6 +118,15 @@ describe("running one chat turn", () => {
     expect(result.current.messages).toHaveLength(0)
   })
 
+  it("refuses to send under a schema it could not read", async () => {
+    yields(frame("x"))
+    const config = { ...emptyConfig(), model: "m", dialect: "openai" as const, schemaRaw: "{nope" }
+    const { result } = renderHook(() => useChatRun(config, () => {}))
+    await act(() => result.current.send("hi"))
+    expect(streamMock).not.toHaveBeenCalled()
+    expect(result.current.messages).toHaveLength(0)
+  })
+
   it("keeps the half answer when the operator stops", async () => {
     // Stopping is a decision, not a failure: the tokens were spent and the
     // partial answer is what they bought.
@@ -204,6 +213,40 @@ describe("running one chat turn", () => {
 
     await waitFor(() => expect(result.current.busy).toBe(false))
     expect(turns).toHaveLength(0)
+  })
+
+  it.each([
+    ["stopped before the first token", Object.assign(new Error("aborted"), { name: "AbortError" })],
+    ["failed with nothing streamed", new Error("upstream refused")],
+  ])("leaves an exchange %s out of the next request", async (_why, thrown) => {
+    // It stays on screen, but nothing was said and nothing was kept: sent on,
+    // the next request carries a prompt nobody answered and an empty
+    // assistant turn the provider reads as the model's own reply.
+    streamMock.mockImplementationOnce(async function* () {
+      throw thrown
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    traceMock.mockResolvedValue(null)
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    await act(() => result.current.send("first"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    expect(result.current.messages).toHaveLength(2)
+    const afterFirst = result.current.history
+
+    yields(frame("ok"))
+    await act(() => result.current.send("second"))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+
+    const body = streamMock.mock.calls[1]![1] as { messages: unknown[] }
+    expect(body.messages).toEqual([{ role: "user", content: "second" }])
+    // Nothing fixed the settings in between: no exchange existed to have been
+    // produced under them.
+    expect(afterFirst).toEqual([])
+    expect(result.current.history).toEqual([
+      { role: "user", content: "second" },
+      { role: "assistant", content: "ok" },
+    ])
   })
 
   it("is ready to send the moment a conversation is loaded", async () => {
@@ -347,11 +390,11 @@ describe("running one chat turn", () => {
     expect(result.current.error).toBe("")
   })
   it("does not let a superseded run write into the transcript that replaced it", async () => {
-    // traceWhenWritten takes no signal, so a run whose stream has ended sits
-    // in a wait of up to a second and a half. Reopening a conversation in that
-    // window used to stamp the old run's route, metrics and turn onto the new
-    // one -- which, once Chat mode persists from onTurn, writes one
-    // conversation's turn into another.
+    // A run whose stream has ended can sit in traceWhenWritten's wait of up to
+    // a second and a half. Reopening a conversation in that window used to
+    // stamp the old run's route and metrics onto the new one. The turn itself
+    // is still reported: it was sent from the thread that was left, and the
+    // caller files it under the owner it captured when the send began.
     yields(frame("old answer"))
     let releaseTrace: (v: unknown) => void = () => {}
     traceMock.mockImplementation(
@@ -377,7 +420,7 @@ describe("running one chat turn", () => {
 
     expect(result.current.messages).toEqual([{ role: "user", content: "from last week" }])
     expect(result.current.routes).toEqual({})
-    expect(turns).toEqual([])
+    expect(turns).toEqual([{ prompt: "hi", answer: "old answer", requestId: "01TRACE" }])
     expect(metrics).toHaveLength(metricsAfterLoad)
   })
 

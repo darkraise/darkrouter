@@ -28,6 +28,7 @@ import {
 } from "darkraise-ui"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
+import { useRowHeight } from "../../lib/row-height"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
 import {
@@ -41,6 +42,7 @@ import {
 import type { BreakerEntry, DiscoveryHealthRow, Preset, ProbeResult } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { NoMatch } from "../shell/empty-state"
+import { LoadError } from "../shell/screen-state"
 import { TestDrawer } from "./test-drawer"
 import { AccountStrip, ShareMeter, type AccountMix } from "../shell/measures"
 import { ProviderStateMark } from "../shell/status-mark"
@@ -85,15 +87,6 @@ const CHIP_SHAPE = "gap-1.5 rounded-full px-3"
  *  where nothing can be measured. */
 const MIN_LIST_HEIGHT = 320
 
-/** A floor, not a guess. The real row height is read back from the rows,
- *  because the density and font-size axes both move it and the window is
- *  placed from whatever number it is told. Low enough that no theme sits
- *  under it, so the measurement always converges from below. */
-const MIN_ROW_HEIGHT = 32
-
-/** The axes that change how tall a row wants to be. Their pinned height has
- *  to be let go before a smaller one can be observed. */
-const ROW_HEIGHT_AXES = ["data-density", "data-font-size"]
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
 
 /**
@@ -110,12 +103,15 @@ const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
  * changes for two different reasons -- the window resizing, and the filters
  * above wrapping to another line and pushing the table down.
  */
-function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
+function useListMetrics(
+  ref: RefObject<HTMLDivElement | null>,
+  data: readonly unknown[],
+): {
   height: number
   rowHeight: number
 } {
   const [height, setHeight] = useState(MIN_LIST_HEIGHT)
-  const [rowHeight, setRowHeight] = useState(MIN_ROW_HEIGHT)
+  const rowHeight = useRowHeight(ref, data)
 
   const measure = useCallback(() => {
     const el = ref.current
@@ -137,20 +133,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
       // observed, so an unguarded write would answer its own notification.
       setHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev))
     }
-
-    // The pinned height is a floor, so a row whose content does not fit
-    // reports the taller figure it actually took. Reading the tallest one back
-    // and pinning to that settles in a step or two and lands on the natural
-    // row height for whatever density and font size are in force.
-    const rows = el.querySelectorAll<HTMLElement>(
-      "tbody tr:not(.dr-data-table-virtual-pad)",
-    )
-    let tallest = 0
-    for (const row of rows) tallest = Math.max(tallest, row.getBoundingClientRect().height)
-    if (tallest > 0) {
-      const next = Math.max(Math.ceil(tallest), MIN_ROW_HEIGHT)
-      setRowHeight((prev) => (prev !== next ? next : prev))
-    }
   }, [ref])
 
   // After every render, not only on mount. The space left over depends on
@@ -170,16 +152,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
     observer.observe(el)
     // The panel above is what decides where the table starts.
     if (el.previousElementSibling) observer.observe(el.previousElementSibling)
-    // Changing density or font size has to let the pin go before it can be
-    // re-measured. The pinned height is a floor, so while it stands no row
-    // can report wanting less than it, and a list that had been at spacious
-    // would keep those rows for ever after a switch to compact. Dropping back
-    // to the floor lets the measurement climb to the new height from below.
-    const axes = new MutationObserver(() => setRowHeight(MIN_ROW_HEIGHT))
-    axes.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ROW_HEIGHT_AXES,
-    })
     // Inter arrives after first paint and re-flows everything above the
     // table. Nothing re-renders for it, so the measurement has to be asked
     // for again explicitly.
@@ -191,7 +163,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
       cancelled = true
       window.removeEventListener("resize", measure)
       observer.disconnect()
-      axes.disconnect()
     }
   }, [measure, ref])
 
@@ -296,7 +267,11 @@ function buildColumns(actions: RowActions): Columns {
               {r.row.id} · {r.row.kind}
             </span>
           </span>
-          {r.row.freeTier && <Badge variant="secondary">Free tier</Badge>}
+          {r.row.freeTier && (
+            <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+              Free tier
+            </Badge>
+          )}
         </span>
       ),
     },
@@ -503,7 +478,6 @@ export function ProvidersScreen() {
   const [localPreset, setLocalPreset] = useState<Preset | null>(null)
   const [keylessPreset, setKeylessPreset] = useState<Preset | null>(null)
   const tableRef = useRef<HTMLDivElement | null>(null)
-  const { height: listHeight, rowHeight } = useListMetrics(tableRef)
   // Which provider the dialog opens on. Null is the picker, which is what the
   // header button means; a row's own button has already named one.
   const [addPreset, setAddPreset] = useState<Preset | null>(null)
@@ -570,6 +544,7 @@ export function ProvidersScreen() {
     () => listRows(rows, healthRows, share, discoveryRows),
     [rows, healthRows, share, discoveryRows],
   )
+  const { height: listHeight, rowHeight } = useListMetrics(tableRef, [list])
   // Counted over everything the other filters leave, not over the whole
   // catalogue: a chip reading 40 beside a list of 6 would be counting rows
   // the screen is not showing.
@@ -610,6 +585,18 @@ export function ProvidersScreen() {
     () =>
       buildColumns(rowActions),
     [rowActions],
+  )
+
+  const listFailure =
+    providers.isError && !providers.data
+      ? { what: "The providers", error: providers.error }
+      : presets.isError && !presets.data
+        ? { what: "The provider catalogue", error: presets.error }
+        : null
+  const healthFailed = health.isError && !health.data
+  const discoveryFailed = discovery.isError && !discovery.data
+  const staleReadings = [providers, presets, health, discovery].some(
+    (q) => q.isError && q.data !== undefined,
   )
 
   return (
@@ -779,7 +766,47 @@ export function ProvidersScreen() {
       />
 
 
-      {presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
+      {/* A reading that did not arrive is said to be missing. Left to the
+          fallbacks, a failed health poll reads as nothing cooling and a failed
+          discovery poll as nothing ever discovered. */}
+      {healthFailed && (
+        <LoadError
+          what="Credential health"
+          error={health.error}
+          onRetry={() => void health.refetch()}
+          className="mb-4"
+        />
+      )}
+      {discoveryFailed && (
+        <LoadError
+          what="The discovery readings"
+          error={discovery.error}
+          onRetry={() => void discovery.refetch()}
+          className="mb-4"
+        />
+      )}
+
+      {/* A failed poll with readings already on screen is a staleness note,
+          not an alarm: what is below is real, just older than it looks. */}
+      {!listFailure && staleReadings && (
+        <p className="mb-2 text-sm text-[hsl(var(--warning))]">
+          last refresh failed — readings may be stale
+        </p>
+      )}
+
+      {listFailure ? (
+        // Not the table. Without the provider rows every preset merges in as
+        // unconfigured, which is a claim about providers that may be carrying
+        // traffic.
+        <LoadError
+          what={listFailure.what}
+          error={listFailure.error}
+          onRetry={() => {
+            void providers.refetch()
+            void presets.refetch()
+          }}
+        />
+      ) : presets.isSuccess && providers.isSuccess && rows.length === 0 ? (
         // Only ever a filter miss: the list is every provider the release
         // supports, so it is never empty on its own.
         <NoMatch what="providers" onClear={clearFilters} />
@@ -809,10 +836,11 @@ export function ProvidersScreen() {
         // pagination row model for a scrolling window, so every row is
         // reachable by scrolling and only the visible ones are rendered.
         //
-        // The row height is declared, not measured, so providers-table.css
-        // pins every row to it. The two numbers have to agree.
+        // The row height is declared, not measured, so the row-height-pinned
+        // rule in globals.css pins every row to it. The two numbers have to
+        // agree.
         <div
-          className="providers-table"
+          className="providers-table row-height-pinned"
           ref={tableRef}
           style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
         >

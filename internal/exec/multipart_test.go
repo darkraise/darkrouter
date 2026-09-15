@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -177,6 +178,78 @@ func TestParseFormRefusesAnOversizedUpload(t *testing.T) {
 	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
 		t.Errorf("err = %v; it must be distinguishable so the route answers 413", err)
 	}
+}
+
+func requirePayloadTooLarge(t *testing.T, err error) {
+	t.Helper()
+	var ie *ir.Error
+	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
+		t.Fatalf("err = %v, want payload_too_large", err)
+	}
+}
+
+// max_body_bytes is what the operator allows the upload itself, so a file of
+// exactly that size is accepted even though its boundaries, part headers and
+// the model field make the encoded body larger.
+func TestParseFormAcceptsAFileOfExactlyTheConfiguredMaximum(t *testing.T) {
+	const max = 4096
+	body, ct := buildForm(t, nil, [2]string{"a.mp3", strings.Repeat("A", max)}, false)
+	if _, err := parseForm(t, body, ct, max); err != nil {
+		t.Fatalf("err = %v; a %d-byte file was refused under a %d-byte maximum", err, max, max)
+	}
+}
+
+// The allowance for framing is not extra room for content: one byte of
+// upload past the maximum is still refused, and the error names the maximum.
+func TestParseFormRefusesUploadContentOneBytePastTheMaximum(t *testing.T) {
+	const max = 4096
+	body, ct := buildForm(t, [][2]string{{"model", "m"}},
+		[2]string{"a.mp3", strings.Repeat("A", max)}, false)
+	_, err := parseForm(t, body, ct, max)
+	requirePayloadTooLarge(t, err)
+	if !strings.Contains(err.Error(), "upload exceeds the configured maximum of 4096 bytes") {
+		t.Errorf("err = %v; it should name the upload and the configured maximum", err)
+	}
+}
+
+// Part headers are held for the life of the request, so they are spent from
+// a budget too. Otherwise a client sends megabytes of headers on empty parts
+// and nothing moves. Two parts keep the per-part charge far below the
+// allowance, so only the headers can exhaust it.
+func TestParseFormChargesPartHeadersAgainstTheBudget(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for range 2 {
+		h := textproto.MIMEHeader{
+			"Content-Disposition": {`form-data; name="pad"`},
+			"X-Pad":               {strings.Repeat("h", formFramingAllowance/2+4096)},
+		}
+		if _, err := w.CreatePart(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseForm(t, buf.String(), w.FormDataContentType(), 8<<10)
+	requirePayloadTooLarge(t, err)
+}
+
+// Every part costs memory beyond its encoded bytes, so a flood of empty parts
+// whose encoding alone fits must still exhaust the budget.
+func TestParseFormChargesEachPartAgainstTheBudget(t *testing.T) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for range 4000 {
+		if err := w.WriteField("x", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := parseForm(t, buf.String(), w.FormDataContentType(), int64(buf.Len())*2)
+	requirePayloadTooLarge(t, err)
 }
 
 func TestParseFormRejectsANonMultipartBody(t *testing.T) {

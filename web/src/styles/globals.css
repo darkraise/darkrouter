@@ -112,3 +112,47 @@
 .dr-table-wrapper {
   overflow-x: auto;
 }
+
+/* One scroll container, not two, for a virtualised table. The wrapper
+   carries overflow-x for the wide table, and a box with overflow-x: auto
+   computes overflow-y to auto as well -- so it, not the viewport, was the
+   nearest scrolling ancestor. Its horizontal scrollbar then sat at the
+   bottom of every row the window pads out, thousands of pixels below the
+   fold, and a header sticking to it stuck to a box that never scrolls
+   vertically. Handing both axes to the viewport puts the scrollbar at the
+   bottom of the visible box and gives sticky cells the box that moves. */
+.dr-data-table-viewport .dr-table-wrapper {
+  overflow: visible;
+}
+
+.dr-data-table-viewport {
+  overflow-x: auto;
+}
+
+/* Windowed rather than paged, and a window's arithmetic is only as good as the
+   row height it is told. DataTable places every row from that one number, so
+   rows that render 57px next to neighbours at 60px walk the list out of step
+   with its own scrollbar — three pixels a row is six hundred over the whole
+   catalogue. Pinning every row to one height is what makes the declared
+   figure true.
+
+   The height is a variable, not a constant, because the density and font-size
+   axes both move it: at spacious and large a row wants 70px, and a 60px rule
+   is only a floor, so the rows quietly grew past the number the window was
+   placed from. The screen reads the tallest row back (useRowHeight) and sets
+   the variable to it, so the two always agree whatever the operator has
+   picked. A row that grows lifts the pin for every row rather than standing
+   taller than its neighbours.
+
+   The spacer rows are excluded by name: their whole job is to be exactly as
+   tall as the rows they stand in for, and a fixed height would collapse them. */
+/* auto, so that with no script the rows are simply their natural height:
+   a wrong constant here would be worse than no pin at all. The screen
+   overwrites this with the height it measured. */
+.row-height-pinned {
+  --row-h: auto;
+}
+
+.row-height-pinned .dr-data-table-frame tbody tr:not(.dr-data-table-virtual-pad) {
+  height: var(--row-h);
+}

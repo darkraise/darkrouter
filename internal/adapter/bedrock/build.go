@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -24,11 +26,26 @@ func EndpointFor(region string) string {
 	return "https://bedrock-runtime." + region + ".amazonaws.com"
 }
 
+// regionShape is one hostname label: us-east-1, us-gov-west-1. A dot, slash
+// or @ would send the signed request to another host.
+var regionShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
+
+// CheckRegion refuses a region that would not form the documented endpoint.
+func CheckRegion(region string) error {
+	if !regionShape.MatchString(region) {
+		return fmt.Errorf("bedrock region %q is not a region name such as us-east-1", region)
+	}
+	return nil
+}
+
 func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	base := strings.TrimRight(t.BaseURL, "/")
 	if base == "" {
 		if t.Region == "" {
 			return nil, nil, fmt.Errorf("bedrock target has neither a base url nor a region")
+		}
+		if err := CheckRegion(t.Region); err != nil {
+			return nil, nil, err
 		}
 		base = EndpointFor(t.Region)
 	}
@@ -44,27 +61,55 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// they do for gemini and anthropic.
 	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
 	warns = append(warns, sysWarns...)
-	if sys := renderSystem(sysBlocks); len(sys) > 0 {
+	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model), toolPoints: toolCacheModel(t.Model)}
+
+	// Converse forwards all of this to Claude's native request, so the shapes
+	// a generation refuses, and the controls Anthropic rejects while thinking
+	// is on, are refused here exactly as on the direct API. Thinking is
+	// settled first because the other rules depend on it.
+	shape := claudeShapeOf(t)
+	// Tools come before thinking, which depends on the tool choice actually
+	// sent: none when every tool was dropped, auto when the model refused a
+	// forced one. They also come before system, the order cache markers are
+	// placed in.
+	tc, toolWarns := toolConfig(req, shape, marks)
+	sys, sw := renderSystem(sysBlocks, marks)
+	warns = append(warns, sw...)
+	if len(sys) > 0 {
 		body["system"] = sys
 	}
+	extra, extraWarns := additionalFields(t, req, sendsForcedChoice(tc))
+	thinking := shape.thinkingAlwaysOn || thinkingEnabled(extra)
 
-	messages, mw := renderMessages(xlate.NonSystemMessages(req.Messages))
+	msgs := xlate.NonSystemMessages(req.Messages)
+	dropPrefill := (thinking || shape.noPrefill) && endsInPrefill(msgs)
+	if dropPrefill {
+		msgs = msgs[:len(msgs)-1]
+	}
+	messages, mw := renderMessages(msgs, marks)
 	warns = append(warns, mw...)
+	if dropPrefill {
+		reason := "response prefill is rejected while thinking is on; the turn was dropped"
+		if shape.noPrefill {
+			reason = "this model rejects a response prefill; the turn was dropped"
+		}
+		warns = append(warns, ir.Warning{
+			Field: "messages[last].assistant_prefill", Target: targetName, Reason: reason,
+		})
+	}
 	body["messages"] = messages
-	if cfg := inferenceConfig(req); len(cfg) > 0 {
+	cfg, cw := inferenceConfig(req, shape, thinking)
+	warns = append(warns, cw...)
+	if len(cfg) > 0 {
 		body["inferenceConfig"] = cfg
 	}
-	if extra, w := additionalFields(t, req); len(extra) > 0 || len(w) > 0 {
-		warns = append(warns, w...)
-		if len(extra) > 0 {
-			body["additionalModelRequestFields"] = extra
-		}
+	warns = append(warns, extraWarns...)
+	if len(extra) > 0 {
+		body["additionalModelRequestFields"] = extra
 	}
-	if tc, w := toolConfig(req); tc != nil || len(w) > 0 {
-		warns = append(warns, w...)
-		if tc != nil {
-			body["toolConfig"] = tc
-		}
+	warns = append(warns, toolWarns...)
+	if tc != nil {
+		body["toolConfig"] = tc
 	}
 	if req.TopK != nil {
 		// topK lives in additionalModelRequestFields, which is per-family and
@@ -104,24 +149,126 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	return hr, warns, nil
 }
 
-func renderSystem(blocks []ir.ContentBlock) []any {
+func renderSystem(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warning) {
+	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		if b.Type == ir.BlockText && b.Text != "" {
 			out = append(out, map[string]any{"text": b.Text})
 			if b.CacheControl != nil {
-				out = append(out, cachePoint())
+				cp, w := marks.point(b.CacheControl)
+				warns = append(warns, w...)
+				if cp != nil {
+					out = append(out, cp)
+				}
 			}
 		}
 	}
-	return out
+	return out, warns
 }
 
-// cachePoint is Converse's spelling of a cache breakpoint. It is a block of
-// its own placed after the content it closes, rather than an attribute on
-// that content, and it takes no TTL.
-func cachePoint() map[string]any {
-	return map[string]any{"cachePoint": map[string]any{"type": "default"}}
+// cacheMarks tracks the four-breakpoint limit across a whole request. Converse
+// forwards the markers to the model, which rejects a fifth with a message that
+// does not name the surplus one, so it is dropped here and named.
+//
+// It also tracks the TTL rules. Only the models hourCacheModel names take a
+// ttl at all, and AWS requires every one-hour entry to precede every
+// five-minute one, in the order Converse processes them: tools, system,
+// messages. Markers are placed here in that same order.
+type cacheMarks struct {
+	used     int
+	hourTTL  bool
+	sentFive bool
+	// toolPoints is whether the model takes a cachePoint in tools. AWS lists
+	// tools among the checkpoint fields for the Claude models in its caching
+	// table only.
+	toolPoints bool
+}
+
+// point is Converse's spelling of a cache breakpoint: a block of its own placed
+// after the content it closes, rather than an attribute on that content.
+//
+// A five-minute marker is sent without a ttl. Five minutes is the default, and
+// a model without the ttl field in its cache-point contract, such as Nova,
+// accepts the omitted form.
+func (c *cacheMarks) point(cc *ir.CacheControl) (map[string]any, []ir.Warning) {
+	if c.used >= xlate.MaxCacheBreakpoints {
+		return nil, []ir.Warning{{
+			Field: "cache_control", Target: targetName,
+			Reason: "more than four breakpoints; the surplus marker was dropped",
+		}}
+	}
+	c.used++
+	cp := map[string]any{"type": "default"}
+	var warns []ir.Warning
+	switch {
+	case cc.TTL != "1h":
+		c.sentFive = true
+	case !c.hourTTL:
+		c.sentFive = true
+		warns = append(warns, ir.Warning{
+			Field: "cache_control", Target: targetName,
+			Reason: "this model has no one-hour cache TTL on Bedrock; cached for the default five minutes",
+		})
+	case c.sentFive:
+		warns = append(warns, ir.Warning{
+			Field: "cache_control", Target: targetName,
+			Reason: "a one-hour cache entry must precede every five-minute one; cached for five minutes",
+		})
+	default:
+		cp["ttl"] = "1h"
+	}
+	return map[string]any{"cachePoint": cp}, warns
+}
+
+// hourCacheModels are the Claude families AWS documents the one-hour cache TTL
+// for (Bedrock user guide, "Supported models, Regions, and explicit caching
+// limits"), keyed by what follows "anthropic.claude-" in a model id. Claude
+// 3.7 Sonnet and 3.5 Sonnet v2 are listed with five minutes only; every other
+// publisher documents no ttl.
+var hourCacheModels = []string{
+	"fable-5", "mythos-",
+	"opus-5", "opus-4-8", "opus-4-7", "opus-4-6", "opus-4-5",
+	"sonnet-5", "sonnet-4-6", "sonnet-4-5",
+	"haiku-4-5",
+}
+
+// toolCacheModels are the Claude families in the same AWS table, every one of
+// which lists tools among its checkpoint fields. Claude models missing from it,
+// such as Sonnet 4, Opus 4 and 4.1, and the 3.x Haiku models, are sent no tool
+// cachePoint.
+var toolCacheModels = append([]string{
+	"3-7-sonnet", "3-5-sonnet-20241022-v2",
+}, hourCacheModels...)
+
+// hourCacheModel reports whether a Bedrock model id names a model that takes a
+// one-hour cache TTL. An id that does not name its model, such as an
+// application inference profile ARN, is not assumed to: the one-hour marker
+// degrades to five minutes rather than failing the request.
+func hourCacheModel(model string) bool {
+	return claudeFamilyIn(model, hourCacheModels)
+}
+
+// toolCacheModel reports whether a Bedrock model id names a model that takes a
+// cachePoint in tools. As with hourCacheModel, an id that does not name its
+// model is not assumed to.
+func toolCacheModel(model string) bool {
+	return claudeFamilyIn(model, toolCacheModels)
+}
+
+func claudeFamilyIn(model string, families []string) bool {
+	m := strings.ToLower(model)
+	i := strings.Index(m, "anthropic.claude-")
+	if i < 0 {
+		return false
+	}
+	family := m[i+len("anthropic.claude-"):]
+	for _, p := range families {
+		if strings.HasPrefix(family, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAnthropicModel reports whether a Bedrock model id names a Claude model.
@@ -132,30 +279,43 @@ func isAnthropicModel(model string) bool {
 }
 
 // additionalFields renders what Converse only accepts per model family.
-// reasoning_config is Anthropic's; other publishers spell thinking
+// Converse hands these fields to the model's native request, so Claude's are
+// Anthropic's own thinking and output_config. Other publishers spell thinking
 // differently or not at all, and sending it to them is a ValidationException.
-func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.Warning) {
+func additionalFields(t *adapter.Target, req *ir.Request, forcedChoice bool) (map[string]any, []ir.Warning) {
 	r := req.Reasoning
-	if r == nil || r.Disabled {
+	if (r != nil && r.Disabled) || req.Metadata["anthropic_thinking_type"] == "disabled" {
+		return disabledThinking(t)
+	}
+	if r == nil {
 		return nil, nil
 	}
 	if !isAnthropicModel(t.Model) {
 		return nil, []ir.Warning{{
 			Field: "reasoning", Target: targetName,
-			Reason: "reasoning_config is an Anthropic-only additional field; dropped for this publisher",
+			Reason: "thinking is an Anthropic-only additional field; dropped for this publisher",
 		}}
 	}
 	// The catalog, not the model id, knows which shape a generation takes. A
-	// generation that dropped the manual budget refuses reasoning_config, and
-	// Converse has no field for the adaptive shape, so the honest move is to
-	// drop the ask and say so rather than send a request that cannot serve.
-	// TraitsKnown false keeps the permissive fallback an unrecognized or
-	// proxied model has always had.
+	// generation that dropped the manual budget refuses one and takes the
+	// adaptive shape instead. TraitsKnown false keeps the permissive
+	// fallback an unrecognized or proxied model has always had.
 	if t.Info.TraitsKnown && !t.Info.ManualBudget {
-		return nil, []ir.Warning{{
-			Field: "reasoning", Target: targetName,
-			Reason: "this model takes the adaptive thinking shape, which Converse cannot express; reasoning dropped",
-		}}
+		if !t.Info.Adaptive {
+			return nil, []ir.Warning{{
+				Field: "reasoning", Target: targetName,
+				Reason: "this model takes neither a thinking budget nor adaptive thinking; reasoning dropped",
+			}}
+		}
+		fields := map[string]any{"thinking": map[string]any{"type": "adaptive"}}
+		effort := xlate.AnthropicEffort(r.Effort)
+		if r.Effort == "" {
+			effort = xlate.BudgetEffort(r.Budget)
+		}
+		if effort != "" {
+			fields["output_config"] = map[string]any{"effort": effort}
+		}
+		return fields, nil
 	}
 
 	var warns []ir.Warning
@@ -176,45 +336,167 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 			Reason: "budget below Anthropic's 1024-token minimum; thinking disabled",
 		})
 	}
+	// Forced tool use is incompatible with manual thinking, though not with
+	// adaptive. The forced tool is the client's explicit instruction and an
+	// agentic loop depends on it; the reasoning depth is the softer ask.
+	if forcedChoice {
+		return nil, append(warns, ir.Warning{
+			Field: "reasoning", Target: targetName,
+			Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
+		})
+	}
 	return map[string]any{
-		"reasoning_config": map[string]any{"type": "enabled", "budget_tokens": budget},
+		"thinking": map[string]any{"type": "enabled", "budget_tokens": budget},
 	}, warns
 }
 
-func inferenceConfig(req *ir.Request) map[string]any {
+// disabledThinking renders a client's request for no thinking. A Claude model
+// with adaptive thinking may think when the field is absent — Opus 5 and
+// Sonnet 5 do by default — so only the explicit off switch turns it off. A
+// model that always thinks rejects that switch, and one from before adaptive
+// thinking has none; omitting the field is the only request either accepts.
+func disabledThinking(t *adapter.Target) (map[string]any, []ir.Warning) {
+	if !isAnthropicModel(t.Model) || !t.Info.TraitsKnown {
+		return nil, nil
+	}
+	if t.Info.ThinkingAlwaysOn {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model cannot turn thinking off; the request was sent with thinking on",
+		}}
+	}
+	if !t.Info.Adaptive {
+		return nil, nil
+	}
+	return map[string]any{"thinking": map[string]any{"type": "disabled"}}, nil
+}
+
+// claudeShape is what a Claude generation refuses. The zero restrictions —
+// free sampling and nothing refused — belong to another publisher's model and
+// to a Claude model the catalog does not know, which is sent as the client
+// asked.
+type claudeShape struct {
+	freeSampling       bool
+	noPrefill          bool
+	thinkingAlwaysOn   bool
+	noForcedToolChoice bool
+}
+
+func claudeShapeOf(t *adapter.Target) claudeShape {
+	if !isAnthropicModel(t.Model) || !t.Info.TraitsKnown {
+		return claudeShape{freeSampling: true}
+	}
+	return claudeShape{
+		freeSampling:       t.Info.FreeSampling,
+		noPrefill:          t.Info.NoPrefill,
+		thinkingAlwaysOn:   t.Info.ThinkingAlwaysOn,
+		noForcedToolChoice: t.Info.NoForcedToolChoice,
+	}
+}
+
+func thinkingEnabled(extra map[string]any) bool {
+	th, _ := extra["thinking"].(map[string]any)
+	return th != nil && th["type"] != "disabled"
+}
+
+func forcedToolChoice(tc *ir.ToolChoice) bool {
+	return tc != nil && (tc.Mode == "any" || tc.Mode == "tool")
+}
+
+// sendsForcedChoice reports whether a rendered toolConfig forces a tool.
+func sendsForcedChoice(toolConfig map[string]any) bool {
+	choice, _ := toolConfig["toolChoice"].(map[string]any)
+	_, anyTool := choice["any"]
+	_, oneTool := choice["tool"]
+	return anyTool || oneTool
+}
+
+// endsInPrefill reports whether the conversation ends in the prefill idiom: a
+// trailing assistant turn holding only text.
+func endsInPrefill(msgs []ir.Message) bool {
+	if len(msgs) == 0 {
+		return false
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != ir.RoleAssistant || len(last.Content) == 0 {
+		return false
+	}
+	for _, b := range last.Content {
+		if b.Type != ir.BlockText {
+			return false
+		}
+	}
+	return true
+}
+
+func inferenceConfig(req *ir.Request, shape claudeShape, thinking bool) (map[string]any, []ir.Warning) {
+	var warns []ir.Warning
+	drop := func(field, reason string) {
+		warns = append(warns, ir.Warning{Field: field, Target: targetName, Reason: reason})
+	}
+	const sealed = "this model rejects any non-default sampling parameter"
 	cfg := map[string]any{}
 	if req.MaxTokens != nil {
 		cfg["maxTokens"] = *req.MaxTokens
 	}
 	if req.Temperature != nil {
-		cfg["temperature"] = *req.Temperature
+		switch {
+		case !shape.freeSampling:
+			drop("temperature", sealed)
+		case thinking:
+			drop("temperature", "rejected by Anthropic alongside thinking")
+		default:
+			cfg["temperature"] = *req.Temperature
+		}
 	}
 	if req.TopP != nil {
-		cfg["topP"] = *req.TopP
+		switch {
+		case !shape.freeSampling:
+			drop("top_p", sealed)
+		case thinking && (*req.TopP < 0.95 || *req.TopP > 1):
+			drop("top_p", "with thinking on, Anthropic accepts top_p only between 0.95 and 1")
+		default:
+			cfg["topP"] = *req.TopP
+		}
 	}
 	if len(req.StopSequences) > 0 {
 		cfg["stopSequences"] = req.StopSequences
 	}
-	return cfg
+	return cfg, warns
 }
 
-func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
+func toolConfig(req *ir.Request, shape claudeShape, marks *cacheMarks) (map[string]any, []ir.Warning) {
 	if len(req.Tools) == 0 {
 		return nil, nil
 	}
 	var warns []ir.Warning
 	tools := make([]any, 0, len(req.Tools))
 	for _, t := range req.Tools {
+		// Another provider's built-in, such as Gemini's googleSearch, has no
+		// name, and a toolSpec without one fails validation.
+		if t.BuiltIn() {
+			for k := range t.Extra {
+				warns = append(warns, ir.Warning{
+					Field: "tools[]." + k, Target: targetName,
+					Reason: "another provider's built-in tool has no Converse equivalent; dropped",
+				})
+			}
+			continue
+		}
 		// A typed tool runs on its own provider's side. Rendering it as a
 		// toolSpec would have the model call a function nobody implements.
 		if _, typed := t.Extra["type"]; typed {
+			field := "tools[]." + t.Name
+			if t.Name == "" {
+				field = "tools[].type"
+			}
 			warns = append(warns, ir.Warning{
-				Field: "tools[]." + t.Name, Target: targetName,
+				Field: field, Target: targetName,
 				Reason: "provider-run tool has no Converse equivalent; dropped",
 			})
 			continue
 		}
-		schema := t.Schema
+		schema := xlate.JSONSchema(t.Schema, t.SchemaDialect)
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object"}`)
 		}
@@ -226,12 +508,33 @@ func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 				"inputSchema": map[string]any{"json": schema},
 			},
 		})
+		if raw, ok := t.Extra["cache_control"]; ok {
+			cp, w := toolCachePoint(raw, marks)
+			warns = append(warns, w...)
+			if cp != nil {
+				tools = append(tools, cp)
+			}
+		}
 	}
 	if len(tools) == 0 {
+		if forcedToolChoice(req.ToolChoice) {
+			warns = append(warns, ir.Warning{
+				Field: "tool_choice", Target: targetName,
+				Reason: "no tool was left to declare; the forced tool choice was dropped",
+			})
+		}
 		return nil, warns
 	}
 	cfg := map[string]any{"tools": tools}
-	if tc := req.ToolChoice; tc != nil {
+	tc := req.ToolChoice
+	if shape.noForcedToolChoice && forcedToolChoice(tc) {
+		warns = append(warns, ir.Warning{
+			Field: "tool_choice", Target: targetName,
+			Reason: "this model rejects a forced tool choice; downgraded to auto",
+		})
+		tc = &ir.ToolChoice{Mode: "auto"}
+	}
+	if tc != nil {
 		switch tc.Mode {
 		case "any":
 			cfg["toolChoice"] = map[string]any{"any": map[string]any{}}
@@ -246,6 +549,20 @@ func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 	return cfg, warns
 }
 
+// toolCachePoint renders a tool's cache_control as the cachePoint that follows
+// it in tools, closing every tool declared before it.
+func toolCachePoint(raw json.RawMessage, marks *cacheMarks) (map[string]any, []ir.Warning) {
+	reason := "this model takes no cache checkpoint in tools on Bedrock; the marker was dropped"
+	var cc ir.CacheControl
+	if marks.toolPoints {
+		if json.Unmarshal(raw, &cc) == nil {
+			return marks.point(&cc)
+		}
+		reason = "the marker is not a cache_control object; it was dropped"
+	}
+	return nil, []ir.Warning{{Field: "tools[].cache_control", Target: targetName, Reason: reason}}
+}
+
 // renderMessages maps IR turns to Converse turns, merging consecutive
 // same-role turns into one.
 //
@@ -254,16 +571,22 @@ func toolConfig(req *ir.Request) (map[string]any, []ir.Warning) {
 // first thing the tests assert. It also requires strictly alternating roles,
 // and the IR routinely produces two user turns in a row — a tool-result turn
 // follows a user turn in every agentic loop.
-func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
+func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) {
 	var (
 		warns   []ir.Warning
 		out     = make([]any, 0, len(msgs))
 		curRole string
 		content []any
+		docs    int
 	)
 	flush := func() {
 		if curRole == "" {
 			return
+		}
+		if curRole == "user" {
+			var w []ir.Warning
+			content, w = conformDocuments(content)
+			warns = append(warns, w...)
 		}
 		out = append(out, map[string]any{"role": curRole, "content": content})
 		curRole, content = "", nil
@@ -273,8 +596,18 @@ func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"
 		}
-		blocks, w := renderBlocks(m.Content)
+		blocks, w := renderBlocks(m.Content, marks, &docs)
 		warns = append(warns, w...)
+		if role == "assistant" {
+			var dropped bool
+			blocks, dropped = withoutDocuments(blocks)
+			if dropped {
+				warns = append(warns, ir.Warning{
+					Field: "document", Target: targetName,
+					Reason: "Converse takes documents in user turns only; an assistant turn's document was dropped",
+				})
+			}
+		}
 		if len(blocks) == 0 {
 			continue
 		}
@@ -288,11 +621,83 @@ func renderMessages(msgs []ir.Message) ([]any, []ir.Warning) {
 	return out, warns
 }
 
-func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
+// maxDocumentsPerMessage is Converse's limit on documents in one message.
+const maxDocumentsPerMessage = 5
+
+func isDocument(block any) bool {
+	m, ok := block.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = m["document"]
+	return ok
+}
+
+func withoutDocuments(blocks []any) ([]any, bool) {
+	out := blocks[:0:0]
+	dropped := false
+	for _, b := range blocks {
+		if isDocument(b) {
+			dropped = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, dropped
+}
+
+// conformDocuments applies the rules Converse sets on documents in a user
+// message, after consecutive turns have merged into it: at most five, and a
+// text block beside them. A client can send a file with its instruction in the
+// system prompt, which Converse would refuse outright.
+func conformDocuments(content []any) ([]any, []ir.Warning) {
+	var (
+		warns       []ir.Warning
+		out         = make([]any, 0, len(content)+1)
+		docs, extra int
+		hasText     bool
+	)
+	for _, b := range content {
+		if isDocument(b) {
+			if docs == maxDocumentsPerMessage {
+				extra++
+				continue
+			}
+			docs++
+		}
+		if m, ok := b.(map[string]any); ok {
+			if _, ok := m["text"]; ok {
+				hasText = true
+			}
+		}
+		out = append(out, b)
+	}
+	if extra > 0 {
+		warns = append(warns, ir.Warning{
+			Field: "document", Target: targetName,
+			Reason: "Converse takes five documents in a message; " + strconv.Itoa(extra) + " more were dropped",
+		})
+	}
+	if docs > 0 && !hasText {
+		out = append([]any{map[string]any{"text": "Attached documents."}}, out...)
+		warns = append(warns, ir.Warning{
+			Field: "document", Target: targetName,
+			Reason: "Converse needs a text block beside documents; a short one was added",
+		})
+	}
+	return out, warns
+}
+
+// renderBlocks renders content, placing cache breakpoints only when marks is
+// non-nil: tool-result content is rendered without them, because
+// ToolResultContentBlock has no cachePoint member. docs counts the documents
+// rendered so far in the request, which names each one.
+func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks, docs *int) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
 		before := len(out)
+		mark := b.CacheControl
 		switch b.Type {
 		case ir.BlockText:
 			if b.Text != "" {
@@ -300,6 +705,12 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 			}
 		case ir.BlockImage:
 			blk, w := imageBlock(b.Media)
+			warns = append(warns, w...)
+			if blk != nil {
+				out = append(out, blk)
+			}
+		case ir.BlockDocument:
+			blk, w := documentBlock(b.Media, docs)
 			warns = append(warns, w...)
 			if blk != nil {
 				out = append(out, blk)
@@ -323,8 +734,15 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 			if b.ToolResult == nil {
 				continue
 			}
-			inner, w := renderBlocks(b.ToolResult.Content)
+			inner, w := renderBlocks(b.ToolResult.Content, nil, docs)
 			warns = append(warns, w...)
+			// A marker inside the result closes the result as a whole, which
+			// is the nearest place Converse admits one.
+			for _, c := range b.ToolResult.Content {
+				if mark == nil && c.CacheControl != nil {
+					mark = c.CacheControl
+				}
+			}
 			res := map[string]any{
 				"toolUseId": b.ToolResult.ToolUseID,
 				"content":   inner,
@@ -360,8 +778,12 @@ func renderBlocks(blocks []ir.ContentBlock) ([]any, []ir.Warning) {
 		}
 		// A breakpoint closes the block that carried it, so it follows only a
 		// block that was actually rendered.
-		if b.CacheControl != nil && len(out) > before {
-			out = append(out, cachePoint())
+		if marks != nil && mark != nil && len(out) > before {
+			cp, w := marks.point(mark)
+			warns = append(warns, w...)
+			if cp != nil {
+				out = append(out, cp)
+			}
 		}
 	}
 	return out, warns
@@ -391,6 +813,47 @@ func imageBlock(m *ir.Media) (map[string]any, []ir.Warning) {
 		// The IR carries base64; Converse's bytes member is base64 on the wire.
 		"source": map[string]any{"bytes": m.Data},
 	}}, nil
+}
+
+// documentBlock names each document by its position rather than by the client's
+// filename. Converse requires a name and restricts its alphabet, and AWS
+// recommends a neutral one because the model can read a name as an instruction.
+func documentBlock(m *ir.Media, docs *int) (map[string]any, []ir.Warning) {
+	if m == nil {
+		return nil, nil
+	}
+	if m.Data == "" {
+		return nil, []ir.Warning{{
+			Field: "document", Target: targetName,
+			Reason: "Converse takes document bytes only; a URL or file id cannot be sent",
+		}}
+	}
+	format, ok := documentFormats[strings.ToLower(strings.TrimSpace(m.MIME))]
+	if !ok {
+		return nil, []ir.Warning{{
+			Field: "document", Target: targetName,
+			Reason: "Converse accepts pdf, csv, doc, docx, xls, xlsx, html, txt and md documents only; " +
+				m.MIME + " was dropped",
+		}}
+	}
+	*docs++
+	return map[string]any{"document": map[string]any{
+		"format": format,
+		"name":   "document-" + strconv.Itoa(*docs),
+		"source": map[string]any{"bytes": m.Data},
+	}}, nil
+}
+
+var documentFormats = map[string]string{
+	"application/pdf":    "pdf",
+	"text/csv":           "csv",
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/vnd.ms-excel": "xls",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+	"text/html":     "html",
+	"text/plain":    "txt",
+	"text/markdown": "md",
 }
 
 func imageFormat(mime string) (string, bool) {

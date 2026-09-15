@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { chatBody, parseSchema, parseStopLines } from "./request"
+import { chatBody, parseSchema, parseStopLines, requestProblem } from "./request"
 import { emptyConfig } from "../config"
 
 const base = { ...emptyConfig(), model: "m", messages: [{ role: "user", content: "hi" }] }
@@ -79,5 +79,30 @@ describe("building the request body", () => {
     expect(body.temperature).toBe(0.2)
     expect(body.max_tokens).toBe(100)
     expect(body.system).toBe("be brief")
+  })
+})
+
+describe("what stops a request from being sent", () => {
+  it("names malformed tools", () => {
+    expect(requestProblem({ ...base, toolsRaw: "[{" })).toMatch(/^tools must be JSON/)
+  })
+
+  it("names a malformed schema on a dialect that sends one", () => {
+    // chatBody drops a schema it cannot parse, so sending anyway asks the
+    // provider an unconstrained question and reads as the schema being ignored.
+    expect(requestProblem({ ...base, dialect: "openai", schemaRaw: "{nope" })).toMatch(
+      /^schema must be JSON/,
+    )
+    expect(requestProblem({ ...base, dialect: "gemini", schemaRaw: "[]" })).toBe(
+      "schema must be a JSON object",
+    )
+  })
+
+  it("ignores a schema the dialect never sends", () => {
+    expect(requestProblem({ ...base, dialect: "anthropic", schemaRaw: "{nope" })).toBeUndefined()
+  })
+
+  it("finds nothing wrong with a well-formed request", () => {
+    expect(requestProblem({ ...base, toolsRaw: "[]", schemaRaw: '{"type":"object"}' })).toBeUndefined()
   })
 })

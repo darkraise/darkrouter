@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/auth"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -49,11 +50,31 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// Breaker entries are per triple. Folded per provider here because spec §6
 	// asks for provider-level signals: forty models cooling on one dead
 	// credential is one dead provider, and forty red dots would say otherwise.
+	//
+	// Only enabled credentials count, as on the Providers screen: the router
+	// drops a disabled one, so its cooldown says nothing about whether the
+	// provider can be sent to.
+	//
+	// A keyless provider with no enabled credential is sent one attempt keyed
+	// on the empty credential id, so that is the id its cooldowns carry.
+	enabled := map[health.Key]bool{}
+	for _, p := range rows {
+		usable := false
+		for _, c := range summaries[p.ID] {
+			if c.Enabled {
+				enabled[health.Key{ProviderID: p.ID, KeyID: c.ID}] = true
+				usable = true
+			}
+		}
+		if !usable && auth.IsKeyless(p.AuthStyle) {
+			enabled[health.Key{ProviderID: p.ID}] = true
+		}
+	}
 	cooling := map[string]int{}
 	if s.deps.Breaker != nil {
 		now := time.Now()
 		for _, e := range s.deps.Breaker.Snapshot() {
-			if e.CoolingUntil.After(now) {
+			if e.CoolingUntil.After(now) && enabled[health.Key{ProviderID: e.Key.ProviderID, KeyID: e.Key.KeyID}] {
 				cooling[e.Key.ProviderID]++
 			}
 		}
@@ -64,24 +85,29 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		t := tileView{ID: p.ID, Name: p.Name, Enabled: p.Enabled, Cooling: cooling[p.ID]}
 		creds := summaries[p.ID]
 		t.Credentials = len(creds)
+		usable := 0
 		for _, c := range creds {
 			// The one state only the operator can fix. Everything else
 			// either recovers on its own or is a provider's problem, so
 			// it is called out rather than folded into "degraded".
 			if !c.Enabled {
 				t.NeedsAuth = true
+			} else {
+				usable++
 			}
 		}
+		keyless := auth.IsKeyless(p.AuthStyle)
 		switch {
 		case !p.Enabled:
 			t.State = "disabled"
 		// A keyless provider with no credentials is configured: there is
 		// nothing left for an operator to add, and calling it unconfigured
-		// sends them looking for a key that does not exist.
-		case t.Credentials == 0 && auth.IsKeyless(p.AuthStyle):
-			t.State = "healthy"
-		case t.Credentials == 0:
+		// sends them looking for a key that does not exist. It still falls
+		// through to the cooling check, since it routes without a key.
+		case t.Credentials == 0 && !keyless:
 			t.State = "unconfigured"
+		case usable == 0 && !keyless:
+			t.State = "degraded"
 		case t.Cooling > 0:
 			t.State = "degraded"
 		default:
@@ -116,7 +142,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		// arcs is worse than an overview that fails to load.
 		edges = []store.FailoverEdge{}
 	}
-	series, err := s.deps.DB.UsageBy(r.Context(), 30, store.UsageByDayOnly)
+	series, err := s.deps.DB.UsageBy(r.Context(), s.now(), 30, store.UsageByDayOnly)
 	if err != nil {
 		series = []store.UsageRow{}
 	}
@@ -125,7 +151,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// as the day's, so it is sourced from the day rather than from
 	// overviewWindow, or a busy gateway would report a few minutes of spend
 	// as though it were the whole day.
-	spendMicros, spendPriced, spendEstimated, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
+	spendMicros, spendPriced, spendEstimated, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(s.now()))
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -179,7 +205,8 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.deps.DB.UsageBy(r.Context(), days, dim)
+	now := s.now()
+	rows, err := s.deps.DB.UsageBy(r.Context(), now, days, dim)
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -200,7 +227,11 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	resp := map[string]any{"days": out, "priced": priced}
+	first, last := store.UsageWindow(now, days)
+	// The window is served rather than left to the console to derive, so a
+	// chart and a Requests drilldown agree with it whatever the browser clock
+	// says.
+	resp := map[string]any{"days": out, "priced": priced, "first_day": first, "last_day": last}
 	// Omitted only when there is no group_by: existing consumers parse this
 	// response today and must see the exact shape they always have.
 	if groupBy != "" {

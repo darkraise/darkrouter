@@ -3,12 +3,15 @@ package gemini
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/sse"
 )
+
+var errStreamTruncated = fmt.Errorf("upstream stream ended before a finish reason: %w", io.ErrUnexpectedEOF)
 
 // ParseStream reads Gemini's alt=sse stream.
 //
@@ -21,6 +24,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		reader := sse.NewReader(r, maxLine)
 		var (
 			started    bool
+			ids        *callIDs
 			textIdx    = -1
 			thoughtIdx = -1
 			nextIdx    int
@@ -28,7 +32,8 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 			// hasCall spans the whole candidate: the call arrives in one
 			// chunk and the finish reason in a later one, and STOP on that
 			// later chunk means tool_use only if this remembers the call.
-			hasCall bool
+			hasCall      bool
+			droppedMedia bool
 		)
 
 		closeAll := func() bool {
@@ -52,7 +57,9 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 		for {
 			raw, err := reader.Next()
 			if errors.Is(err, io.EOF) {
-				closeAll()
+				// A finish reason returns from the loop, so reaching the end
+				// of the body means the candidate never finished.
+				yield(ir.StreamEvent{}, errStreamTruncated)
 				return
 			}
 			if err != nil {
@@ -86,6 +93,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 
 			if !started {
 				started = true
+				ids = newCallIDs(chunk.ResponseID)
 				if !yield(ir.StreamEvent{
 					Type: ir.EventMessageStart, ID: chunk.ResponseID, Model: chunk.ModelVersion,
 				}, nil) {
@@ -116,7 +124,7 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					nextIdx++
 					d := &ir.Delta{
 						Type:   ir.BlockToolUse,
-						ToolID: p.FunctionCall.ID, ToolName: p.FunctionCall.Name,
+						ToolID: ids.next(p.FunctionCall.ID), ToolName: p.FunctionCall.Name,
 					}
 					if !yield(ir.StreamEvent{Type: ir.EventBlockStart, Index: idx, Delta: d}, nil) {
 						return
@@ -132,18 +140,33 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 						return
 					}
 
+				case p.InlineData != nil:
+					// The IR delta has no slot for media and no client writer
+					// renders it, so generated media cannot reach a translated
+					// client; it is dropped, but never silently.
+					droppedMedia = true
+
 				case p.Thought:
 					idx, ok := openBlock(&thoughtIdx, ir.BlockThinking)
 					if !ok {
 						return
 					}
-					// Text and signature ride one delta. A part carrying only
-					// a signature yields an empty thought delta, which is
-					// not content-bearing, so a signature alone never
+					// Text and signature go out as two deltas, text first, as
+					// Anthropic streams them: its writer has no event carrying
+					// both and would keep only the signature. A signature-only
+					// delta is not content-bearing, so a signature alone never
 					// commits the response.
-					d := &ir.Delta{Type: ir.BlockThinking, Thinking: p.Text, Signature: p.ThoughtSignature}
-					if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
-						return
+					if p.Text != "" {
+						d := &ir.Delta{Type: ir.BlockThinking, Thinking: p.Text}
+						if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
+							return
+						}
+					}
+					if p.ThoughtSignature != "" || p.Text == "" {
+						d := &ir.Delta{Type: ir.BlockThinking, Signature: p.ThoughtSignature}
+						if !yield(ir.StreamEvent{Type: ir.EventContentDelta, Index: idx, Delta: d}, nil) {
+							return
+						}
 					}
 
 				case p.Text != "" || p.ThoughtSignature != "":
@@ -173,6 +196,12 @@ func ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.StreamEvent, error] {
 					stop.Warnings = append(stop.Warnings, ir.Warning{
 						Field: "finishReason", Target: targetName,
 						Reason: "unrecognized value " + c.FinishReason + "; reported as end_turn",
+					})
+				}
+				if droppedMedia {
+					stop.Warnings = append(stop.Warnings, ir.Warning{
+						Field: "candidates[].content.parts[].inlineData", Target: targetName,
+						Reason: "generated media cannot be streamed to this client; it was dropped",
 					})
 				}
 				if !yield(stop, nil) {

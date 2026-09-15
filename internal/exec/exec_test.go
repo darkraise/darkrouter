@@ -20,6 +20,7 @@ import (
 	anthropicadapter "github.com/darkraise/darkrouter/internal/adapter/anthropic"
 	geminiadapter "github.com/darkraise/darkrouter/internal/adapter/gemini"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	vertexadapter "github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
@@ -270,6 +271,23 @@ func TestAServingAttemptWithNoUsageStaysUnpriced(t *testing.T) {
 	if rec.Attempts[1].CostMicros != nil {
 		t.Fatalf("a serving attempt that burned nothing must stay unpriced, got %d",
 			*rec.Attempts[1].CostMicros)
+	}
+}
+
+// A response that reported no usage is unknown, not free: the served
+// attempt is left unpriced for exactly that reason, and the request row must
+// not claim otherwise beside it.
+func TestARequestWithNoUsageStaysUnpriced(t *testing.T) {
+	e := newPricedExecutor(t)
+	rec := &store.RequestRecord{FinalProviderID: "groq", FinalModel: "m"}
+	rec.Attempts = append(rec.Attempts, store.AttemptRecord{
+		Seq: 0, ProviderID: "groq", Model: "m",
+		Outcome: string(adapter.OutcomeSuccess),
+	})
+	e.priceRecord(rec)
+
+	if rec.CostMicros != nil {
+		t.Fatalf("a request that reported no usage was priced at %d", *rec.CostMicros)
 	}
 }
 
@@ -563,6 +581,291 @@ func TestHandleClientDisconnectMidStreamIsNotAProviderFault(t *testing.T) {
 	}
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		t.Fatalf("inbound context error = %v", ctx.Err())
+	}
+}
+
+// firstWrite is a recorder that reports when the first byte reaches it.
+type firstWrite struct {
+	*httptest.ResponseRecorder
+	once  sync.Once
+	wrote chan struct{}
+}
+
+func (f *firstWrite) Write(b []byte) (int, error) {
+	f.once.Do(func() { close(f.wrote) })
+	return f.ResponseRecorder.Write(b)
+}
+
+// A client that hangs up after the response has committed did not receive a
+// complete response, so the row says cancelled, as it does for a hang-up
+// before commit, rather than success. It is still not an error: the provider
+// did nothing wrong.
+func TestAClientHangUpAfterCommitIsRecordedAsCancelled(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		dialect          edge.Dialect
+	}{
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`, openaiedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger := &captureLogger{}
+			e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &firstWrite{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the response never committed")
+			}
+			cancel()
+			<-done
+
+			got := logger.only(t)
+			if got.Status != "cancelled" || got.ErrorCode != "" {
+				t.Errorf("record = status %q error %q, want cancelled with no error code",
+					got.Status, got.ErrorCode)
+			}
+		})
+	}
+}
+
+// At shutdown the server cancels every request context with ErrShutdown while
+// the clients are still connected. A response cut that way was ended by the
+// gateway: the row must not say the client cancelled it, and the provider did
+// nothing wrong either.
+func TestAResponseCutAtShutdownIsNotAClientCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		dialect          edge.Dialect
+	}{
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`, openaiedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger, h := &captureLogger{}, &captureHealth{}
+			e := newExecutorWith(t, up.URL, Deps{Log: logger, Health: h}, 0)
+			ctx, cancel := context.WithCancelCause(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &firstWrite{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the response never committed")
+			}
+			cancel(ErrShutdown)
+			<-done
+
+			got := logger.only(t)
+			// success is what every committed response records, its failure
+			// carried by the error code, as a provider's post-commit fault is.
+			if got.Status != "success" || got.ErrorCode != string(ir.ErrDarkrouter) {
+				t.Errorf("record = status %q error %q, want success with error %q",
+					got.Status, got.ErrorCode, ir.ErrDarkrouter)
+			}
+			if _, sig := h.only(t); sig.Outcome != adapter.OutcomeClientCancelled {
+				t.Errorf("breaker heard %q, want %q — the provider was still sending",
+					sig.Outcome, adapter.OutcomeClientCancelled)
+			}
+			if !strings.Contains(w.Body.String(), "error") {
+				t.Errorf("client saw %q, want the stream to end with an error event", w.Body.String())
+			}
+		})
+	}
+}
+
+// Before commit a shutdown cut still leaves a client waiting for an answer, and
+// that answer must not tell it that it cancelled its own request.
+func TestARequestCutAtShutdownBeforeCommitIsNotAClientCancel(t *testing.T) {
+	sent := make(chan struct{})
+	release := make(chan struct{})
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(sent)
+		<-release
+	}))
+	defer up.Close()
+	defer close(release)
+
+	logger, h := &captureLogger{}, &captureHealth{}
+	e := newExecutorWith(t, up.URL, Deps{Log: logger, Health: h}, 0)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"ping"}]}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.Handle(w, r, openaiedge.New())
+	}()
+	select {
+	case <-sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the provider")
+	}
+	cancel(ErrShutdown)
+	<-done
+
+	got := logger.only(t)
+	if got.Status != "error" || got.ErrorCode != string(ir.ErrDarkrouter) {
+		t.Errorf("record = status %q error %q, want error %q", got.Status, got.ErrorCode, ir.ErrDarkrouter)
+	}
+	if _, sig := h.only(t); sig.Outcome != adapter.OutcomeClientCancelled {
+		t.Errorf("breaker heard %q, want %q", sig.Outcome, adapter.OutcomeClientCancelled)
+	}
+	if body := w.Body.String(); strings.Contains(body, "client cancelled") || !strings.Contains(body, "shutting down") {
+		t.Errorf("client saw %q, want an answer naming the shutdown", body)
+	}
+}
+
+// sawMarker is a recorder that reports when a write carrying marker reaches it.
+type sawMarker struct {
+	*httptest.ResponseRecorder
+	marker string
+	once   sync.Once
+	saw    chan struct{}
+}
+
+func (s *sawMarker) Write(b []byte) (int, error) {
+	n, err := s.ResponseRecorder.Write(b)
+	if strings.Contains(string(b), s.marker) {
+		s.once.Do(func() { close(s.saw) })
+	}
+	return n, err
+}
+
+// A client may close as soon as it has read the stream's terminal event, before
+// the provider's connection has finished closing. The next upstream read then
+// fails with the cancellation, but the client received the whole response, so
+// the row records a success rather than a hang-up.
+func TestAClientClosingAfterTheTerminalEventIsASuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, path, body, events, marker string
+		dialect                                edge.Dialect
+	}{
+		{name: "openai", kind: "openaicompat", path: "/v1/chat/completions",
+			body: `{"model":"target-model","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			events: "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+				"data: [DONE]\n\n",
+			marker: "[DONE]", dialect: openaiedge.New()},
+		{name: "anthropic", kind: "anthropic", path: "/v1/messages",
+			body: `{"model":"target-model","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			events: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"a\"}}\n\n" +
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+			marker: "message_stop", dialect: anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(tc.events))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger := &captureLogger{}
+			e := newExecutorFor(t, tc.kind, up.URL, Deps{Log: logger})
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &sawMarker{ResponseRecorder: httptest.NewRecorder(), marker: tc.marker, saw: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.saw:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the terminal event never reached the client")
+			}
+			cancel()
+			<-done
+
+			got := logger.only(t)
+			if n := len(got.Attempts); n != 1 || got.Attempts[0].Path != PathPassthrough {
+				t.Fatalf("attempts = %+v, want one forwarded attempt", got.Attempts)
+			}
+			if got.Status != "success" || got.ErrorCode != "" {
+				t.Errorf("record = status %q error %q, want success with no error code",
+					got.Status, got.ErrorCode)
+			}
+		})
+	}
+}
+
+// A provider that drops its connection after the terminal event has still
+// delivered the whole response. Blaming it would cool a healthy key, and an
+// error event written after [DONE] reaches a client that has already finished.
+func TestAProviderClosingAfterTheTerminalEventIsASuccess(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+			"data: [DONE]\n\n"))
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	defer up.Close()
+
+	logger := &captureLogger{}
+	e := newExecutorFor(t, "openaicompat", up.URL, Deps{Log: logger})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"target-model","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
+	e.Handle(rec, r, openaiedge.New())
+
+	body := rec.Body.String()
+	if strings.Count(body, "[DONE]") != 1 || strings.Contains(body, "upstream read failed") {
+		t.Errorf("body = %q, want it to end at the provider's [DONE] with nothing after", body)
+	}
+	got := logger.only(t)
+	if n := len(got.Attempts); n != 1 || got.Attempts[0].Error != "" {
+		t.Fatalf("attempts = %+v, want one attempt with no error", got.Attempts)
+	}
+	if got.Status != "success" || got.ErrorCode != "" {
+		t.Errorf("record = status %q error %q, want success with no error code", got.Status, got.ErrorCode)
 	}
 }
 
@@ -873,6 +1176,67 @@ func TestClientDisconnectIsNotAProviderFailure(t *testing.T) {
 	}
 }
 
+// A client that hangs up after the upstream's headers arrived, while the body
+// is still being read, cancels the read. That failure is the client's on every
+// rendering, not the provider's.
+func TestClientDisconnectDuringTheBodyIsNotAProviderFailure(t *testing.T) {
+	const (
+		partialJSON = `{"id":"x","model":"m",`
+		roleOnly    = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+	)
+	for _, tc := range []struct {
+		name, path, body, contentType, partial string
+		dialect                                edge.Dialect
+	}{
+		{"forwarded unary", "/v1/chat/completions",
+			`{"model":"m","messages":[{"role":"user","content":"ping"}]}`,
+			"application/json", partialJSON, openaiedge.New()},
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			"text/event-stream", roleOnly, openaiedge.New()},
+		{"translated unary", "/v1/messages", anthropicPing,
+			"application/json", partialJSON, anthropicedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			"text/event-stream", roleOnly, anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent, release := make(chan struct{}), make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				_, _ = w.Write([]byte(tc.partial))
+				w.(http.Flusher).Flush()
+				close(sent)
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			h, logger := &captureHealth{}, &captureLogger{}
+			e := newExecutorWith(t, up.URL, Deps{Health: h, Log: logger}, 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(httptest.NewRecorder(), r, tc.dialect)
+			}()
+			<-sent
+			time.Sleep(30 * time.Millisecond)
+			cancel()
+			<-done
+
+			if _, s := h.only(t); s.Outcome != adapter.OutcomeClientCancelled {
+				t.Errorf("Outcome = %q, want client_cancelled", s.Outcome)
+			}
+			if got := logger.only(t).Status; got != "cancelled" {
+				t.Errorf("Status = %q, want cancelled", got)
+			}
+		})
+	}
+}
+
 // A Darkrouter-imposed deadline is a provider timeout and must be recorded.
 func TestDarkrouterDeadlineIsAProviderFailure(t *testing.T) {
 	release := make(chan struct{})
@@ -1026,7 +1390,8 @@ func TestExecutorFallsBackWithoutACatalog(t *testing.T) {
 // captureAdapter records the Target it was built with and otherwise behaves
 // exactly as an OpenAI-compatible adapter.
 type captureAdapter struct {
-	onBuild func(*adapter.Target)
+	onBuild  func(*adapter.Target)
+	buildErr error
 }
 
 func (c *captureAdapter) Kind() string { return "capture" }
@@ -1034,6 +1399,9 @@ func (c *captureAdapter) Kind() string { return "capture" }
 func (c *captureAdapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	if c.onBuild != nil {
 		c.onBuild(t)
+	}
+	if c.buildErr != nil {
+		return nil, nil, c.buildErr
 	}
 	return openaicompat.New().BuildRequest(ctx, t, req)
 }
@@ -1048,6 +1416,86 @@ func (c *captureAdapter) ParseStream(r io.Reader, maxLine int) iter.Seq2[ir.Stre
 
 func (c *captureAdapter) Classify(resp *http.Response, err error) adapter.Outcome {
 	return openaicompat.New().Classify(resp, err)
+}
+
+func TestABuildErrorNamingAClientFaultReachesTheClient(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	defer upstream.Close()
+
+	refusing := &captureAdapter{buildErr: &ir.Error{
+		Type: ir.ErrPayloadTooLarge, Message: "media fetched from URLs is too large",
+	}}
+	src := providertest.NewSource(providertest.Keyed("p", "capture", upstream.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": refusing}, Deps{})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
+	e.Handle(w, r, openaiedge.New())
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d; a request the adapter refused as too large is the client's to shrink", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "media fetched from URLs is too large") {
+		t.Errorf("body = %s; the adapter's reason must reach the client", w.Body.String())
+	}
+	if hits.Load() != 0 {
+		t.Errorf("upstream was called %d times", hits.Load())
+	}
+}
+
+// A render failure the adapter does not name as the client's is a fact about
+// that target's configuration. A later target configured correctly can still
+// serve the request, so the chain must reach it.
+func TestAMisconfiguredTargetFailsOverToTheNext(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(ok200))
+	defer up.Close()
+
+	vx := providertest.Keyed("vx", "vertex", up.URL, "sk", "m")
+	vx.Priority = 10
+	good := providertest.Keyed("good", "openaicompat", up.URL, "sk", "m")
+	logger := &captureLogger{}
+	e := executorFor(t, nil, providertest.NewSource(vx, good), map[string]adapter.Adapter{
+		"vertex": vertexadapter.New(), "openaicompat": openaicompat.New(),
+	}, Deps{Log: logger})
+
+	w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "pong") {
+		t.Fatalf("status = %d body = %s; the configured target was never tried", w.Code, w.Body.String())
+	}
+	r := logger.only(t)
+	if len(r.Attempts) != 2 || r.Attempts[0].ProviderID != "vx" || r.FinalProviderID != "good" {
+		t.Fatalf("attempts = %+v final = %q", r.Attempts, r.FinalProviderID)
+	}
+}
+
+// The other half of the rule: a refusal the adapter names as the client's is
+// one every target would repeat, so it still ends the chain.
+func TestARenderFailureNamingAClientFaultDoesNotFailOver(t *testing.T) {
+	var hits atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		ok200(w, r)
+	}))
+	defer up.Close()
+
+	refusing := providertest.Keyed("refusing", "capture", up.URL, "sk", "m")
+	refusing.Priority = 10
+	good := providertest.Keyed("good", "openaicompat", up.URL, "sk", "m")
+	e := executorFor(t, nil, providertest.NewSource(refusing, good), map[string]adapter.Adapter{
+		"capture":      &captureAdapter{buildErr: &ir.Error{Type: ir.ErrInvalidRequest, Message: "bad"}},
+		"openaicompat": openaicompat.New(),
+	}, Deps{})
+
+	if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s, want the client's 400", w.Code, w.Body.String())
+	}
+	if hits.Load() != 0 {
+		t.Errorf("a client fault failed over to %d more targets", hits.Load())
+	}
 }
 
 func TestTargetCarriesTheCatalogFacts(t *testing.T) {
@@ -1627,6 +2075,66 @@ func TestHandleRefusesACompressedBodyWith415(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "content-encoding") {
 		t.Errorf("the error does not name the cause: %s", w.Body)
+	}
+}
+
+// A preset that names its own header is reached only that way: the upstream
+// rejects a key sent as a bearer token. Both renderings must honour it.
+func TestAStaticStyleDecidesWhereTheKeyIsSent(t *testing.T) {
+	for _, tc := range []struct{ preset, header string }{
+		{"pioneer", "x-api-key"},
+		{"ideogram", "Api-Key"},
+		{"haiper", "HAIPER_KEY"},
+	} {
+		for _, kind := range []string{"openaicompat", "probe"} {
+			t.Run(tc.preset+"/"+kind, func(t *testing.T) {
+				var got http.Header
+				up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					got = r.Header.Clone()
+					ok200(w, r)
+				}))
+				defer up.Close()
+
+				p := providertest.Keyed("p", kind, up.URL, "sk", "m")
+				p.Preset = tc.preset
+				e := executorFor(t, nil, providertest.NewSource(p),
+					map[string]adapter.Adapter{kind: openaicompat.New()}, Deps{})
+				if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != 200 {
+					t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+				}
+				if v := got.Get(tc.header); v != "sk" {
+					t.Errorf("%s = %q, want the key", tc.header, v)
+				}
+				if v := got.Get("Authorization"); v != "" {
+					t.Errorf("Authorization = %q, want none beside the declared header", v)
+				}
+			})
+		}
+	}
+}
+
+// bearer is also the column default of every provider row created without a
+// style, so it must not override an adapter whose kind authenticates with its
+// own header.
+func TestABearerRowKeepsItsAdaptersHeader(t *testing.T) {
+	var got http.Header
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer up.Close()
+
+	p := providertest.Keyed("ant", "anthropic", up.URL, "sk", "m")
+	p.AuthStyle = "bearer"
+	e := executorFor(t, nil, providertest.NewSource(p),
+		map[string]adapter.Adapter{"anthropic": anthropicadapter.New()}, Deps{})
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	if v := got.Get("x-api-key"); v != "sk" {
+		t.Errorf("x-api-key = %q, want the key", v)
+	}
+	if v := got.Get("Authorization"); v != "" {
+		t.Errorf("Authorization = %q, want none", v)
 	}
 }
 

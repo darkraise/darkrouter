@@ -7,7 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
+	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 // A provider that commits and then fails must not produce a second response.
@@ -116,6 +121,112 @@ func TestCommittedStreamIsCutAtIdle(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("a silent committed stream was not cut at idle")
+	}
+}
+
+// idle bounds a gap in the transfer, not the transfer. A body whose bytes keep
+// arriving for longer than idle — long audio, a slow link — must not be cut
+// once idle has passed since its headers.
+func TestABodyThatKeepsArrivingOutlivesIdle(t *testing.T) {
+	const pieces = 8
+	trickle := func(contentType string, piece func(i int) string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", contentType)
+			for i := range pieces {
+				_, _ = w.Write([]byte(piece(i)))
+				w.(http.Flusher).Flush()
+				time.Sleep(60 * time.Millisecond)
+			}
+		}
+	}
+	jsonPiece := func(i int) string {
+		parts := []string{`{"id":"x",`, `"model":"m",`, `"choices":[{"message":`, `{"content":"po`,
+			`ng"},`, `"finish_reason":"stop"}],`, `"usage":{"prompt_tokens":1,`, `"completion_tokens":1}}`}
+		return parts[i]
+	}
+	cfg := func(c *config.Config) {
+		c.Policy.Timeout.Connect = 50 * time.Millisecond
+		c.Policy.Timeout.FirstByte = time.Second
+		c.Policy.Timeout.Total = 10 * time.Second
+		c.Policy.Timeout.Idle = 200 * time.Millisecond
+	}
+
+	t.Run("speech", func(t *testing.T) {
+		up := httptest.NewServer(trickle("audio/mpeg", func(int) string { return "A" }))
+		defer up.Close()
+		src := providertest.NewSource(providertest.Keyed("p", "probe", up.URL, "sk", "tts-1"))
+		e := executorFor(t, cfg, src, map[string]adapter.Adapter{"probe": openaicompat.New()},
+			Deps{Catalog: catalogWith("p", "tts-1", ir.SurfaceTTS)})
+		w := httptest.NewRecorder()
+		e.HandleSpeech(w, speechRequest(), openaiedge.New())
+		if got := w.Body.String(); got != strings.Repeat("A", pieces) {
+			t.Errorf("body = %q; the audio was cut while it was still arriving", got)
+		}
+	})
+	for _, tc := range []struct {
+		name string
+		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body string
+	}{
+		{"forwarded unary", post, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`},
+		{"translated unary", postAnthropic, anthropicPing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &scripted{by: map[string]http.HandlerFunc{"g1": trickle("application/json", jsonPiece)}}
+			up := httptest.NewServer(sc)
+			defer up.Close()
+			e, _ := breakerExecutor(t, up, oneKeyFleet(), Deps{}, cfg)
+			if w := tc.post(t, e, tc.body); w.Code != 200 || !strings.Contains(w.Body.String(), "pong") {
+				t.Errorf("status = %d body = %s; the body was cut while it was still arriving",
+					w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// Renewing idle per read must not let a unary body outlast total. Nothing has
+// reached the client while it is read, so total still bounds the attempt, and
+// an upstream sending a byte just inside every idle interval would otherwise
+// hold the request for as long as it liked.
+func TestATricklingUnaryBodyIsBoundedByTotal(t *testing.T) {
+	const trickleFor = 3 * time.Second
+	trickle := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"m","choices":[{"message":`))
+		w.(http.Flusher).Flush()
+		for end := time.Now().Add(trickleFor); time.Now().Before(end) && r.Context().Err() == nil; {
+			time.Sleep(50 * time.Millisecond)
+			_, _ = w.Write([]byte(" "))
+			w.(http.Flusher).Flush()
+		}
+		_, _ = w.Write([]byte(`{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}
+	cfg := func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 300 * time.Millisecond
+		c.Policy.Timeout.Total = 600 * time.Millisecond
+		c.Policy.Timeout.Idle = 200 * time.Millisecond
+	}
+	for _, tc := range []struct {
+		name string
+		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body string
+	}{
+		{"passthrough", post, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`},
+		{"ir", postAnthropic, anthropicPing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &scripted{by: map[string]http.HandlerFunc{"g1": trickle}}
+			up := httptest.NewServer(sc)
+			defer up.Close()
+			e, _ := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, cfg)
+			start := time.Now()
+			rec := tc.post(t, e, tc.body)
+			if took := time.Since(start); rec.Code == 200 || took > 2*time.Second {
+				t.Fatalf("code = %d after %v; a body trickling past total must be cut at total",
+					rec.Code, took)
+			}
+		})
 	}
 }
 

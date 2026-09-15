@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -178,6 +179,24 @@ func TestParseRequestCarriesTypedServerTools(t *testing.T) {
 	}
 }
 
+func TestParseRequestTreatsACustomTypedToolAsAClientFunction(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[],"tools":[
+		{"type":"custom","name":"f","description":"d","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]}`, nil)
+	if len(req.Tools) != 1 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	tool := req.Tools[0]
+	if tool.Name != "f" || tool.Description != "d" || string(tool.Schema) != `{"type":"object"}` {
+		t.Errorf("tool = %+v", tool)
+	}
+	if _, ok := tool.Extra["type"]; ok {
+		t.Errorf("tool extra = %v; type custom is an ordinary function, not a provider-run tool", tool.Extra)
+	}
+	if string(tool.Extra["cache_control"]) != `{"type":"ephemeral"}` {
+		t.Errorf("tool extra = %v; cache_control must be kept", tool.Extra)
+	}
+}
+
 // The adapters that are not Anthropic strip this edge's transport state by
 // its key prefix, so a key that misses the prefix is forwarded to an upstream
 // that has no idea what it is.
@@ -211,5 +230,18 @@ func TestAnOversizedBodyIsTypedAsPayloadTooLarge(t *testing.T) {
 	var ie *ir.Error
 	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
 		t.Errorf("err = %#v, want an *ir.Error of type %q", err, ir.ErrPayloadTooLarge)
+	}
+}
+
+// A text source carries the document itself, not base64. The IR carries
+// base64, and every other target wraps Media.Data as base64, so text passed
+// through verbatim reaches them as corrupt bytes.
+func TestParseRequestEncodesATextDocumentSource(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[{"role":"user","content":[
+		{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hello, world"}},
+		{"type":"text","text":"summarise"}]}]}`, nil)
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "text/plain" || m.Data != base64.StdEncoding.EncodeToString([]byte("hello, world")) {
+		t.Errorf("media = %+v, want the text base64-encoded", m)
 	}
 }

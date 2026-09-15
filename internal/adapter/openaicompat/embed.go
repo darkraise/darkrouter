@@ -124,7 +124,27 @@ func (a *Adapter) ParseEmbedding(resp *http.Response) (*ir.EmbeddingResponse, er
 		}
 		out.Embeddings = append(out.Embeddings, e)
 	}
+	// Some OpenAI-compatible servers omit index, so every vector decodes as 0.
+	// Such a batch can only be answered in position order; a batch with any
+	// non-zero index is taken at its word and validated as sent.
+	if allZeroIndices(out.Embeddings) {
+		for i := range out.Embeddings {
+			out.Embeddings[i].Index = i
+		}
+	}
+	if err := adapter.ValidateEmbeddings(out.Embeddings); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+func allZeroIndices(es []ir.Embedding) bool {
+	for _, e := range es {
+		if e.Index != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 var _ adapter.Embedder = (*Adapter)(nil)

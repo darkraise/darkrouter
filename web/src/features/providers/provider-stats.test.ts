@@ -66,17 +66,25 @@ describe("the traffic series", () => {
       usage("cerebras", "2026-08-26", 99),
       usage("groq", "2026-08-24", 3),
     ]
-    expect(requestsByDay(rows, "groq")).toEqual([3, 5])
+    expect(requestsByDay(rows, "groq", ["2026-08-24", "2026-08-26"])).toEqual([3, 5])
     expect(totalRequests(rows, "groq")).toBe(8)
+  })
+
+  it("draws a day the provider served nothing as zero", () => {
+    // Absent from the rollup is not absent from the timeline: dropping the
+    // day would put Monday's and Friday's traffic side by side.
+    const rows = [usage("groq", "2026-08-24", 3), usage("groq", "2026-08-27", 5)]
+    const days = ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"]
+    expect(requestsByDay(rows, "groq", days)).toEqual([3, 0, 0, 5])
   })
 
   it("sums a day split across rows", () => {
     const rows = [usage("groq", "2026-08-26", 5), usage("groq", "2026-08-26", 2)]
-    expect(requestsByDay(rows, "groq")).toEqual([7])
+    expect(requestsByDay(rows, "groq", ["2026-08-26"])).toEqual([7])
   })
 
   it("reads a provider with no traffic as zero rather than as an error", () => {
-    expect(requestsByDay([], "groq")).toEqual([])
+    expect(requestsByDay([], "groq", ["2026-08-26"])).toEqual([0])
     expect(totalRequests([], "groq")).toBe(0)
   })
 })

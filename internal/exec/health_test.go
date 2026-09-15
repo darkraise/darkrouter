@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +13,11 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/config"
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
+	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/provider/providertest"
 )
 
 // breakerExecutor is loopExecutor with a breaker whose cooldowns are short
@@ -142,6 +146,164 @@ func TestATruncated200OnThePassthroughPathTripsTheBreaker(t *testing.T) {
 	}
 }
 
+// A provider that commits and then fails has still failed. Failover is
+// impossible once bytes are out, but the breaker must hear the failure, or a
+// provider that sends one token and dies on every request never cools.
+func TestAFailureAfterCommitCountsAgainstTheProvider(t *testing.T) {
+	const content = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"
+	errorAfterContent := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(content))
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("data: {\"error\":{\"message\":\"died\",\"type\":\"server_error\"}}\n\n"))
+	}
+	cutAfter := func(contentType, first string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Content-Length", "4096")
+			_, _ = w.Write([]byte(first))
+			w.(http.Flusher).Flush()
+		}
+	}
+	postSpeech := func(t *testing.T, e *Executor, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		e.HandleSpeech(w, httptest.NewRequest("POST", "/v1/audio/speech", strings.NewReader(body)),
+			openaiedge.New())
+		return w
+	}
+	for _, tc := range []struct {
+		name     string
+		post     func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body     string
+		upstream http.HandlerFunc
+		sent     string
+	}{
+		{"forwarded stream error", post,
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			errorAfterContent, "partial"},
+		{"translated stream error", postAnthropic,
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			errorAfterContent, "partial"},
+		{"forwarded stream cut", post,
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			cutAfter("text/event-stream", content), "partial"},
+		{"speech cut", postSpeech, `{"model":"m","input":"hello","voice":"alloy"}`,
+			cutAfter("audio/mpeg", "AUDIO"), "AUDIO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := httptest.NewServer(&scripted{by: map[string]http.HandlerFunc{"g1": tc.upstream}})
+			defer up.Close()
+
+			logger := &captureLogger{}
+			deps := Deps{Log: logger}
+			if tc.name == "speech cut" {
+				deps.Catalog = catalogWith("groq", "m", ir.SurfaceTTS)
+			}
+			e, b := breakerExecutor(t, up, oneKeyFleet(), deps,
+				func(c *config.Config) { c.Policy.Cooldown.Max = time.Hour })
+			for i := 0; i < 3; i++ {
+				if w := tc.post(t, e, tc.body); !strings.Contains(w.Body.String(), tc.sent) {
+					t.Fatalf("request %d: the committed bytes are missing: %q", i, w.Body.String())
+				}
+			}
+			if b.Available(groqKey) {
+				t.Error("three failures after commit did not trip the breaker")
+			}
+			logger.mu.Lock()
+			last := logger.records[len(logger.records)-1]
+			logger.mu.Unlock()
+			if last.ErrorCode == "" {
+				t.Error("the request row carries no error for a response that failed after commit")
+			}
+		})
+	}
+}
+
+// The outcome of a stream is recorded when it ends, so these hold the other
+// side: a stream that completes still closes the ladder, a client that hangs
+// up after commit costs the provider nothing, and a response still streaming
+// does not keep a half-open entry shut to everyone else.
+func TestAStreamsOutcomeIsRecordedWhenItEnds(t *testing.T) {
+	const streamBody = `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`
+
+	t.Run("completed", func(t *testing.T) {
+		up := httptest.NewServer(&scripted{by: map[string]http.HandlerFunc{"g1": sseOK}})
+		defer up.Close()
+		e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{}, nil)
+		b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+		b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+		post(t, e, streamBody)
+		b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+		if !b.Available(groqKey) {
+			t.Fatal("a completed stream did not reset the failure count")
+		}
+	})
+
+	t.Run("client hung up", func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		committed := make(chan struct{}, 3)
+		up := httptest.NewServer(&scripted{by: map[string]http.HandlerFunc{"g1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			committed <- struct{}{}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}}})
+		defer up.Close()
+		e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{},
+			func(c *config.Config) { c.Policy.Cooldown.Max = time.Hour })
+		for range 3 {
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(streamBody))
+				e.Handle(httptest.NewRecorder(), r.WithContext(ctx), openaiedge.New())
+			}()
+			<-committed
+			time.Sleep(20 * time.Millisecond)
+			cancel()
+			<-done
+		}
+		if !b.Available(groqKey) {
+			t.Fatal("clients hanging up after commit cooled the provider")
+		}
+	})
+
+	t.Run("probe released at commit", func(t *testing.T) {
+		release := make(chan struct{})
+		committed := make(chan struct{})
+		up := httptest.NewServer(&scripted{by: map[string]http.HandlerFunc{"g1": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			close(committed)
+			<-release
+		}}})
+		defer up.Close()
+		e, b := breakerExecutor(t, up, oneKeyFleet(), Deps{}, nil)
+		tripKey(b, groqKey)
+		time.Sleep(40 * time.Millisecond)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			post(t, e, streamBody)
+		}()
+		<-committed
+		time.Sleep(20 * time.Millisecond)
+		if !b.Available(groqKey) {
+			t.Error("a committed stream kept the half-open probe for its whole length")
+		}
+		close(release)
+		<-done
+	})
+}
+
 // A 200 with a good body still closes the ladder, so the fix above cannot
 // have turned every success into a non-event.
 func TestAHealthy200StillResetsTheLadder(t *testing.T) {
@@ -158,5 +320,65 @@ func TestAHealthy200StillResetsTheLadder(t *testing.T) {
 	b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
 	if !b.Available(groqKey) {
 		t.Fatal("a healthy 200 did not reset the failure count")
+	}
+}
+
+// A candidate whose kind has no registered adapter is skipped before any
+// attempt, so nothing records for it. Checking health first would claim the
+// credential's probe on the way past and never give it back.
+func TestANoAdapterSkipDoesNotClaimTheProbe(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream must not be called for an unknown kind")
+	}))
+	defer up.Close()
+
+	fleet := oneKeyFleet()
+	fleet[0].Kind = "martian"
+	var rec captureLogger
+	e, b := breakerExecutor(t, up, fleet, Deps{Log: &rec}, nil)
+
+	b.Record(groqKey, health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	time.Sleep(40 * time.Millisecond)
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+	if skips := rec.only(t).Skips; len(skips) != 1 || !strings.HasSuffix(skips[0], ":no_adapter") {
+		t.Fatalf("skips = %v, want one no_adapter skip", skips)
+	}
+	if !b.Available(groqKey) {
+		t.Fatal("the no_adapter skip left the credential's probe claimed")
+	}
+}
+
+func TestARequestThatNeverReachedTheProviderLeavesItsLadderAlone(t *testing.T) {
+	// A client controls whether its request can be rendered. If that failure
+	// counted as the provider answering, any token holder could clear a
+	// cooling model's ladder by sending one it knows will be refused.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("upstream must not be called for a request that failed to render")
+	}))
+	defer up.Close()
+
+	b := health.New(3, 20*time.Millisecond)
+	refusing := &captureAdapter{buildErr: &ir.Error{Type: ir.ErrPayloadTooLarge, Message: "too large"}}
+	src := providertest.NewSource(providertest.Keyed("p", "capture", up.URL, "sk", "m"))
+	e := executorFor(t, nil, src, map[string]adapter.Adapter{"capture": refusing},
+		Deps{Health: b, Fleet: b})
+
+	k := health.Key{ProviderID: "p", Model: "m"}
+	for range 3 {
+		b.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	}
+	time.Sleep(40 * time.Millisecond)
+	if w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`); w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 from the refused build", w.Code)
+	}
+
+	// The tripped ladder survives, so the next failure after expiry re-cools
+	// at once instead of starting a fresh count of three.
+	if !b.Available(k) {
+		t.Fatal("the refused build left the model's probe claimed")
+	}
+	b.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 503})
+	if b.Available(k) {
+		t.Fatal("the refused build reset the model's ladder: one failure no longer re-cools it")
 	}
 }

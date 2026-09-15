@@ -65,12 +65,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// A read failure degrades the label to "default" rather than failing the
 	// screen: an operator who cannot see their settings at all is worse off
 	// than one seeing a source annotation that is too modest.
-	var stored map[string]bool
-	if s.deps.DB != nil {
-		var err error
-		if stored, err = store.StoredConfigKeys(r.Context(), s.deps.DB); err != nil {
-			slog.Warn("config view could not read which settings are stored", "err", err)
-		}
+	stored, err := store.StoredConfigKeys(r.Context(), s.deps.DB)
+	if err != nil {
+		slog.Warn("config view could not read which settings are stored", "err", err)
 	}
 
 	// Values and fields both come from the registry, so a key added there is on
@@ -190,7 +187,7 @@ type policyWrite struct {
 }
 
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Config == nil || s.deps.DB == nil {
+	if s.deps.Config == nil {
 		writeError(w, http.StatusServiceUnavailable, "no configuration store")
 		return
 	}
@@ -224,16 +221,22 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 	defer cancel()
 	written, err := s.deps.Config.Update(ctx, p)
 	var rejected config.RejectedError
+	var conflict config.ConflictError
 	var publish config.PublishError
 	switch {
 	case errors.As(err, &rejected):
 		writeError(w, http.StatusBadRequest, rejected.Error())
+	case errors.As(err, &conflict):
+		// 409, not 400: the save itself is fine, it was computed against a
+		// table that has since moved. A retry that reloads first can succeed
+		// where repeating this exact body never would.
+		writeError(w, http.StatusConflict, conflict.Error())
 	case errors.As(err, &publish):
 		// 200 rather than 500: the write was performed and its outcome is the
 		// answer. The rows are durable; what failed is the republish, and the
 		// previous configuration is still serving.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false, "error": publish.Error(),
+			"valid": false, "routing_updated": false, "error": publish.Error(),
 			"serving": "the previous configuration is still serving",
 		})
 	case err != nil:

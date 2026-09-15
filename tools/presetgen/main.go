@@ -66,8 +66,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	entries, dropped, err := scrapeRegistry(filepath.Join(*omni, "open-sse/config/providers/registry"),
-		droppedFamilies(filepath.Join(*omni, "src/shared/constants/providers")))
+	families, err := droppedFamilies(filepath.Join(*omni, "src/shared/constants/providers"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	entries, dropped, err := scrapeRegistry(filepath.Join(*omni, "open-sse/config/providers/registry"), families)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -256,19 +259,22 @@ func dropReason(e entry, drop map[string]bool) string {
 
 // droppedFamilies collects the ids of every entry in a family spec §3.2 drops
 // wholesale.
-func droppedFamilies(constants string) map[string]bool {
+func droppedFamilies(constants string) (map[string]bool, error) {
 	out := map[string]bool{}
 	idRe := regexp.MustCompile(`(?m)^\s{2,4}id: "([^"]+)"`)
 	for _, f := range []string{"web-cookie.ts", "cloud-agent.ts", "upstream-proxy.ts", "system.ts", "search.ts"} {
+		// Not skippable: most web-cookie entries pass every structural rule in
+		// dropReason, so a family file upstream moved would emit them as
+		// ordinary presets.
 		raw, err := os.ReadFile(filepath.Join(constants, f))
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("read excluded family %s: %w", f, err)
 		}
 		for _, m := range idRe.FindAllStringSubmatch(string(raw), -1) {
 			out[m[1]] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 var kindOf = map[string]string{"openai": "openaicompat", "claude": "anthropic", "gemini": "gemini"}
@@ -426,7 +432,7 @@ func carryQuirks(presets catalog.Presets, existingPath string) (int, error) {
 // --- overrides ---
 
 // applyOverrides merges the hand-reviewed file over the generated set, field by
-// field where the override is non-zero. An override for an id the generator did
+// field where the override declares the key, whatever its value. An override for an id the generator did
 // not produce is added outright, which is how hand-written entries such as the
 // phase-8 kinds enter the file.
 func applyOverrides(presets catalog.Presets, path string) (int, error) {
@@ -441,6 +447,12 @@ func applyOverrides(presets catalog.Presets, path string) (int, error) {
 	d.KnownFields(true)
 	var over catalog.Presets
 	if err := d.Decode(&over); err != nil {
+		return 0, fmt.Errorf("parse overrides: %w", err)
+	}
+	// The typed decode cannot tell an explicit "" or [] or false from an
+	// absent key, and an explicit zero value is a correction too.
+	var declared map[string]map[string]yaml.Node
+	if err := yaml.Unmarshal(raw, &declared); err != nil {
 		return 0, fmt.Errorf("parse overrides: %w", err)
 	}
 	var incomplete []string
@@ -459,61 +471,77 @@ func applyOverrides(presets catalog.Presets, path string) (int, error) {
 			presets[id] = o
 			continue
 		}
-		if o.Name != "" {
+		set := func(key string) bool { _, ok := declared[id][key]; return ok }
+		if set("name") {
 			base.Name = o.Name
 		}
-		if o.Kind != "" {
+		if set("kind") {
 			base.Kind = o.Kind
 		}
-		if o.BaseURL != "" {
+		if set("base_url") {
 			base.BaseURL = o.BaseURL
 		}
-		if o.Auth.Style != "" {
+		if set("auth") {
 			base.Auth = o.Auth
 		}
-		if len(o.Surfaces) > 0 {
+		if set("surfaces") {
 			base.Surfaces = o.Surfaces
 		}
-		if o.ModelsDevID != "" {
-			base.ModelsDevID, base.NoModelsDev = o.ModelsDevID, false
+		if set("models_dev_id") {
+			base.ModelsDevID = o.ModelsDevID
+			if o.ModelsDevID != "" {
+				base.NoModelsDev = false
+			}
 		}
-		if o.NoModelsDev {
-			base.NoModelsDev, base.ModelsDevID = true, ""
+		if set("no_models_dev") {
+			base.NoModelsDev = o.NoModelsDev
+			if o.NoModelsDev {
+				base.ModelsDevID = ""
+			}
 		}
-		if o.LiteLLMID != "" {
-			base.LiteLLMID, base.NoLiteLLM = o.LiteLLMID, false
+		if set("litellm_id") {
+			base.LiteLLMID = o.LiteLLMID
+			if o.LiteLLMID != "" {
+				base.NoLiteLLM = false
+			}
 		}
-		if o.NoLiteLLM {
-			base.NoLiteLLM, base.LiteLLMID = true, ""
+		if set("no_litellm") {
+			base.NoLiteLLM = o.NoLiteLLM
+			if o.NoLiteLLM {
+				base.LiteLLMID = ""
+			}
 		}
-		if o.Website != "" {
+		if set("website") {
 			base.Website = o.Website
 		}
-		if o.FreeTier {
-			base.FreeTier = true
+		if set("free_tier") {
+			base.FreeTier = o.FreeTier
 		}
-		if o.Resells {
-			base.Resells = true
+		if set("resells_prices") {
+			base.Resells = o.Resells
 		}
-		if len(o.Quirks) > 0 {
+		if set("api_key_url") {
+			base.APIKeyURL = o.APIKeyURL
+		}
+		if set("quirks") {
 			base.Quirks = o.Quirks
 		}
-		if o.ModelsURL != "" {
+		if set("models_url") {
 			base.ModelsURL = o.ModelsURL
 		}
-		if len(o.ModelAliases) > 0 {
+		if set("model_aliases") {
 			base.ModelAliases = o.ModelAliases
 		}
-		if len(o.ModelTraits) > 0 {
+		if set("model_traits") {
 			base.ModelTraits = o.ModelTraits
 		}
-		if o.CapabilityProbe != "" {
+		if set("capability_probe") {
 			base.CapabilityProbe = o.CapabilityProbe
 		}
-		if o.Publisher != "" {
+		if set("publisher") {
 			base.Publisher = o.Publisher
 		}
-		if o.OAuth != nil {
+		if set("oauth") {
 			base.OAuth = o.OAuth
 		}
 		presets[id] = base

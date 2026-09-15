@@ -15,6 +15,7 @@ import {
 import { useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import { count, money } from "../../lib/format"
+import { utcDayStartMs, utcDays } from "../../lib/time"
 import type { UsageDimension, UsageRow } from "../../lib/api-types"
 import { EmptyState, GhostChart } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
@@ -67,13 +68,19 @@ export function readRange(raw: string): (typeof RANGES)[number] {
 export function topKeys(rows: UsageRow[], n: number): string[] {
   const total = new Map<string, number>()
   for (const r of rows) {
-    if (!r.key) continue
+    if (r.key === undefined) continue
     total.set(r.key, (total.get(r.key) ?? 0) + r.requests)
   }
   return [...total.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([k]) => k)
+}
+
+/** How a dimension key reads on screen. The empty key is real: a request for
+ *  a model by name resolves no alias. */
+export function keyLabel(key: string): string {
+  return key === "" ? "(none)" : key
 }
 
 /** What the charts plot for a dimension: its top keys, or on the Total view
@@ -102,15 +109,25 @@ export function stackByDay(
   rows: UsageRow[],
   keys: string[],
   value: (r: UsageRow) => number | null,
+  days: string[],
 ): Record<string, number | string | null>[] {
   const byDay = new Map<string, Record<string, number | string | null>>()
   // Which keys have had at least one row on a given day -- distinct from the
   // zero-fill placeholder, which marks "no row at all" rather than "a row
   // whose value we don't know yet".
   const seen = new Map<string, Set<string>>()
+  // A day with no rows at all is a zero for every key: nothing ran, so
+  // nothing was spent either. The x-axis is categorical, and a day left out
+  // closes the gap between its neighbours instead of drawing one.
+  for (const d of days) {
+    const day: Record<string, number | string | null> = { day: d }
+    for (const k of keys) day[k] = 0
+    byDay.set(d, day)
+    seen.set(d, new Set())
+  }
 
   for (const r of rows) {
-    if (!r.key || !keys.includes(r.key)) continue
+    if (r.key === undefined || !keys.includes(r.key)) continue
     let day = byDay.get(r.day)
     if (!day) {
       day = { day: r.day }
@@ -141,23 +158,25 @@ export function stackByDay(
  * the idiom the router supports -- the root route's `validateSearch` already
  * turns any string-keyed record into the URL's query params.
  *
+ * The window starts at UTC midnight of the served `firstDay`, the same
+ * boundary the charts were aggregated over, and runs to now as they do.
+ *
  * `range` rides along so Requests' own time-range pills don't lie: a URL
  * carrying `since_ms` with no `range` shows that control as "All" while a
- * filter is actually active. "7d" happens to match Requests' own "7d" pill
- * exactly; wider spans (this screen goes to 365d, Requests tops out at 7d)
- * land on no pill rather than a false "All" -- still honest, just less
- * specific than a highlighted pill would be.
+ * filter is actually active. Those pills are rolling windows, which a span of
+ * calendar days never equals, so the value names no pill rather than lighting
+ * one whose span differs.
  */
 export function requestsSearch(
   dimension: UsageDimension,
   key: string,
+  firstDay: string,
   days: number,
 ): Record<string, string> {
-  const since = Date.now() - days * 24 * 60 * 60 * 1000
   return {
     [dimension]: key,
-    since_ms: String(Math.round(since)),
-    range: `${days}d`,
+    since_ms: String(utcDayStartMs(firstDay)),
+    range: `${days}-utc-days`,
   }
 }
 
@@ -170,7 +189,10 @@ export function costTick(micros: number | null): string {
 
 /** Rows summed per key, so a dimension reads as totals rather than as one
  *  line per key per day. */
-export function summarise(rows: UsageRow[]): {
+export function summarise(
+  rows: UsageRow[],
+  dimension: Dimension,
+): {
   key: string
   requests: number
   attempts: number
@@ -180,7 +202,7 @@ export function summarise(rows: UsageRow[]): {
 }[] {
   const acc = new Map<string, ReturnType<typeof summarise>[number]>()
   for (const row of rows) {
-    const key = row.key || row.day
+    const key = dimension === "day" ? row.day : (row.key ?? "")
     const cur = acc.get(key) ?? {
       key,
       requests: 0,
@@ -229,7 +251,7 @@ function Bars({ rows }: { rows: ReturnType<typeof summarise> }) {
     <div className="chart-scope flex flex-col gap-2">
       {rows.slice(0, 10).map((r, i) => (
         <div key={r.key} className="flex items-center gap-3">
-          <span className="w-40 shrink-0 truncate font-mono text-sm">{r.key}</span>
+          <span className="w-40 shrink-0 truncate font-mono text-sm">{keyLabel(r.key)}</span>
           <div className="h-4 min-w-0 flex-1 rounded-sm bg-[hsl(var(--muted))]">
             <div
               className="h-full rounded-sm"
@@ -271,7 +293,9 @@ export function UsageScreen() {
   const days = range.days
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
-  const rows = summarise(usageRows)
+  const firstDay = usage.data?.first_day ?? ""
+  const windowDays = utcDays(firstDay, usage.data?.last_day ?? "")
+  const rows = summarise(usageRows, dimension)
   const series = chartSeries(usageRows, dimension)
   const legend = dimension !== "day"
   // Nothing to filter by on the day view -- there is no dimension key, only
@@ -348,8 +372,9 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Requests</h2>
             <StackedAreaChart
-              data={stackByDay(series.rows, series.keys, (r) => r.requests)}
+              data={stackByDay(series.rows, series.keys, (r) => r.requests, windowDays)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               legend={legend}
             />
           </Card>
@@ -357,8 +382,9 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Tokens</h2>
             <StackedAreaChart
-              data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out)}
+              data={stackByDay(series.rows, series.keys, (r) => r.tokens_in + r.tokens_out, windowDays)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               legend={legend}
             />
           </Card>
@@ -366,8 +392,9 @@ export function UsageScreen() {
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Cost</h2>
             <CostLineChart
-              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros)}
+              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros, windowDays)}
               keys={series.keys}
+              labels={series.keys.map(keyLabel)}
               formatValue={costTick}
               legend={legend}
             />
@@ -394,16 +421,18 @@ export function UsageScreen() {
                 {rows.map((r) => (
                   <TableRow key={r.key}>
                     <TableCell className="font-mono text-sm">
-                      {clickable ? (
+                      {/* Requests reads an empty filter as no filter, so the
+                          no-alias bucket has nothing to link to. */}
+                      {clickable && r.key !== "" ? (
                         <Link
                           to="/requests"
-                          search={requestsSearch(dimension, r.key, days)}
+                          search={requestsSearch(dimension, r.key, firstDay, days)}
                           className="underline"
                         >
                           {r.key}
                         </Link>
                       ) : (
-                        r.key
+                        keyLabel(r.key)
                       )}
                     </TableCell>
                     <TableCell className="tabular-nums">{count(r.requests)}</TableCell>

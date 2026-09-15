@@ -120,7 +120,7 @@ func TestMergeReadsCacheWritePricingFromAnUnjoinedRow(t *testing.T) {
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
 		CacheReadMicrosPerMTok: 30_000, CacheWriteMicrosPerMTok: 375_000,
 		PriceKnown: true,
-	}, "", Preset{}, Doc{}, LiteLLMDoc{}, store.ModelOverride{})
+	}, "", Preset{}, Doc{}, LiteLLMDoc{}, FreeCatalog{}, store.ModelOverride{})
 
 	if got.Source != SourceInferred {
 		t.Fatalf("source = %v, want the row to be the source", got.Source)
@@ -244,5 +244,213 @@ func TestASyncedLiteLLMIndexReachesTheSnapshot(t *testing.T) {
 	}
 	if m.Pricing.Source != SourceLiteLLM || m.Pricing.InputMicrosPerMTok != 590_000 {
 		t.Errorf("pricing = %+v, want the synced index's 590000", m.Pricing)
+	}
+}
+
+// The router's veto reads the tier carried on the model, so a free-tier
+// grading the daily sync changed must reach the snapshot, not only the import
+// filter.
+func TestASyncedFreeTierReachesTheSnapshot(t *testing.T) {
+	const model = "freshly-graded-model"
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = 'groq' WHERE id = 'p'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p",
+		[]store.DiscoveredModel{{ModelID: model}}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: "groq"}}}
+	cat := NewStore(db, src)
+	if _, ok := FreeModels().Tier("groq", model); ok {
+		t.Fatal("the embedded catalogue already grades the model; the test proves nothing")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`
+export const FREE_CATALOG_CURATED_AT = "2026-09-01";
+export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
+  { provider: "groq", modelId: "` + model + `", displayName: "Fresh", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "groq", tos: "avoid" },
+];
+`))
+	}))
+	defer srv.Close()
+
+	syncer := NewFreeSyncer(FreeSyncOptions{URL: srv.URL, OnUpdate: func(c context.Context) {
+		if err := cat.Rebuild(c); err != nil {
+			t.Error(err)
+		}
+	}})
+	cat.SetFreeTiers(syncer.Catalog)
+	if err := syncer.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := cat.Snapshot().Lookup("p", model)
+	if !ok {
+		t.Fatalf("%s is not in the snapshot", model)
+	}
+	if !m.FreeTier.Vetoed() {
+		t.Errorf("free tier = %+v, want the synced avoid grading", m.FreeTier)
+	}
+}
+
+// A listing that quotes input and output but no cache rates outranks
+// models.dev for the rates it quoted, and only those. Taking the stored record
+// whole costed every cached token at zero.
+func TestAListedPriceTakesCacheRatesItDidNotQuote(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+		}},
+		{ModelID: "quoted-zero-cache", Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+			CacheReadMicrosPerMTok: &zero,
+		}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	directory := Metadata{
+		InputMicrosPerMTok: 999_000, OutputMicrosPerMTok: 999_000,
+		CacheReadMicrosPerMTok: 25_000, CacheWriteMicrosPerMTok: 60_000,
+		PriceKnown: true,
+	}
+	cat.SetDoc(func() Doc {
+		return Doc{embeddedPreset: {embeddedModel: directory, "quoted-zero-cache": directory}}
+	})
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || m.Pricing.InputMicrosPerMTok != 50_000 ||
+		m.Pricing.OutputMicrosPerMTok != 80_000 {
+		t.Errorf("pricing = %+v, want the listing's input and output", m.Pricing)
+	}
+	if m.Pricing.CacheReadMicrosPerMTok != 25_000 || m.Pricing.CacheWriteMicrosPerMTok != 60_000 {
+		t.Errorf("cache = %d/%d, want models.dev's 25000/60000 for rates the listing did not quote",
+			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
+	}
+
+	// The filled rates are models.dev's, and a cost that used one rests on it.
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000}); got != GradeMeasured {
+		t.Errorf("grade without cached tokens = %q, want measured", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache reads = %q, want indexed: the read rate is models.dev's", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache writes = %q, want indexed: the write rate is models.dev's", got)
+	}
+
+	// A rate the listing did quote, zero included, is still the listing's.
+	q, _ := cat.Snapshot().Lookup("p", "quoted-zero-cache")
+	if q.Pricing.CacheReadMicrosPerMTok != 0 {
+		t.Errorf("cache read = %d, want the quoted 0", q.Pricing.CacheReadMicrosPerMTok)
+	}
+	if q.Pricing.CacheWriteMicrosPerMTok != 60_000 {
+		t.Errorf("cache write = %d, want models.dev's 60000", q.Pricing.CacheWriteMicrosPerMTok)
+	}
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cache reads = %q, want measured: the listing quoted that rate", got)
+	}
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache writes = %q, want indexed", got)
+	}
+	// A write whose TTL the response broke out is priced from the input rate,
+	// which the listing quoted.
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000, CacheWrite5m: 1000}); got != GradeMeasured {
+		t.Errorf("grade with TTL-priced cache writes = %q, want measured", got)
+	}
+}
+
+// A model the listing quotes free is free for cached tokens too. Syncs before
+// cache columns were tracked stored a quoted zero cache rate as unset, so a
+// fill here would start charging for a model the provider gives away.
+func TestAFreeListedPriceTakesNoCacheRates(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	cat.SetDoc(func() Doc {
+		return Doc{embeddedPreset: {embeddedModel: Metadata{
+			CacheReadMicrosPerMTok: 25_000, CacheWriteMicrosPerMTok: 60_000,
+			PriceKnown: true,
+		}}}
+	})
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || !m.Pricing.Known {
+		t.Fatalf("pricing = %+v, want the listing's known free price", m.Pricing)
+	}
+	if m.Pricing.CacheReadMicrosPerMTok != 0 || m.Pricing.CacheWriteMicrosPerMTok != 0 {
+		t.Errorf("cache = %d/%d, want 0/0 for a model listed free",
+			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000, CacheWrite: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cached tokens = %q, want measured: free is a real price", got)
+	}
+}
+
+// A cache rate nobody quoted costs its tokens at zero, and zero is a guess,
+// not the listing's measurement.
+func TestAnUnpricedCacheRateGradesItsTokensAsGuessed(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{
+			InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 80_000,
+			CacheWriteMicrosPerMTok: &zero,
+		}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	cat.SetDoc(func() Doc { return Doc{} })
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || m.Pricing.CacheReadMicrosPerMTok != 0 {
+		t.Fatalf("pricing = %+v, want the listing's price with no cache read rate", m.Pricing)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000}); got != GradeMeasured {
+		t.Errorf("grade without cached tokens = %q, want measured", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeGuessed {
+		t.Errorf("grade with cache reads = %q, want guessed: no one priced them", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cache writes = %q, want measured: the listing quoted 0", got)
 	}
 }

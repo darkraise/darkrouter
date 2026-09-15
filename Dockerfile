@@ -54,6 +54,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM node:26-alpine AS auggie-1
 # Pinned for the reason web/ uses npm ci: an image is meant to be reproducible,
 # and an unpinned CLI would change under a rebuild that touched nothing else.
+# A bump must re-check withheldTools in internal/localcli/auggie.go against
+# `auggie tools list`: the CLI silently ignores a tool name it does not have.
 ARG AUGGIE_VERSION=0.36.0
 RUN npm install -g --prefix /opt/auggie @augmentcode/auggie@${AUGGIE_VERSION}
 

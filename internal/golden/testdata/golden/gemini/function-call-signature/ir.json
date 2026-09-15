@@ -110,7 +110,8 @@
             "type": "string"
           }
         }
-      }
+      },
+      "SchemaDialect": "openapi"
     }
   ],
   "ToolChoice": null,

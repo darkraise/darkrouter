@@ -94,7 +94,7 @@
       "Thinking": "",
       "Signature": "",
       "ToolInput": "",
-      "ToolID": "",
+      "ToolID": "call_r-2_1",
       "ToolName": "lookup"
     },
     "Usage": null,
@@ -113,7 +113,7 @@
       "Thinking": "",
       "Signature": "",
       "ToolInput": "{\"city\":\"Oslo\"}",
-      "ToolID": "",
+      "ToolID": "call_r-2_1",
       "ToolName": "lookup"
     },
     "Usage": null,

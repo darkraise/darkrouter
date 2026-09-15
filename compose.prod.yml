@@ -64,6 +64,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # The server's own shutdown budget (config.ShutdownGrace, default 10s in
+    # internal/config/load.go) plus its 500ms terminalGrace and final worker
+    # flush (internal/server/server.go) can run right up against Compose's
+    # 10s default, so a slow drain gets SIGKILLed mid-flush. Keep this at least
+    # 5s above server.shutdown_grace, which is hot-reloadable from the console:
+    # the gateway warns once shutdown_grace exceeds 25s, a threshold that
+    # assumes this 30s value, so raise both together.
+    stop_grace_period: 30s
     cap_drop:
       - ALL
     security_opt:

@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import { ProviderDetail } from "./provider-detail"
 import type { Preset, Provider } from "../../lib/api-types"
 
@@ -143,6 +144,26 @@ describe("a provider nobody has configured", () => {
   })
 })
 
+describe("a provider list that did not load", () => {
+  it("says so rather than rendering nothing", async () => {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url) === "/api/providers"
+          ? new Response(JSON.stringify({ error: "database is locked" }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            })
+          : routes(url, init),
+    )
+    await renderProvider("groq")
+
+    expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument()
+  })
+})
+
 describe("a configured provider", () => {
   it("renders the full page", async () => {
     stub([configured], [preset])
@@ -152,6 +173,35 @@ describe("a configured provider", () => {
     // The parts that only exist once there is a database row.
     expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument()
     expect(screen.getByText(/priority 10/)).toBeInTheDocument()
+  })
+
+  it("shows the models as this provider serves them, not as the fold does", async () => {
+    // The unnarrowed catalogue is one row per model with another provider's
+    // price and capabilities on it; only the narrowed view is groq's own.
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    const model = (input: number, tools: boolean) => ({
+      model: "llama", providers: ["cerebras", "groq"], surfaces: ["llm"],
+      context_window: 8000, max_output_tokens: 0, tools, vision: false, reasoning: false,
+      inferred: false, state: "live", free_tier: null, merge_source: "discovered",
+      pricing: { input_micros: input, output_micros: input, price_source: "", price_grade: "" },
+    })
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        const path = String(url)
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } })
+        if (path === "/api/models?provider=groq") {
+          return json({ models: [{ ...model(9_000_000, true), providers: ["groq"] }], aliases: [] })
+        }
+        if (path.startsWith("/api/models")) return json({ models: [model(1_000_000, false)], aliases: [] })
+        return routes(url, init)
+      },
+    )
+    await renderProvider("groq")
+
+    expect(await screen.findByText(/\$9\.00/)).toBeInTheDocument()
+    expect(screen.queryByText(/\$1\.00/)).not.toBeInTheDocument()
   })
 })
 
@@ -213,6 +263,30 @@ describe("adding a keyless provider", () => {
         free_models_only: true,
       })
     })
+  })
+
+  it("warns when the provider was stored but the gateway did not load it", async () => {
+    stub([], [keylessPreset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      String(url) === "/api/providers" && init?.method === "POST"
+        ? new Response(
+            JSON.stringify({ id: "opencode", routing_updated: false, warning: "still routing with the previous settings" }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          )
+        : routes(url, init),
+    )
+    const success = vi.spyOn(toast, "success")
+    const warning = vi.spyOn(toast, "warning")
+    await renderProvider("opencode")
+    await userEvent.click(await screen.findByRole("button", { name: /add opencode free/i }))
+
+    await waitFor(() =>
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("still routing with the previous settings")),
+    )
+    expect(success).not.toHaveBeenCalled()
+    success.mockRestore()
+    warning.mockRestore()
   })
 
   it("defaults to importing everything", async () => {
@@ -286,6 +360,63 @@ describe("switching a provider back on", () => {
       expect(keys).toContain(JSON.stringify(["health", "providers"]))
       expect(keys).toContain(JSON.stringify(["health", "discovery"]))
     })
+  })
+})
+
+describe("a change saved but not yet routed", () => {
+  // The server answers 500 with routing_updated:false: the write committed,
+  // so the page must say it was saved rather than that it failed.
+  function patchesCommitButDoNotRoute() {
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      (init as RequestInit)?.method === "PATCH"
+        ? new Response(
+            JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          )
+        : routes(url, init),
+    )
+  }
+
+  it.each([
+    ["the provider switch", { ...configured, enabled: false }, "Enable"],
+    [
+      "a credential switch",
+      { ...configured, credentials: [{ ...cred, enabled: false }] },
+      "Enable",
+    ],
+  ])("warns instead of failing for %s", async (_what, row, button) => {
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    stub([row], [preset])
+    patchesCommitButDoNotRoute()
+    await renderProvider("groq")
+
+    await userEvent.click(await screen.findByRole("button", { name: button }))
+
+    await waitFor(() =>
+      expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/)),
+    )
+    expect(error).not.toHaveBeenCalled()
+    warning.mockRestore()
+    error.mockRestore()
+  })
+
+  it("warns instead of failing for the unsanctioned-tier opt-in", async () => {
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    stub([configured], [preset])
+    patchesCommitButDoNotRoute()
+    await renderProvider("groq")
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /use models the vendor hasn't sanctioned/i }),
+    )
+
+    await waitFor(() => expect(warning).toHaveBeenCalled())
+    expect(error).not.toHaveBeenCalled()
+    warning.mockRestore()
+    error.mockRestore()
   })
 })
 
@@ -418,5 +549,51 @@ describe("the unsanctioned-tier opt-in", () => {
         allow_unsanctioned_free: false,
       })
     })
+  })
+})
+
+describe("the requests sparkline", () => {
+  function withUsage(days: { day: string; key: string; requests: number }[]) {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url).startsWith("/api/usage")
+          ? new Response(
+              JSON.stringify({ days, priced: false, first_day: "2026-09-01", last_day: "2026-09-03" }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            )
+          : routes(url, init),
+    )
+  }
+
+  it("explains a flat line when no day in the window carried traffic", async () => {
+    withUsage([{ day: "2026-09-02", key: "other", requests: 9 }])
+    await renderProvider("groq")
+    expect(await screen.findByText("no requests in this window")).toBeInTheDocument()
+  })
+
+  it("says nothing extra once a day has traffic", async () => {
+    withUsage([{ day: "2026-09-02", key: "groq", requests: 9 }])
+    await renderProvider("groq")
+    expect(await screen.findByText("requests · 30d")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("9")).toBeInTheDocument())
+    expect(screen.queryByText("no requests in this window")).toBeNull()
+  })
+
+  it("says it did not load rather than showing a zero", async () => {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url).startsWith("/api/usage")
+          ? new Response(JSON.stringify({ error: "database is locked" }), { status: 500 })
+          : routes(url, init),
+    )
+    await renderProvider("groq")
+
+    const card = (await screen.findByText("requests · 30d")).parentElement!
+    await waitFor(() => expect(within(card).getByText("did not load")).toBeInTheDocument())
+    expect(within(card).queryByText("0")).toBeNull()
   })
 })

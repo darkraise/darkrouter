@@ -39,11 +39,6 @@
         },
         {
           "text": "five"
-        },
-        {
-          "cachePoint": {
-            "type": "default"
-          }
         }
       ],
       "role": "user"

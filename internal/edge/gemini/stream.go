@@ -89,6 +89,8 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		stop    = ir.StopEndTurn
 		calls   = map[int]*pendingCall{}
 		sendErr error
+		// malformed records a call dropped for unparseable arguments.
+		malformed bool
 	)
 
 	partChunk := func(parts []any) error {
@@ -110,6 +112,14 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		args := json.RawMessage(pc.args)
 		if len(args) == 0 {
 			args = json.RawMessage(`{}`)
+		}
+		// Arguments cut off mid-object, typically by an output limit, cannot
+		// be rendered as a functionCall; failing the marshal would leave the
+		// array form unterminated, so the call is dropped and the finish
+		// reason says why.
+		if !json.Valid(args) {
+			malformed = true
+			return nil
 		}
 		call := map[string]any{"name": pc.name, "args": args}
 		if pc.id != "" {
@@ -134,6 +144,23 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			}
 		}
 		return nil
+	}
+
+	// The IR carries a thought's signature on a delta after its text, while
+	// Gemini requires the signature back on the exact part it came with. The
+	// latest thought part is held for one event so a signature that follows
+	// can rejoin it.
+	var (
+		held    map[string]any
+		heldIdx int
+	)
+	flushThought := func() error {
+		if held == nil {
+			return nil
+		}
+		p := held
+		held = nil
+		return partChunk([]any{p})
 	}
 
 	terminal := func(reason string) error {
@@ -161,6 +188,9 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			if e.Type == ir.ErrContentFilter {
 				reason = "SAFETY"
 			}
+			if ferr := flushThought(); ferr != nil {
+				return ferr
+			}
 			if serr := cw.send(map[string]any{
 				"candidates": []any{map[string]any{
 					"content":      map[string]any{"role": "model", "parts": []any{}},
@@ -177,6 +207,18 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 				return serr
 			}
 			return cw.close()
+		}
+
+		if d := ev.Delta; held != nil && ev.Type == ir.EventContentDelta && d != nil &&
+			d.Type == ir.BlockThinking && d.Thinking == "" && d.Signature != "" && ev.Index == heldIdx {
+			held["thoughtSignature"] = d.Signature
+			if err := flushThought(); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := flushThought(); err != nil {
+			return err
 		}
 
 		switch ev.Type {
@@ -206,8 +248,10 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 				p := map[string]any{"text": ev.Delta.Thinking, "thought": true}
 				if ev.Delta.Signature != "" {
 					p["thoughtSignature"] = ev.Delta.Signature
+					sendErr = partChunk([]any{p})
+				} else {
+					held, heldIdx = p, ev.Index
 				}
-				sendErr = partChunk([]any{p})
 			case ir.BlockToolUse:
 				pc, ok := calls[ev.Index]
 				if !ok {
@@ -240,16 +284,13 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			}
 
 		case ir.EventMessageStop:
+			// The terminal chunk waits for the sequence to end: OpenAI-compatible
+			// and Bedrock upstreams report usage after their stop, and the
+			// terminal chunk has to carry it.
 			if ev.StopReason != "" {
 				stop = ev.StopReason
 			}
-			if err := flushAllCalls(); err != nil {
-				return err
-			}
-			if err := terminal(finishReasonWire(stop)); err != nil {
-				return err
-			}
-			return cw.close()
+			sendErr = flushAllCalls()
 		}
 
 		if sendErr != nil {
@@ -257,12 +298,22 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		}
 	}
 
-	// The sequence ended without a message_stop. Flush and terminate anyway, or
-	// the array form is never closed and the client sees truncated JSON.
+	// Terminate once the sequence ends, whether or not a message_stop arrived:
+	// without it the array form is never closed and the client sees truncated
+	// JSON.
+	if err := flushThought(); err != nil {
+		return err
+	}
 	if err := flushAllCalls(); err != nil {
 		return err
 	}
-	if err := terminal(finishReasonWire(stop)); err != nil {
+	reason := finishReasonWire(stop)
+	// MAX_TOKENS stays: it names the cause, and a client acts on it by
+	// raising the limit.
+	if malformed && stop != ir.StopMaxTokens {
+		reason = "MALFORMED_FUNCTION_CALL"
+	}
+	if err := terminal(reason); err != nil {
 		return err
 	}
 	return cw.close()

@@ -70,9 +70,13 @@ func responseParts(blocks []ir.ContentBlock) []any {
 }
 
 func usageBody(u ir.Usage) map[string]any {
+	candidates := u.OutputTokens - u.ReasoningTokens
+	if candidates < 0 {
+		candidates = 0
+	}
 	return map[string]any{
 		"promptTokenCount":        u.PromptTokens(),
-		"candidatesTokenCount":    u.OutputTokens,
+		"candidatesTokenCount":    candidates,
 		"cachedContentTokenCount": u.CacheReadTokens,
 		"thoughtsTokenCount":      u.ReasoningTokens,
 		"totalTokenCount":         u.PromptTokens() + u.OutputTokens,

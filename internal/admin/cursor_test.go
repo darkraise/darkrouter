@@ -83,10 +83,19 @@ func TestFilterHashIsOrderIndependentButValueSensitive(t *testing.T) {
 }
 
 func TestAFieldSeparatorPreventsHashCollisions(t *testing.T) {
-	// Without the separator {Provider:"ab"} and {Provider:"a", Model:"b"}
+	// Without a field boundary {Provider:"ab"} and {Provider:"a", Model:"b"}
 	// would hash identically, and a cursor would survive a filter change that
 	// genuinely altered the result set.
 	if (RequestFilters{Provider: "ab"}).Hash() == (RequestFilters{Provider: "a", Model: "b"}).Hash() {
 		t.Error("two different filter sets collided")
+	}
+}
+
+func TestANulInsideAFilterValueCannotForgeAFieldBoundary(t *testing.T) {
+	// Filter values arrive from query parameters, where %00 decodes to a NUL.
+	a := RequestFilters{Provider: "a\x00b"}
+	b := RequestFilters{Provider: "a", Model: "b\x00"}
+	if a.Hash() == b.Hash() {
+		t.Error("a NUL inside a value made two different filter sets collide")
 	}
 }

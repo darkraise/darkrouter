@@ -115,6 +115,71 @@ func TestBuildListRequestHonorsAModelsURLOverride(t *testing.T) {
 	}
 }
 
+func TestAMovedBaseURLListsWhereItServes(t *testing.T) {
+	// The preset's listing host belongs to the base it ships. A row pointed at
+	// another installation must not send its credential to the original vendor.
+	pre := Preset{
+		Kind: "openaicompat", BaseURL: "https://api.example.com/v1",
+		ModelsURL: "https://catalog.example.com/v1/models", Auth: Auth{Style: "bearer"},
+	}
+	for _, tc := range []struct {
+		name, base, want string
+	}{
+		{name: "preset base", base: "https://api.example.com/v1", want: "https://catalog.example.com/v1/models"},
+		{name: "preset base with slash", base: "https://api.example.com/v1/", want: "https://catalog.example.com/v1/models"},
+		{name: "no row base", base: "", want: "https://catalog.example.com/v1/models"},
+		{name: "moved base", base: "https://gw.internal/v1", want: "https://gw.internal/v1/models"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, err := ProbeFor(provider.Provider{ID: "p", Kind: "openaicompat", BaseURL: tc.base}, pre, "sk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := BuildListRequest(context.Background(), pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.URL.String() != tc.want {
+				t.Errorf("listed %s, want %s", r.URL, tc.want)
+			}
+		})
+	}
+}
+
+func TestARowCreatedBeforeAPresetBaseChangeKeepsItsListing(t *testing.T) {
+	// Rows copy the preset's base URL when they are created, and presets are
+	// regenerated. A row left on the vendor's previous path is still on the
+	// vendor, and several vendors do not list at base + /models.
+	presets, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ preset, regeneratedBase string }{
+		{preset: "command-code", regeneratedBase: "https://api.commandcode.ai/v1"},
+		{preset: "free-ai", regeneratedBase: "https://api.free.ai/v1"},
+	} {
+		t.Run(tc.preset, func(t *testing.T) {
+			pre, ok := presets[tc.preset]
+			if !ok || pre.ModelsURL == "" {
+				t.Fatalf("preset %q has no models_url to keep", tc.preset)
+			}
+			rowBase := pre.BaseURL
+			pre.BaseURL = tc.regeneratedBase
+			pr, err := ProbeFor(provider.Provider{ID: "p", Kind: pre.Kind, BaseURL: rowBase}, pre, "sk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := BuildListRequest(context.Background(), pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.URL.String() != pre.ModelsURL {
+				t.Errorf("listed %s, want the preset's %s", r.URL, pre.ModelsURL)
+			}
+		})
+	}
+}
+
 func TestBuildListRequestCustomAPIKeyHeader(t *testing.T) {
 	r, _ := BuildListRequest(context.Background(), Probe{
 		Kind: "openaicompat", BaseURL: "https://x/v1",
@@ -334,6 +399,48 @@ func TestParseListLeavesAnUnpricedListingNil(t *testing.T) {
 			t.Errorf("%s: pricing = %s, want nil for a listing with no price",
 				m.ModelID, showPricing(m.Pricing))
 		}
+	}
+}
+
+// The fixture is ollama.com/v1/models, captured live on 2026-09-15. It named
+// the same 20 models as /api/tags did at the same moment.
+func TestParseListReadsOllamaCloudsListing(t *testing.T) {
+	pre := Embedded()["ollama-cloud"]
+	if !strings.HasSuffix(pre.ModelsURL, "/v1/models") {
+		t.Fatalf("ollama-cloud lists from %q, not its OpenAI-compatible /v1/models", pre.ModelsURL)
+	}
+	body, err := os.ReadFile("testdata/listing-ollama-cloud.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseList(pre.Kind, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 20 {
+		t.Errorf("got %d models, want the fixture's 20", len(got))
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ModelID] = true
+	}
+	for _, want := range []string{"gpt-oss:120b", "glm-5.3", "gemma4:31b"} {
+		if !ids[want] {
+			t.Errorf("%s missing from %v", want, ids)
+		}
+	}
+}
+
+// A native models[] listing is not an OpenAI-compatible one. Gemini's names
+// carry a "models/" prefix no chat request accepts, so importing any models[]
+// body would fill the catalogue with ids nothing can route to.
+func TestParseListDoesNotReadANativeModelsListAsOpenAICompatible(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-ollama-tags.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ParseList("openaicompat", body); err == nil {
+		t.Errorf("imported %d models from a native tags listing", len(got))
 	}
 }
 

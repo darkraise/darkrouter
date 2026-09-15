@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -211,6 +212,27 @@ func TestUpdateTouchesOnlyWhatThePatchNames(t *testing.T) {
 	}
 	if !rows[0].Enabled {
 		t.Error("enabled changed; the patch did not name it")
+	}
+}
+
+func TestAPatchCanSetALocation(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "vx", Name: "V", Kind: "vertex", BaseURL: "https://x", AuthStyle: "gcp-sa",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loc := "us-central1"
+	if err := db.UpdateProvider(ctx, "vx", ProviderPatch{Location: &loc}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.ProviderByID(ctx, "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != loc {
+		t.Errorf("location = %q, want %q", row.Location, loc)
 	}
 }
 
@@ -469,6 +491,13 @@ func TestFiltersNarrowTheResult(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "01A" {
 		t.Errorf("provider filter = %+v", got)
 	}
+	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, AttemptedProvider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "01A" {
+		t.Errorf("attempted provider filter on a row with no attempts = %+v", got)
+	}
 	got, err = db.ListRequests(ctx, RequestQuery{Limit: 10, Surface: "embedding"})
 	if err != nil {
 		t.Fatal(err)
@@ -613,7 +642,7 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 		}
 	}
 
-	rows, err := db.UsageBy(ctx, 30, UsageByAlias)
+	rows, err := db.UsageBy(ctx, usageNow, 30, UsageByAlias)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -626,7 +655,7 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 	}
 
 	// The day-only rollup still aggregates across aliases.
-	flat, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	flat, err := db.UsageBy(ctx, usageNow, 30, UsageByDayOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,13 +664,12 @@ func TestUsageByAliasSplitsTheDay(t *testing.T) {
 	}
 }
 
-// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded LIMIT
+// TestUsageByLimitsDaysNotRows is the fixture that tells a day-bounded window
 // apart from a row-bounded one. Three days x two providers is six rows.
 // Asking UsageBy for 2 days must return every row from the two newest days:
 // four rows spanning exactly two distinct days. A row-bounded `LIMIT 2`
 // instead returns the first two rows the query happens to emit, which cover
-// only one day -- so this test fails against that bug and passes against a
-// correct day-scoped LIMIT.
+// only one day.
 func TestUsageByLimitsDaysNotRows(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
@@ -655,7 +683,7 @@ func TestUsageByLimitsDaysNotRows(t *testing.T) {
 		}
 	}
 
-	rows, err := db.UsageBy(ctx, 2, UsageByProvider)
+	rows, err := db.UsageBy(ctx, usageNow, 2, UsageByProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,10 +707,9 @@ func TestUsageByLimitsDaysNotRows(t *testing.T) {
 
 // TestUsageByClampsDays pins the 1..365 clamp: days=0, a negative value and
 // an oversized value must all read as if days=30 had been asked for. Without
-// the clamp, days=0 would query LIMIT 0 (zero days back) and days=10000
-// would place no bound at all, so an unclamped implementation returns a
-// different row count than a clamped one on this fixture -- this test fails
-// if the clamp is removed.
+// the clamp, days=0 and a negative value would open a window ending before it
+// starts, so an unclamped implementation returns no rows on this fixture --
+// this test fails if the clamp is removed.
 func TestUsageByClampsDays(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
@@ -692,7 +719,7 @@ func TestUsageByClampsDays(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base, err := db.UsageBy(ctx, 30, UsageByDayOnly)
+	base, err := db.UsageBy(ctx, usageNow, 30, UsageByDayOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +728,7 @@ func TestUsageByClampsDays(t *testing.T) {
 	}
 
 	for _, days := range []int{0, -5, 10000} {
-		got, err := db.UsageBy(ctx, days, UsageByDayOnly)
+		got, err := db.UsageBy(ctx, usageNow, days, UsageByDayOnly)
 		if err != nil {
 			t.Fatalf("days=%d: %v", days, err)
 		}
@@ -709,6 +736,74 @@ func TestUsageByClampsDays(t *testing.T) {
 			t.Errorf("days=%d: want %d rows (clamped to 30), got %d",
 				days, len(base), len(got))
 		}
+	}
+}
+
+// A provider's usage counts every attempt made on it, so the requests behind
+// that usage include ones it failed before another provider served, and ones
+// that no provider served at all.
+func TestTheAttemptedProviderFilterMatchesAnyAttempt(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{
+		{ID: "01FAILOVER", TS: time.UnixMilli(4), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "nebius", FinalModel: "m", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+				{Seq: 2, ProviderID: "nebius", Model: "m", Outcome: "success"},
+			}},
+		{ID: "01ALLFAILED", TS: time.UnixMilli(3), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", Status: "error",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "groq", Model: "m", Outcome: "retryable_provider"},
+			}},
+		{ID: "01ELSEWHERE", TS: time.UnixMilli(2), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "nebius", FinalModel: "m", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "nebius", Model: "m", Outcome: "success"},
+			}},
+	})
+
+	got, err := db.ListRequests(ctx, RequestQuery{Limit: 10, AttemptedProvider: "groq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range got {
+		ids = append(ids, r.ID)
+	}
+	if want := []string{"01FAILOVER", "01ALLFAILED"}; !slices.Equal(ids, want) {
+		t.Fatalf("attempted groq = %v, want %v", ids, want)
+	}
+}
+
+// usageNow is the clock the usage fixtures are dated against.
+var usageNow = time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+// A range is calendar days ending today, not the newest days that happen to
+// have traffic: on a sparse gateway those can reach back months.
+func TestUsageByCountsCalendarDaysNotActiveDates(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 25, 23, 30, 0, 0, time.UTC)
+	for _, day := range []string{"2026-06-01", "2026-08-18", "2026-08-19", "2026-08-25"} {
+		if _, err := db.Write.ExecContext(ctx,
+			`INSERT INTO usage_daily (day, provider_id, model, alias, requests)
+			 VALUES (?, 'groq', 'm', '', 1)`, day); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := db.UsageBy(ctx, now, 7, UsageByDayOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.Day)
+	}
+	if want := []string{"2026-08-19", "2026-08-25"}; !slices.Equal(got, want) {
+		t.Fatalf("7 days = %v, want %v", got, want)
 	}
 }
 
@@ -1072,5 +1167,32 @@ func TestSpendSinceIsNotEstimatedWhenEveryPriceIsFirsthand(t *testing.T) {
 	}
 	if estimated {
 		t.Fatal("estimated must be false when every contributing price was measured or declared")
+	}
+}
+
+// A client that hangs up is not a failure of the gateway or of a provider, and
+// a chat UI's stop button would otherwise read on the overview as an outage.
+func TestRecentStatsCountsOnlyFailuresAsErrors(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	w := NewLogWriter(db, LogOptions{})
+	now := time.Now()
+	var recs []*RequestRecord
+	for i, status := range []string{"success", "error", "cancelled", "cancelled"} {
+		recs = append(recs, &RequestRecord{
+			ID: fmt.Sprintf("r-%d-%s", i, status), TS: now.Add(-time.Minute),
+			Status: status,
+		})
+	}
+	if _, err := w.WriteBatch(ctx, recs); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := db.RecentStats(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Requests != 4 || s.Errors != 1 {
+		t.Fatalf("stats = %+v, want 4 requests and 1 error", s)
 	}
 }

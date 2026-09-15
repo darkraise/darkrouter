@@ -7,7 +7,7 @@
         "type": "thinking"
       },
       {
-        "id": "",
+        "id": "call_r-1_1",
         "input": {
           "city": "Oslo"
         },
@@ -25,7 +25,7 @@
       "cache_creation_input_tokens": 0,
       "cache_read_input_tokens": 4,
       "input_tokens": 8,
-      "output_tokens": 6
+      "output_tokens": 11
     }
   },
   "status": 200

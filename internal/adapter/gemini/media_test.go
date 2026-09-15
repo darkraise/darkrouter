@@ -2,11 +2,14 @@ package gemini
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
@@ -17,6 +20,16 @@ func hasWarning(warns []ir.Warning, field string) bool {
 		}
 	}
 	return false
+}
+
+// onePart renders a single block against a fresh request budget.
+func onePart(t *testing.T, f *Fetcher, m *ir.Media, field string) (map[string]any, []ir.Warning) {
+	t.Helper()
+	got, warns, err := f.part(context.Background(), m, field, &inlineBudget{left: f.MaxBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got, warns
 }
 
 func TestPassthroughURIRecognizesOnlyTheAcceptedForms(t *testing.T) {
@@ -40,7 +53,7 @@ func TestPassthroughURIRecognizesOnlyTheAcceptedForms(t *testing.T) {
 }
 
 func TestPartEmitsInlineDataForBase64(t *testing.T) {
-	got, warns := NewFetcher().part(context.Background(),
+	got, warns := onePart(t, NewFetcher(),
 		&ir.Media{MIME: "image/png", Data: "AAAA"}, "image")
 	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
@@ -52,7 +65,7 @@ func TestPartEmitsInlineDataForBase64(t *testing.T) {
 }
 
 func TestPartPassesAFilesAPIURIThrough(t *testing.T) {
-	got, warns := NewFetcher().part(context.Background(),
+	got, warns := onePart(t, NewFetcher(),
 		&ir.Media{MIME: "image/png", URL: "https://generativelanguage.googleapis.com/v1beta/files/abc"}, "image")
 	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
@@ -81,7 +94,7 @@ func TestPartInlinesAReachableURL(t *testing.T) {
 	}))
 	defer up.Close()
 
-	got, warns := localFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
+	got, warns := onePart(t, localFetcher(), &ir.Media{URL: up.URL + "/a.png"}, "image")
 	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
 	}
@@ -105,7 +118,7 @@ func TestPartDropsAnOversizedURL(t *testing.T) {
 
 	f := localFetcher()
 	f.MaxBytes = 10
-	got, warns := f.part(context.Background(), &ir.Media{URL: up.URL + "/big.png"}, "image")
+	got, warns := onePart(t, f, &ir.Media{URL: up.URL + "/big.png"}, "image")
 	if got != nil {
 		t.Fatalf("part = %v, want nil", got)
 	}
@@ -123,7 +136,7 @@ func TestPartDropsAFailedFetch(t *testing.T) {
 	}))
 	defer up.Close()
 
-	got, warns := localFetcher().part(context.Background(), &ir.Media{URL: up.URL + "/gone.png"}, "image")
+	got, warns := onePart(t, localFetcher(), &ir.Media{URL: up.URL + "/gone.png"}, "image")
 	if got != nil || !hasWarning(warns, "messages[].image") {
 		t.Fatalf("part = %v, warnings = %+v", got, warns)
 	}
@@ -133,7 +146,7 @@ func TestPartDropsAFailedFetch(t *testing.T) {
 }
 
 func TestPartRefusesANonHTTPScheme(t *testing.T) {
-	got, warns := NewFetcher().part(context.Background(),
+	got, warns := onePart(t, NewFetcher(),
 		&ir.Media{URL: "file:///etc/passwd"}, "document")
 	if got != nil {
 		t.Fatalf("part = %v; only http and https are fetched", got)
@@ -144,7 +157,7 @@ func TestPartRefusesANonHTTPScheme(t *testing.T) {
 }
 
 func TestPartDropsAnEmptyMedia(t *testing.T) {
-	got, warns := NewFetcher().part(context.Background(), &ir.Media{}, "image")
+	got, warns := onePart(t, NewFetcher(), &ir.Media{}, "image")
 	if got != nil || len(warns) != 1 {
 		t.Fatalf("part = %v, warnings = %+v", got, warns)
 	}
@@ -158,7 +171,7 @@ func TestADisabledFetcherDropsRemoteURLsWithAWarning(t *testing.T) {
 
 	f := localFetcher()
 	f.Inline = false
-	got, warns := f.part(context.Background(), &ir.Media{URL: up.URL + "/a.png"}, "image")
+	got, warns := onePart(t, f, &ir.Media{URL: up.URL + "/a.png"}, "image")
 	if got != nil {
 		t.Fatalf("the block should be dropped, got %v", got)
 	}
@@ -178,9 +191,47 @@ func TestADisabledFetcherStillPassesWhatNeedsNoFetch(t *testing.T) {
 		"file id":     {FileID: "files/abc", MIME: "image/png"},
 		"youtube":     {URL: "https://www.youtube.com/watch?v=x"},
 	} {
-		got, warns := f.part(context.Background(), m, "image")
+		got, warns := onePart(t, f, m, "image")
 		if got == nil {
 			t.Errorf("%s: dropped, warnings = %v", name, warns)
 		}
+	}
+}
+
+func TestFetchedMediaSharesOneBudgetAcrossTheRequest(t *testing.T) {
+	var hits atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(strings.Repeat("x", 6)))
+	}))
+	defer up.Close()
+
+	image := func(name string) ir.ContentBlock {
+		return ir.ContentBlock{Type: ir.BlockImage, Media: &ir.Media{URL: up.URL + "/" + name}}
+	}
+	// Each URL fits the cap on its own; the second, arriving inside a tool
+	// result, is what pushes the request over it. The third must never be
+	// fetched.
+	req := &ir.Request{Messages: []ir.Message{
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{image("a.png")}},
+		{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockToolUse,
+			ToolUse: &ir.ToolUse{ID: "c1", Name: "shot", Input: []byte(`{}`)}}}},
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockToolResult,
+			ToolResult: &ir.ToolResult{ToolUseID: "c1", Content: []ir.ContentBlock{image("b.png")}}}}},
+		{Role: ir.RoleUser, Content: []ir.ContentBlock{image("c.png")}},
+	}}
+
+	f := localFetcher()
+	f.MaxBytes = 10
+	_, _, err := f.BuildRequest(context.Background(), &adapter.Target{
+		BaseURL: "https://generativelanguage.googleapis.com/v1beta", Model: "gemini-2.0-flash",
+	}, req)
+
+	var ie *ir.Error
+	if !errors.As(err, &ie) || ie.Type != ir.ErrPayloadTooLarge {
+		t.Fatalf("err = %v; a request over the media budget must fail as payload too large", err)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Errorf("fetched %d URLs; fetching must stop once the budget is exceeded", n)
 	}
 }

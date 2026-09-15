@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,8 +76,18 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	var warns []ir.Warning
 	body := map[string]any{}
 
-	contents, w := f.renderContents(ctx, req)
+	contents, w, err := f.renderContents(ctx, req)
 	warns = append(warns, w...)
+	if err != nil {
+		return nil, warns, err
+	}
+	if isGemini3(t.Model) && signCurrentTurn(contents) {
+		warns = append(warns, ir.Warning{
+			Field: "messages[].tool_calls", Target: targetName,
+			Reason: "a function call in the current turn had no Gemini thought signature; " +
+				"sent with Google's validator placeholder, which can degrade the model's reasoning",
+		})
+	}
 	body["contents"] = contents
 
 	sys, w := xlate.CollectSystem(req, targetName)
@@ -151,21 +163,33 @@ func (f *Fetcher) renderBody(ctx context.Context, t *adapter.Target, req *ir.Req
 	if rf := req.ResponseFormat; rf != nil {
 		switch rf.Type {
 		case "json_schema":
-			// A responseSchema without the MIME type is ignored outright.
+			// responseSchema takes Gemini's OpenAPI subset, which rejects
+			// $defs, $ref and additionalProperties; responseJsonSchema takes
+			// JSON Schema, whose type names are lowercase. Each schema goes to
+			// the field its own form belongs in. Either is ignored outright
+			// without the MIME type.
 			cfg["responseMimeType"] = "application/json"
-			cfg["responseSchema"] = rf.Schema
+			cfg[schemaField(rf.SchemaDialect, "responseSchema", "responseJsonSchema")] = rf.Schema
 		case "json_object":
 			cfg["responseMimeType"] = "application/json"
 		}
 	}
-	if tc, w := thinkingConfig(t.Model, req.Reasoning); tc != nil {
-		warns = append(warns, w...)
+	tc, tw := thinkingConfig(t.Model, req.Reasoning)
+	warns = append(warns, tw...)
+	if tc != nil {
 		cfg["thinkingConfig"] = tc
 	}
 	if len(cfg) > 0 {
 		body["generationConfig"] = cfg
 	}
 	return body, warns, nil
+}
+
+func schemaField(dialect, openAPIField, jsonSchemaField string) string {
+	if dialect == ir.SchemaOpenAPI {
+		return openAPIField
+	}
+	return jsonSchemaField
 }
 
 // renderTools declares the client's functions in one tools entry and each
@@ -204,12 +228,15 @@ func renderTools(tools []ir.Tool) ([]any, []ir.Warning) {
 				Reason: "no equivalent on a function declaration; the field was dropped",
 			})
 		}
-		schema := tool.Schema
+		schema, dialect := tool.Schema, tool.SchemaDialect
 		if len(schema) == 0 {
-			schema = json.RawMessage(`{"type":"object"}`)
+			schema, dialect = json.RawMessage(`{"type":"object"}`), ""
 		}
+		// parameters or parametersJsonSchema by the schema's form, for the
+		// same reason as responseSchema and responseJsonSchema.
 		decls = append(decls, map[string]any{
-			"name": tool.Name, "description": tool.Description, "parameters": schema,
+			"name": tool.Name, "description": tool.Description,
+			schemaField(dialect, "parameters", "parametersJsonSchema"): schema,
 		})
 	}
 	if len(decls) > 0 {
@@ -236,11 +263,48 @@ func budgetCap(model string) int {
 	return budgetCapPro
 }
 
+// Budget floors, also per family and also rejected rather than clamped. Pro
+// has no off switch at all: its floor is the closest it comes to off. An
+// unrecognized id gets no floor, so a client's own budget goes through. Only
+// a thinking generation reaches this: 1.x and 2.0 Pro take no budget at all.
+const (
+	budgetFloorPro       = 128
+	budgetFloorFlashLite = 512
+)
+
+func budgetFloor(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "flash-lite"):
+		return budgetFloorFlashLite
+	case isPro(m):
+		return budgetFloorPro
+	}
+	return 0
+}
+
+// isPro reports a model that cannot turn thinking off: 2.5 Pro takes no zero
+// budget.
+func isPro(model string) bool {
+	return strings.Contains(strings.ToLower(model), "-pro")
+}
+
 // isGemini3 reports whether the model takes thinkingLevel rather than a
 // token budget. Gemini 3 ignores thinkingBudget on some variants and rejects
 // it on others; the level is the control the generation documents.
 func isGemini3(model string) bool {
 	return strings.Contains(strings.ToLower(model), "gemini-3")
+}
+
+// nonThinking reports a generation from before thinking existed. It takes no
+// thinkingConfig, so a request to turn thinking off is already honored. The
+// 2.0 Flash Thinking experiments are the exception in that generation.
+func nonThinking(model string) bool {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "gemini-2.0-flash-thinking") {
+		return false
+	}
+	return strings.Contains(m, "gemini-1.") || strings.Contains(m, "gemini-2.0-")
 }
 
 // thinkingLevel maps the IR effort vocabulary onto Gemini 3's levels.
@@ -256,6 +320,66 @@ func thinkingLevel(effort string) string {
 		return "high"
 	}
 	return ""
+}
+
+var levelOrder = []string{"minimal", "low", "medium", "high"}
+
+var gemini3Model = regexp.MustCompile(`gemini-(3(?:\.\d+)?)-([a-z-]+)`)
+
+// gemini3Levels is the set of thinking levels a Gemini 3 model accepts, in
+// levelOrder, per Google's thinking guides for the Gemini API and Vertex.
+// Every other level is a 400.
+//
+// minimal is granted only to the models documented with it: the two newest
+// Flash models dropped it, so an unrecognized one is assumed not to take it.
+// low, medium and high are what every other text model takes, except 3 Pro,
+// which has no medium.
+func gemini3Levels(model string) []string {
+	all := levelOrder
+	noMinimal := levelOrder[1:]
+	match := gemini3Model.FindStringSubmatch(strings.ToLower(model))
+	if match == nil {
+		return noMinimal
+	}
+	version, variant := match[1], match[2]
+	switch {
+	case strings.Contains(variant, "image") && strings.HasPrefix(variant, "pro"):
+		return []string{"high"}
+	case strings.Contains(variant, "image"):
+		return []string{"minimal", "high"}
+	case strings.HasPrefix(variant, "pro"):
+		if version == "3" {
+			return []string{"low", "high"}
+		}
+		return noMinimal
+	case strings.HasPrefix(variant, "flash-lite"):
+		if version == "3.1" || version == "3.5" {
+			return all
+		}
+	case strings.HasPrefix(variant, "flash"):
+		if version == "3" || version == "3.5" || version == "3.6" {
+			return all
+		}
+	}
+	return noMinimal
+}
+
+// nearestLevel picks the supported level closest to the one asked for,
+// rounding up on a tie: too much thinking costs tokens, too little silently
+// degrades the answer.
+func nearestLevel(level string, supported []string) string {
+	want := slices.Index(levelOrder, level)
+	best, bestDist := supported[0], len(levelOrder)
+	for _, s := range supported {
+		d := slices.Index(levelOrder, s) - want
+		if d < 0 {
+			d = -d
+		}
+		if d <= bestDist {
+			best, bestDist = s, d
+		}
+	}
+	return best
 }
 
 // effortBudget extends xlate.EffortBudget to the ends of the vocabulary it
@@ -276,7 +400,27 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 		return nil, nil
 	}
 	if r.Disabled {
+		cannotDisable := []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model cannot turn thinking off; sent with the least thinking it accepts",
+		}}
+		switch {
+		// No Gemini 3 model turns thinking fully off, and a zero budget is not
+		// its control; its lowest level is the documented nearest thing.
+		case isGemini3(model):
+			return map[string]any{"thinkingLevel": gemini3Levels(model)[0]}, cannotDisable
+		case nonThinking(model):
+			return nil, nil
+		case isPro(model):
+			return map[string]any{"thinkingBudget": budgetFloorPro}, cannotDisable
+		}
 		return map[string]any{"thinkingBudget": 0}, nil
+	}
+	if nonThinking(model) {
+		return nil, []ir.Warning{{
+			Field: "reasoning", Target: targetName,
+			Reason: "this model has no thinking; reasoning dropped",
+		}}
 	}
 	cap := budgetCap(model)
 	if isGemini3(model) {
@@ -291,6 +435,13 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 					Field: "reasoning.budget", Target: targetName,
 					Reason: "Gemini 3 takes a thinking level, not a budget; converted to the nearest level",
 				})
+			}
+			if sent := nearestLevel(level, gemini3Levels(model)); sent != level {
+				warns = append(warns, ir.Warning{
+					Field: "reasoning.effort", Target: targetName,
+					Reason: "this model has no " + level + " thinking level; sent " + sent,
+				})
+				level = sent
 			}
 			return map[string]any{"thinkingLevel": level, "includeThoughts": true}, warns
 		}
@@ -310,6 +461,13 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 			Reason: "above the model family's thinking ceiling; clamped to " + strconv.Itoa(cap),
 		})
 		budget = cap
+	}
+	if floor := budgetFloor(model); budget < floor {
+		warns = append(warns, ir.Warning{
+			Field: "reasoning.budget", Target: targetName,
+			Reason: "below the model family's thinking floor; raised to " + strconv.Itoa(floor),
+		})
+		budget = floor
 	}
 	return map[string]any{"thinkingBudget": budget, "includeThoughts": true}, warns
 }

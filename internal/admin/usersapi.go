@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -129,21 +130,19 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such account")
 		return
 	}
-	if target.Role == store.RoleAdmin {
-		n, err := s.deps.DB.AdminCount(r.Context())
-		if err != nil {
-			internalError(w, r, err)
-			return
-		}
+	gone, err := s.deps.DB.DeleteUser(r.Context(), target.ID)
+	if errors.Is(err, store.ErrConflict) {
 		// There is no recovery path: a console with no administrator cannot be
 		// managed again by any route the code provides.
-		if n <= 1 {
-			writeError(w, http.StatusConflict, "the last administrator cannot be removed")
-			return
-		}
+		writeError(w, http.StatusConflict, "the last administrator cannot be removed")
+		return
 	}
-	if _, err := s.deps.DB.DeleteUser(r.Context(), target.ID); err != nil {
+	if err != nil {
 		internalError(w, r, err)
+		return
+	}
+	if !gone {
+		writeError(w, http.StatusNotFound, "no such account")
 		return
 	}
 	slog.Info("an account was removed", "username", target.Username)

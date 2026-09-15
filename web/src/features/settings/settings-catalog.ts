@@ -226,7 +226,8 @@ export const SETTINGS: Record<string, SettingMeta> = {
   },
   "server.shutdown_grace": {
     name: "Shutdown grace period",
-    description: "How long in-flight requests have to finish when the gateway is stopping.",
+    description:
+      "How long in-flight requests have to finish when the gateway is stopping. The shipped compose files kill the container 30s after asking it to stop, so a value above 25s raises a warning; raise stop_grace_period to at least this value plus 5s first.",
     group: "server",
   },
   "server.sse.max_line_bytes": {
@@ -354,6 +355,60 @@ export function displayOf(value: string, kind: ConfigKind): string {
       return value === "true" ? "On" : "Off"
     default:
       return value
+  }
+}
+
+const DURATION_UNIT_NS: Record<string, number> = {
+  ns: 1, us: 1e3, "µs": 1e3, "μs": 1e3, ms: 1e6, s: 1e9, m: 60e9, h: 3600e9,
+}
+
+/** A duration as Go's time.ParseDuration reads it, in nanoseconds. */
+function durationNanos(text: string): number | undefined {
+  const t = text.trim()
+  if (/^[+-]?0$/.test(t)) return 0
+  const m = /^([+-]?)((?:(?:\d+\.?\d*|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+)$/.exec(t)
+  if (!m?.[2]) return undefined
+  let total = 0
+  for (const [, n = "", unit = ""] of m[2].matchAll(/(\d+\.?\d*|\.\d+)(ns|us|µs|μs|ms|s|m|h)/g)) {
+    total += Number(n) * (DURATION_UNIT_NS[unit] ?? Number.NaN)
+  }
+  return Math.round(m[1] === "-" ? -total : total)
+}
+
+/** The spellings strconv.ParseBool accepts. */
+function goBool(text: string): boolean | undefined {
+  const t = text.trim()
+  if (["1", "t", "T", "TRUE", "true", "True"].includes(t)) return true
+  if (["0", "f", "F", "FALSE", "false", "False"].includes(t)) return false
+  return undefined
+}
+
+/**
+ * Whether two spellings store the same setting.
+ *
+ * The gateway reports the typed config rather than the text that was saved,
+ * so a "96h" written anywhere reads back as "96h0m0s" and a "010" as "10". A
+ * string comparison calls those different values. A spelling the gateway
+ * would refuse is compared as text.
+ */
+export function sameSetting(a: string, b: string, kind: ConfigKind): boolean {
+  if (a.trim() === b.trim()) return true
+  switch (kind) {
+    case "duration": {
+      const x = durationNanos(a)
+      return x !== undefined && x === durationNanos(b)
+    }
+    case "int":
+    case "bytes": {
+      const integer = /^[+-]?\d+$/
+      return integer.test(a.trim()) && integer.test(b.trim()) && Number(a) === Number(b)
+    }
+    case "bool": {
+      const x = goBool(a)
+      return x !== undefined && x === goBool(b)
+    }
+    default:
+      return false
   }
 }
 

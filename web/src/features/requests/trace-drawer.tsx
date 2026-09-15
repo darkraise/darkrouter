@@ -278,13 +278,13 @@ export function TraceDrawer({
 
             <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <dt className="text-[hsl(var(--legend))]">Requested</dt>
-              <dd className="font-mono">
+              <dd className="font-mono break-words">
                 {trace.data.alias && trace.data.final_model
                   ? `${trace.data.alias} → ${trace.data.final_model}`
                   : trace.data.model}
               </dd>
               <dt className="text-[hsl(var(--legend))]">Served by</dt>
-              <dd className="font-mono">
+              <dd className="font-mono break-words">
                 {trace.data.provider || "—"}
                 {trace.data.final_model ? `/${trace.data.final_model}` : ""}
               </dd>
@@ -304,7 +304,11 @@ export function TraceDrawer({
               <dd>
                 <Badge
                   variant={
-                    trace.data.status === "success" ? "green" : "destructive"
+                    trace.data.status === "success"
+                      ? "green"
+                      : trace.data.status === "cancelled"
+                        ? "secondary"
+                        : "destructive"
                   }
                 >
                   {trace.data.status}

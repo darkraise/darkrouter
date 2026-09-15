@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 
@@ -105,9 +106,26 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 		Content    []json.RawMessage `json:"content"`
 		StopReason string            `json:"stop_reason"`
 		Usage      wireUsage         `json:"usage"`
+		Type       string            `json:"type"`
+		Error      *struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	body, err := adapter.ReadResponse(resp.Body)
+	if err != nil {
 		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&w); err != nil {
+		return nil, err
+	}
+	if w.Error != nil {
+		return nil, &ir.Error{Type: errorType(w.Error.Type), Message: w.Error.Message, Code: w.Error.Type}
+	}
+	// Any one of the three marks a message. Compatible upstreams do not all
+	// send type, and a legitimate empty answer has an empty content array.
+	if w.Type != "message" && w.Content == nil && w.StopReason == "" {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no message"}
 	}
 
 	out := &ir.Response{ID: w.ID, Model: w.Model, Usage: w.Usage.toIR()}

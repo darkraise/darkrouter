@@ -32,8 +32,11 @@ type RequestQuery struct {
 	AfterID string
 
 	Provider string
-	Model    string
-	Status   string
+	// AttemptedProvider matches a request any of whose attempts ran on this
+	// provider, served or not: the requests behind a provider's usage.
+	AttemptedProvider string
+	Model             string
+	Status            string
 	// Source separates console traffic from a client's: "proxy" or "console".
 	Source    string
 	Alias     string
@@ -108,6 +111,14 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 			where = append(where, f.col+" = ?")
 			args = append(args, f.val)
 		}
+	}
+	if q.AttemptedProvider != "" {
+		// The final provider covers a request logged before attempt rows
+		// existed, the way the rollup credits one.
+		where = append(where, `(r.final_provider_id = ? OR EXISTS (
+		        SELECT 1 FROM request_attempts a
+		         WHERE a.request_id = r.id AND a.provider_id = ?))`)
+		args = append(args, q.AttemptedProvider, q.AttemptedProvider)
 	}
 	if q.SinceMs > 0 {
 		where = append(where, "r.ts >= ?")

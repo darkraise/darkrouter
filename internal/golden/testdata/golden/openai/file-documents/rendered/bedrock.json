@@ -1,0 +1,48 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Summarise these files."
+        },
+        {
+          "document": {
+            "format": "txt",
+            "name": "document-1",
+            "source": {
+              "bytes": "cGxhaW4gbm90ZXMK"
+            }
+          }
+        },
+        {
+          "document": {
+            "format": "md",
+            "name": "document-2",
+            "source": {
+              "bytes": "IyBIZWFkaW5nCgpib2R5Cg=="
+            }
+          }
+        },
+        {
+          "document": {
+            "format": "pdf",
+            "name": "document-3",
+            "source": {
+              "bytes": "JVBERi0xLjQK"
+            }
+          }
+        },
+        {
+          "document": {
+            "format": "docx",
+            "name": "document-4",
+            "source": {
+              "bytes": "UEsDBBQAAAA="
+            }
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

@@ -33,12 +33,13 @@ const stubRouterAdapter: RouterAdapter = {
 
 function mount(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <RouterAdapterProvider value={stubRouterAdapter}>{ui}</RouterAdapterProvider>
       <Toaster />
     </QueryClientProvider>,
   )
+  return { ...view, client }
 }
 
 beforeEach(() => vi.unstubAllGlobals())
@@ -92,6 +93,14 @@ describe("settingsPatch", () => {
 
   it("sends nothing when nothing changed", () => {
     expect(settingsPatch({ "log.retention": "720h0m0s" }, new Set(), cfg)).toEqual({})
+  })
+
+  it("sends nothing for a value typed in another spelling of what is stored", () => {
+    // The gateway reports "10m0s" for a stored "10m"; retyping it is not a
+    // change, and sending it would report the key as written.
+    expect(
+      settingsPatch({ "policy.timeout.total": "10m", "capture.bodies": "0" }, new Set(), cfg),
+    ).toEqual({})
   })
 
   it("sends only the keys the draft changed", () => {
@@ -460,11 +469,10 @@ describe("the settings form", () => {
     await waitFor(() => expect(saves).toEqual([{ reset: ["catalog.sync_timeout"] }]))
   })
 
-  it("clears the Save bar after a save the answer reads back unchanged", async () => {
-    // /api/config reports the typed config, so a saved "10m" reads back as
-    // "10m0s" and the refetch is byte-identical. Query shares that response
-    // structurally, so the reference never changes and a draft waiting on a
-    // changed reference would sit dirty over a value that is stored.
+  it("offers no Save for a value retyped in the spelling the answer reads back", async () => {
+    // /api/config reports the typed config, so a stored "72h" reads back as
+    // "72h0m0s". Typing that spelling is not a change, and a Save bar over it
+    // would sit dirty over a value that is already stored.
     stubSettingsFetch({})
     const user = userEvent.setup()
     mount(<SettingsScreen />)
@@ -472,11 +480,9 @@ describe("the settings form", () => {
     const box = await screen.findByLabelText("Keep request records for")
     await user.clear(box)
     await user.type(box, "72h0m0s")
-    await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument(),
-    )
+    expect(box).toHaveValue("72h0m0s")
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
   })
 
   it("names a restart-only key the save accepted but cannot apply", async () => {
@@ -655,6 +661,69 @@ describe("the settings form", () => {
     await waitFor(() => expect(screen.getByLabelText("Keep request records for")).toBeEnabled())
   })
 
+  describe("when another operator changes the configuration mid-edit", () => {
+    // The second answer is what a focus refetch brings back after someone
+    // else saved: a new reference, with no save of this screen's behind it.
+    function changedElsewhere(values: Record<string, string>) {
+      let fetches = 0
+      return () => {
+        fetches += 1
+        const base = cfg()
+        return fetches === 1 ? base : { ...base, values: { ...base.values, ...values } }
+      }
+    }
+
+    it("keeps the unsaved edit and takes the other key's new value", async () => {
+      const { saves } = stubSettingsFetch({
+        config: changedElsewhere({ "policy.retry.max_attempts": "5" }),
+      })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      await waitFor(() => expect(screen.getByLabelText("Attempts per request")).toHaveValue("5"))
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+      await user.click(screen.getByRole("button", { name: /^save$/i }))
+      await waitFor(() => expect(saves).toEqual([{ set: { "log.retention": "96h" } }]))
+    })
+
+    it("says so on a row the other operator changed under the edit", async () => {
+      stubSettingsFetch({ config: changedElsewhere({ "log.retention": "24h0m0s" }) })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      expect(await screen.findByText(/^Changed elsewhere to 1 day /)).toBeInTheDocument()
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+    })
+
+    it("does not flag a row that was changed to the value typed here", async () => {
+      // The gateway reports the typed config, so the "96h" stored elsewhere
+      // comes back spelled "96h0m0s".
+      stubSettingsFetch({
+        config: changedElsewhere({ "log.retention": "96h0m0s", "policy.retry.max_attempts": "5" }),
+      })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      await waitFor(() => expect(screen.getByLabelText("Attempts per request")).toHaveValue("5"))
+      expect(screen.queryByText(/^Changed elsewhere/)).not.toBeInTheDocument()
+    })
+  })
+
   it("holds the typed value until the refetch that replaces it has landed", async () => {
     // Reseeding from the render-time config puts the pre-save value back, so
     // the box visibly flips to the old value and only returns to the new one
@@ -682,6 +751,25 @@ describe("the settings form", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
     )
+  })
+
+  it("clears the Save bar and shows the stored spelling after a save", async () => {
+    stubSettingsFetch({
+      configAfterSave: () => ({ ...cfg(), values: { ...cfg().values, "log.retention": "96h0m0s" } }),
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    expect(box).toHaveValue("72h")
+    await user.clear(box)
+    await user.type(box, "96h")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+    )
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
   })
 })
 

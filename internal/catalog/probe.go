@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -116,16 +117,40 @@ func ProbeFor(p provider.Provider, preset Preset, apiKey string) (Probe, error) 
 	if base == "" {
 		return Probe{}, fmt.Errorf("provider %q has no base url", p.ID)
 	}
+	// The preset's listing endpoint belongs to the vendor it ships with. A row
+	// pointed at another installation lists from that installation, or the
+	// credential goes to the original vendor and imports its inventory. The
+	// host decides rather than the whole base: rows copy the preset's base when
+	// they are created and presets are regenerated, so a row still on the
+	// vendor can sit on a path the preset has since moved off, and many
+	// vendors do not list at base + /models.
+	modelsURL := preset.ModelsURL
+	if strings.TrimRight(base, "/") != strings.TrimRight(preset.BaseURL, "/") &&
+		!sameHost(base, preset.ModelsURL) {
+		modelsURL = ""
+	}
 	return Probe{
 		ProviderID:     p.ID,
 		Kind:           p.Kind,
 		BaseURL:        base,
-		ModelsURL:      preset.ModelsURL,
+		ModelsURL:      modelsURL,
 		APIKey:         apiKey,
 		AuthStyle:      style,
 		AuthHeader:     preset.Auth.Header,
 		AuthQueryParam: preset.Auth.QueryParam,
 	}, nil
+}
+
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // BuildListRequest renders the listing request for one probe.
@@ -155,37 +180,43 @@ func BuildListRequest(ctx context.Context, p Probe) (*http.Request, error) {
 // sent as both a header and a query parameter is rejected by some upstreams and
 // logged by more of them.
 func applyAuth(r *http.Request, p Probe) {
-	if p.APIKey == "" || p.AuthStyle == "none" {
+	ApplyStaticAuth(r, p.AuthStyle, p.AuthHeader, p.AuthQueryParam, p.APIKey)
+}
+
+// ApplyStaticAuth writes key where a static auth style puts it: the header
+// or query parameter the preset names, or the style's default. The executor
+// sends its requests through this too, so a listing and a completion to the
+// same provider cannot disagree about how it authenticates.
+func ApplyStaticAuth(r *http.Request, style, header, queryParam, key string) {
+	if key == "" || style == "none" {
 		return
 	}
-	switch p.AuthStyle {
+	switch style {
 	// optional and anonymous are bearer with a different rule about when there
 	// is a key at all: one may have none, the other ships its own. By the time
 	// a key has been resolved they are written the same way, and falling
 	// through to the default instead sent the listing request unauthenticated
 	// while the caller believed it had been credentialled.
 	case "bearer", "optional", "anonymous":
-		r.Header.Set("Authorization", "Bearer "+p.APIKey)
+		r.Header.Set("Authorization", "Bearer "+key)
 	case "x-api-key":
-		r.Header.Set("x-api-key", p.APIKey)
+		r.Header.Set("x-api-key", key)
 	case "api-key":
-		header := p.AuthHeader
 		if header == "" {
 			header = "api-key"
 		}
-		r.Header.Set(header, p.APIKey)
+		r.Header.Set(header, key)
 	case "query-param":
-		param := p.AuthQueryParam
-		if param == "" {
-			param = "key"
+		if queryParam == "" {
+			queryParam = "key"
 		}
 		q := r.URL.Query()
-		q.Set(param, p.APIKey)
+		q.Set(queryParam, key)
 		r.URL.RawQuery = q.Encode()
 	default:
-		// sigv4, gcp-sa and oauth are phase 8's. ProbeFor already refused
-		// their kinds, so reaching here means an unsigned request that will be
-		// rejected — which is the honest outcome, not a silent bearer guess.
+		// sigv4, gcp-sa and oauth are served by their own strategies, never
+		// here. Reaching this means an unsigned request that will be rejected
+		// — which is the honest outcome, not a silent bearer guess.
 	}
 }
 
@@ -195,17 +226,10 @@ func applyAuth(r *http.Request, p Probe) {
 // load-bearing: spec §5.1 makes a *successful* listing that omits a model the
 // evidence that retires it, so an HTML error page read as "zero models" would
 // retire everything the provider serves.
+//
+// It reads a single page. Discovery follows the cursor ParseListPage reports.
 func ParseList(kind string, body []byte) ([]Discovered, error) {
-	var out []Discovered
-	var err error
-	switch kind {
-	case "gemini":
-		out, err = parseGeminiList(body)
-	case "openaicompat", "anthropic":
-		out, err = parseDataList(body)
-	default:
-		return nil, fmt.Errorf("%w: %s", ErrKindNotDiscoverable, kind)
-	}
+	out, _, err := ParseListPage(kind, body)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +237,60 @@ func ParseList(kind string, body []byte) ([]Discovered, error) {
 		return nil, errors.New("listing reported no models")
 	}
 	return out, nil
+}
+
+// ParseListPage decodes one page of a listing and returns the cursor for the
+// next one, empty when the listing is complete. An empty page is not an error
+// here: only the whole listing being empty is.
+//
+// Anthropic pages through has_more and last_id, Gemini through nextPageToken.
+// OpenAI's own list is not paginated, so an OpenAI-compatible listing is always
+// one page.
+func ParseListPage(kind string, body []byte) ([]Discovered, string, error) {
+	switch kind {
+	case "gemini":
+		return parseGeminiList(body)
+	case "anthropic":
+		out, err := parseDataList(body)
+		if err != nil {
+			return nil, "", err
+		}
+		var page struct {
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, "", fmt.Errorf("parse listing: %w", err)
+		}
+		if !page.HasMore {
+			return out, "", nil
+		}
+		if page.LastID == "" {
+			return nil, "", errors.New("listing reported more models but no cursor to reach them")
+		}
+		return out, page.LastID, nil
+	case "openaicompat":
+		out, err := parseDataList(body)
+		return out, "", err
+	default:
+		return nil, "", fmt.Errorf("%w: %s", ErrKindNotDiscoverable, kind)
+	}
+}
+
+// SetListCursor points a listing request at the page after cursor.
+func SetListCursor(r *http.Request, kind, cursor string) {
+	var param string
+	switch kind {
+	case "anthropic":
+		param = "after_id"
+	case "gemini":
+		param = "pageToken"
+	default:
+		return
+	}
+	q := r.URL.Query()
+	q.Set(param, cursor)
+	r.URL.RawQuery = q.Encode()
 }
 
 func parseDataList(body []byte) ([]Discovered, error) {
@@ -437,16 +515,17 @@ func (r listedRate) quotedDollars() (float64, bool) {
 	return r.dollars()
 }
 
-func parseGeminiList(body []byte) ([]Discovered, error) {
+func parseGeminiList(body []byte) ([]Discovered, string, error) {
 	var doc struct {
 		Models []struct {
 			Name             string `json:"name"`
 			InputTokenLimit  int    `json:"inputTokenLimit"`
 			OutputTokenLimit int    `json:"outputTokenLimit"`
 		} `json:"models"`
+		NextPageToken string `json:"nextPageToken"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("parse listing: %w", err)
+		return nil, "", fmt.Errorf("parse listing: %w", err)
 	}
 	out := make([]Discovered, 0, len(doc.Models))
 	for _, m := range doc.Models {
@@ -461,5 +540,5 @@ func parseGeminiList(body []byte) ([]Discovered, error) {
 			MaxOutputTokens: m.OutputTokenLimit,
 		})
 	}
-	return out, nil
+	return out, doc.NextPageToken, nil
 }

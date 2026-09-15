@@ -85,7 +85,8 @@ func TestParseStreamReadsToolAndThinkingDeltas(t *testing.T) {
 		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weighing"}}`) +
 		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}`) +
 		sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_a","name":"f","input":{}}}`) +
-		sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"x\":1}"}}`)
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"x\":1}"}}`) +
+		sseEvent("message_stop", `{"type":"message_stop"}`)
 
 	evs, err := collect(t, body)
 	if err != nil {
@@ -111,13 +112,14 @@ func TestParseStreamReadsToolAndThinkingDeltas(t *testing.T) {
 func TestParseStreamIgnoresUnknownEventTypes(t *testing.T) {
 	body := sseEvent("ping", `{"type":"ping"}`) +
 		sseEvent("future_event", `{"type":"future_event","whatever":1}`) +
-		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`)
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}`) +
+		sseEvent("message_stop", `{"type":"message_stop"}`)
 
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatalf("an unknown event type must not fail the stream: %v", err)
 	}
-	if len(evs) != 2 || evs[0].Type != ir.EventPing || evs[1].Type != ir.EventContentDelta {
+	if len(evs) != 3 || evs[0].Type != ir.EventPing || evs[1].Type != ir.EventContentDelta {
 		t.Errorf("events = %+v", evs)
 	}
 }
@@ -155,7 +157,8 @@ func TestParseStreamCarriesServerToolBlocks(t *testing.T) {
 	// is text; both used to become an empty text block that hid the search.
 	body := sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{}}}`) +
 		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"x\"}"}}`) +
-		sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://a"}]}}`)
+		sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[{"type":"web_search_result","url":"https://a"}]}}`) +
+		sseEvent("message_stop", `{"type":"message_stop"}`)
 	evs, err := collect(t, body)
 	if err != nil {
 		t.Fatal(err)

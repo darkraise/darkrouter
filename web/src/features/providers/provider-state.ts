@@ -27,7 +27,11 @@ export function providerState(p: Provider): ProviderState {
   // exists, and calling it unconfigured sends an operator looking for a
   // credential that would do nothing.
   if (p.credentials.length === 0) return isKeyless(p) ? "healthy" : "unconfigured"
-  if (p.credentials.some((c) => c.cooling)) return "degraded"
+  // The router drops a disabled credential, so only enabled ones decide
+  // whether this provider can be sent to.
+  const usable = p.credentials.filter((c) => c.enabled)
+  if (usable.length === 0) return isKeyless(p) ? "healthy" : "degraded"
+  if (usable.some((c) => c.cooling)) return "degraded"
   return "healthy"
 }
 

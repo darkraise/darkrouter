@@ -4,10 +4,10 @@ package catalog
 //
 // CacheWrite is the total the provider reported; CacheWrite5m and
 // CacheWrite1h are the part of it whose TTL is known and priced on its own.
-// Reasoning is thinking the provider reports separately from Output, as
-// Gemini does; a provider that folds it into Output reports 0 here.
+// Output includes any reasoning, which is billed at the output rate and so
+// needs no count of its own here.
 type Tokens struct {
-	Input, Output, Reasoning   int64
+	Input, Output              int64
 	CacheRead, CacheWrite      int64
 	CacheWrite5m, CacheWrite1h int64
 }
@@ -39,12 +39,45 @@ func (p Pricing) Cost(t Tokens) *int64 {
 	plain := t.CacheWrite - t.CacheWrite5m - t.CacheWrite1h
 	total := rateMicros(p.InputMicrosPerMTok, t.Input) +
 		rateMicros(p.OutputMicrosPerMTok, t.Output) +
-		rateMicros(p.OutputMicrosPerMTok, t.Reasoning) +
 		rateMicros(p.CacheReadMicrosPerMTok, t.CacheRead) +
 		rateMicros(p.CacheWriteMicrosPerMTok, plain) +
 		rateMicros(p.InputMicrosPerMTok*cacheWrite5mPerMille/1000, t.CacheWrite5m) +
 		rateMicros(p.InputMicrosPerMTok*cacheWrite1hPerMille/1000, t.CacheWrite1h)
 	return &total
+}
+
+// GradeFor is the grade of the cost Cost computes for t: Grade, lowered to a
+// filled cache rate's grade when t has tokens priced at that rate. A cost is
+// only as trustworthy as the weakest rate it used.
+func (p Pricing) GradeFor(t Tokens) Grade {
+	g := p.Grade()
+	if t.CacheRead > 0 && p.CacheReadSource != "" {
+		g = weaker(g, p.CacheReadSource.grade())
+	}
+	if t.CacheWrite-t.CacheWrite5m-t.CacheWrite1h > 0 && p.CacheWriteSource != "" {
+		g = weaker(g, p.CacheWriteSource.grade())
+	}
+	return g
+}
+
+func weaker(a, b Grade) Grade {
+	if gradeRank(b) < gradeRank(a) {
+		return b
+	}
+	return a
+}
+
+func gradeRank(g Grade) int {
+	switch g {
+	case GradeMeasured:
+		return 3
+	case GradeDeclared:
+		return 2
+	case GradeIndexed:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // CostMicros is Cost for a caller holding only the four classic counts.

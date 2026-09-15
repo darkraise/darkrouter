@@ -1,0 +1,39 @@
+{
+  "max_tokens": 4096,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "Summarise these files.",
+          "type": "text"
+        },
+        {
+          "source": {
+            "data": "plain notes\n",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "type": "document"
+        },
+        {
+          "source": {
+            "data": "# Heading\n\nbody\n",
+            "media_type": "text/plain",
+            "type": "text"
+          },
+          "type": "document"
+        },
+        {
+          "source": {
+            "data": "JVBERi0xLjQK",
+            "media_type": "application/pdf",
+            "type": "base64"
+          },
+          "type": "document"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "target-model"
+}

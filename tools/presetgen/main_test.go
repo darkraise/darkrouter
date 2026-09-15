@@ -51,6 +51,32 @@ retired:
 	}
 }
 
+// The family list is the only rule that drops most browser-cookie entries,
+// which otherwise pass every structural check. A family file upstream moved
+// must stop generation, not quietly shrink the exclusions.
+func TestDroppedFamiliesRefusesAMissingFamilyFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"cloud-agent.ts", "upstream-proxy.ts", "system.ts", "search.ts"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("export const X = [\n  {\n    id: \"x-"+f+"\",\n  },\n];\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := droppedFamilies(dir); err == nil || !strings.Contains(err.Error(), "web-cookie.ts") {
+		t.Fatalf("err = %v, want one naming the missing web-cookie.ts", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "web-cookie.ts"), []byte("export const W = [\n  {\n    id: \"lmarena\",\n  },\n];\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := droppedFamilies(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["lmarena"] || !got["x-search.ts"] {
+		t.Errorf("families = %v", got)
+	}
+}
+
 func TestCarryQuirksToleratesAMissingFile(t *testing.T) {
 	presets := catalog.Presets{"x": {Name: "X"}}
 	if n, err := carryQuirks(presets, filepath.Join(t.TempDir(), "absent.yaml")); err != nil || n != 0 {
@@ -228,5 +254,44 @@ func TestOverridesCarryTheResaleDeclaration(t *testing.T) {
 	}
 	if !ps["openrouter"].ResellsPrices() {
 		t.Error("the declaration did not survive the override merge")
+	}
+}
+
+// An override that names a field replaces it even with its zero value: vertex
+// declares base_url "" so the adapter builds the project-scoped endpoint, and
+// quirks [] is how a correction removes quirks carried from the last run.
+func TestOverridesApplyExplicitZeroValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "overrides.yaml")
+	if err := os.WriteFile(path, []byte(`
+vertex:
+  base_url: ""
+  quirks: []
+  free_tier: false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps := catalog.Presets{"vertex": {
+		Name:     "Google Vertex AI",
+		Kind:     "vertex",
+		BaseURL:  "https://us-central1-aiplatform.googleapis.com/v1/projects",
+		Website:  "https://cloud.google.com/vertex-ai",
+		Quirks:   []string{"requires-max-tokens"},
+		FreeTier: true,
+	}}
+	if _, err := applyOverrides(ps, path); err != nil {
+		t.Fatal(err)
+	}
+	got := ps["vertex"]
+	if got.BaseURL != "" {
+		t.Errorf("base_url = %q, want the explicit empty override", got.BaseURL)
+	}
+	if len(got.Quirks) != 0 {
+		t.Errorf("quirks = %v, want the explicit empty override", got.Quirks)
+	}
+	if got.FreeTier {
+		t.Error("free_tier = true, want the explicit false override")
+	}
+	if got.Website != "https://cloud.google.com/vertex-ai" {
+		t.Errorf("website = %q, an undeclared field must keep its generated value", got.Website)
 	}
 }

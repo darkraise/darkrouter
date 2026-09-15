@@ -34,9 +34,26 @@ type formPart struct {
 	value    []byte
 }
 
+// partOverhead is what holding one part costs beyond its encoded bytes: the
+// cloned header map and the part record. An empty field measures about 850
+// bytes held against about 110 on the wire, so without this charge a flood of
+// tiny parts fits the budget while using several times it in memory.
+const partOverhead = 1 << 10
+
+// formFramingAllowance is what an upload may spend beyond max on everything
+// that is not a part value: boundaries, part headers and partOverhead. It is a
+// fixed amount on top rather than a share of max, so max_body_bytes means the
+// same thing for an upload as for a JSON body, while a form of a few fields
+// still has room for dozens of parts.
+const formFramingAllowance = 64 << 10
+
 // ParseForm reads the whole body, enforcing max while reading rather than
 // after, so a client cannot make the gateway allocate more than the operator
 // allowed by lying about Content-Length.
+//
+// max bounds the part values, which are the upload. Framing is bounded
+// separately by formFramingAllowance, so what the request holds never
+// exceeds max plus that allowance.
 func ParseForm(r *http.Request, max int64) (*Form, error) {
 	ct := r.Header.Get("Content-Type")
 	mediaType, params, err := mime.ParseMediaType(ct)
@@ -51,33 +68,53 @@ func ParseForm(r *http.Request, max int64) (*Form, error) {
 		return nil, errors.New("multipart body has no boundary")
 	}
 
-	// One budget across every part: capping each part separately would let a
-	// client send a thousand parts each just under the limit.
-	remaining := max
-	mr := multipart.NewReader(r.Body, boundary)
+	// The wire budget covers the whole encoded body, not the part values
+	// alone: headers and boundaries are read and part headers are kept, so a
+	// client could otherwise send megabytes of them on empty parts. One byte
+	// past a budget is enough to know it was exceeded, and stops the read
+	// there rather than draining the rest of the upload.
+	budget := &io.LimitedReader{R: r.Body, N: max + formFramingAllowance + 1}
+	values := max
+	tooLarge := func() error {
+		return &ir.Error{
+			Type:    ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("upload exceeds the configured maximum of %d bytes", max),
+		}
+	}
+	framingTooLarge := func() error {
+		return &ir.Error{
+			Type: ir.ErrPayloadTooLarge,
+			Message: fmt.Sprintf("multipart framing (boundaries, part headers and %d bytes per part) "+
+				"exceeds the %d bytes allowed on top of the configured maximum of %d bytes",
+				partOverhead, formFramingAllowance, max),
+		}
+	}
+	mr := multipart.NewReader(budget, boundary)
 	f := &Form{}
 	for {
 		p, err := mr.NextPart()
+		if budget.N <= 0 {
+			return nil, framingTooLarge()
+		}
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("read multipart body: %w", err)
 		}
-		// One byte past the budget is enough to know it was exceeded, and stops
-		// the read there rather than draining the rest of the upload.
-		buf, err := io.ReadAll(io.LimitReader(p, remaining+1))
+		budget.N -= partOverhead
+		buf, err := io.ReadAll(io.LimitReader(p, values+1))
 		p.Close()
+		values -= int64(len(buf))
+		if values < 0 {
+			return nil, tooLarge()
+		}
+		if budget.N <= 0 {
+			return nil, framingTooLarge()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read multipart part %q: %w", p.FormName(), err)
 		}
-		if int64(len(buf)) > remaining {
-			return nil, &ir.Error{
-				Type:    ir.ErrPayloadTooLarge,
-				Message: fmt.Sprintf("upload exceeds the configured maximum of %d bytes", max),
-			}
-		}
-		remaining -= int64(len(buf))
 		f.parts = append(f.parts, formPart{
 			name: p.FormName(), filename: p.FileName(),
 			// textproto.MIMEHeader has no Clone; only http.Header does. A

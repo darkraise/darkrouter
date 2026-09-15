@@ -158,8 +158,16 @@ func ParseResponses(r *http.Request, maxBody int64) (*ir.Request, *edge.Passthro
 	if w.Reasoning != nil && w.Reasoning.Effort != "" {
 		req.Reasoning = &ir.Reasoning{Effort: w.Reasoning.Effort}
 	}
-	if f := w.Text; f != nil && f.Format != nil && f.Format.Type == "json_schema" {
-		req.ResponseFormat = &ir.ResponseFormat{Type: "json_schema", Schema: f.Format.Schema}
+	if f := w.Text; f != nil && f.Format != nil {
+		switch f.Format.Type {
+		case "json_object":
+			req.ResponseFormat = &ir.ResponseFormat{Type: "json_object"}
+		case "json_schema":
+			req.ResponseFormat = &ir.ResponseFormat{
+				Type: "json_schema", Schema: f.Format.Schema,
+				Name: f.Format.Name, Strict: f.Format.Strict,
+			}
+		}
 	}
 	if err := applyResponsesTools(req, w.Tools, w.ToolChoice); err != nil {
 		return nil, nil, nil, err
@@ -379,7 +387,8 @@ func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 		case "input_file", "file":
 			// A file part carries file_url or inline file_data, not image_url.
 			// Reading only the latter would drop the document silently.
-			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, Data: p.FileData}
+			mime, data := fileMedia(p.FileData, p.Filename)
+			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, MIME: mime, Data: data}
 			out = append(out, ir.ContentBlock{Type: ir.BlockDocument, Media: m})
 		default:
 			return nil, fmt.Errorf("content part type %q is not supported", p.Type)
@@ -407,7 +416,7 @@ func responsesImageBlock(imageURL, fileID string) (ir.ContentBlock, error) {
 		if !found {
 			return ir.ContentBlock{}, errors.New("malformed data URL in an image part")
 		}
-		mime, _, _ := strings.Cut(meta, ";")
+		mime, payload := dataURIParts(meta, payload)
 		return ir.ContentBlock{
 			Type: ir.BlockImage, Media: &ir.Media{MIME: mime, Data: payload},
 		}, nil

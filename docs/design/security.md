@@ -36,8 +36,11 @@ service.
 The proxy accepts each dialect's native credential form — `Authorization:
 Bearer`, `x-api-key`, `x-goog-api-key`, `?key=`. Both a shared
 `server.proxy_token` and per-client proxy tokens are accepted; authentication
-is off only when **neither** exists. A gateway with tokens issued does not
-accept an empty header just because the shared secret is unset.
+is off only when the shared secret is unset and **no proxy token has ever been
+issued**. A gateway with tokens issued does not accept an empty header just
+because the shared secret is unset, and revoking the last token keeps it that
+way: the first issue is recorded in `settings` and never cleared, so a
+revocation refuses its clients instead of opening the gateway.
 
 Comparison hashes both sides before a constant-time compare, specifically so
 the comparison's length-based early return cannot leak token length.
@@ -96,7 +99,10 @@ inbound cookie; it is simply never consulted.
 
 Media fetched on the gateway's behalf is restricted to http and https, follows
 no redirects, refuses a private address at dial time, times out at ten seconds
-and caps at 20 MiB. The fetcher's enabled flag defaults to off in its zero
+and caps at 20 MiB — per URL and in total across one request, tool results
+included, since Gemini refuses a request carrying more than 20MB of inline
+data. A request over the total fails with 413 before anything further is
+fetched. The fetcher's enabled flag defaults to off in its zero
 value, which is what makes `media.inline` restart-only rather than merely
 inconvenient to change.
 

@@ -14,6 +14,10 @@ const Done = "[DONE]"
 
 var ErrLineTooLong = errors.New("sse: line exceeds configured maximum")
 
+// ErrEventTooLong means an event's data lines, each within the line cap, add up
+// past it before the blank line that dispatches them.
+var ErrEventTooLong = errors.New("sse: event exceeds configured maximum")
+
 type Event struct {
 	Type  string
 	Data  string
@@ -22,7 +26,8 @@ type Event struct {
 }
 
 type Reader struct {
-	sc *bufio.Scanner
+	sc       *bufio.Scanner
+	maxEvent int
 }
 
 // NewReader reads events from r, rejecting any line longer than maxLine bytes.
@@ -32,7 +37,7 @@ func NewReader(r io.Reader, maxLine int) *Reader {
 	// not exceed maxLine or a small cap silently stops being enforced.
 	sc.Buffer(make([]byte, 0, min(4096, maxLine)), maxLine)
 	sc.Split(splitLines)
-	return &Reader{sc: sc}
+	return &Reader{sc: sc, maxEvent: maxLine}
 }
 
 // splitLines splits on LF, CRLF, and a lone CR, all of which the SSE grammar
@@ -66,11 +71,15 @@ func splitLines(data []byte, atEOF bool) (advance int, token []byte, err error) 
 }
 
 // Next returns the next dispatched event, or io.EOF when the stream ends.
+//
+// One event's joined data is held to the same cap as a line, which is also what
+// the passthrough path's event splitter enforces on a whole event.
 func (r *Reader) Next() (Event, error) {
 	var (
-		ev   Event
-		data []string
-		seen bool
+		ev        Event
+		data      []string
+		dataBytes int
+		seen      bool
 	)
 	for r.sc.Scan() {
 		line := r.sc.Text()
@@ -92,6 +101,13 @@ func (r *Reader) Next() (Event, error) {
 		value = strings.TrimPrefix(value, " ") // exactly one optional space
 		switch field {
 		case "data":
+			if len(data) > 0 {
+				dataBytes++ // the newline the join inserts
+			}
+			dataBytes += len(value)
+			if dataBytes > r.maxEvent {
+				return Event{}, ErrEventTooLong
+			}
 			data = append(data, value)
 		case "event":
 			ev.Type = value

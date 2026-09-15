@@ -293,8 +293,16 @@ after.**
 
 **`server.proxy_token` was not removed when per-client tokens landed.**
 Removing it in the release that adds them stops every existing client on
-upgrade. Both are accepted, and authentication is off only when neither
-exists.
+upgrade. Both are accepted, and authentication is off only when the shared
+secret is unset and no proxy token has **ever** been issued.
+
+**Revoking the last proxy token does not turn authentication off.** The rule
+was once "off when neither exists", read from the live token table — so
+revoking the last token, typically because it leaked, opened the gateway to
+every caller, the revoked one included. A settings row records the first
+issue and is never removed; migration 0024 writes it for a database that
+already held a token. A database whose tokens were all revoked before that
+migration cannot be told apart from a fresh install, and stays open.
 
 **Proxy tokens are hashed with SHA-256, not the password KDF.** The token is
 256 bits this process generated, so there is nothing to brute-force, and a
@@ -381,6 +389,16 @@ asking*; a preset is named, saved deliberately and individually deletable.
 The claim that conversations were the first place prompt text was retained at
 rest was false — a preset's system prompt had been stored since the feature
 shipped.
+
+**The console's Content-Security-Policy admits images from any HTTPS origin
+and blob media.** The playground shows what a model returned: image
+generation can answer with a hosted URL instead of base64, and speech plays
+from an object URL. Under `img-src 'self' data:` the first was blocked, and
+with no `media-src` the fallback to `default-src 'self'` blocked the second in
+Chromium. Only those two directives were loosened. The cost is that a model
+response can make the console fetch an image from any HTTPS origin when it is
+displayed, which tells that origin the operator's address and when they
+looked. Scripts, styles, fonts and connections stay as strict as before.
 
 **The destructive purge stays leftmost of the settings header actions.** Two
 reviewers independently defended it: the rightmost slot is the habitual

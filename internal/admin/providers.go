@@ -2,16 +2,22 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	"github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
+	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -24,6 +30,8 @@ var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 // distinct ranks is more than any provider set needs.
 const maxPriority = 1000
 
+const errLocationMoved = "location is set at creation; a provider in another location is a new provider"
+
 // authStyles is the closed vocabulary a provider row may carry.
 var authStyles = []string{
 	auth.StyleBearer, auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam,
@@ -31,20 +39,72 @@ var authStyles = []string{
 	auth.StyleSigV4, auth.StyleGCPSA, auth.StyleOAuth,
 }
 
-func validBaseURL(raw string) bool {
-	u, err := url.Parse(raw)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+// checkEndpoint refuses a row no request could be sent from. Bedrock and
+// Vertex derive their host from region, project and location, so an empty
+// base_url is an endpoint for them once those are set; Vertex needs its
+// project and location in the request path whatever the host.
+func checkEndpoint(row store.ProviderRow) error {
+	if row.Kind != "vertex" && row.Location != "" {
+		// Nothing else reads it, so it would be stored and never validated.
+		return fmt.Errorf("location applies only to a vertex provider")
+	}
+	if row.Kind == "vertex" {
+		if row.Project == "" || row.Location == "" {
+			return fmt.Errorf("a vertex provider needs a project and a location")
+		}
+		if err := vertex.CheckEndpoint(row.Project, row.Location); err != nil {
+			return err
+		}
+	}
+	if row.Kind == "bedrock" && row.Region != "" {
+		if err := bedrock.CheckRegion(row.Region); err != nil {
+			return err
+		}
+	}
+	if row.BaseURL == "" {
+		switch row.Kind {
+		case "bedrock":
+			if row.Region == "" {
+				return fmt.Errorf("a bedrock provider with no base_url needs a region")
+			}
+			return nil
+		case "vertex":
+			return nil
+		}
+		return fmt.Errorf("base_url is required")
+	}
+	// The account placeholder is filled per credential, so the shape is
+	// checked with a stand-in: in Snowflake's URL it is the hostname, which
+	// url.Parse refuses while the braces are still there.
+	resolved, err := provider.ResolveBaseURL(row.BaseURL, "account")
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(resolved)
+	if err != nil || u.Host == "" || !slices.Contains(endpointSchemes, u.Scheme) {
+		return fmt.Errorf("base_url must be an %s URL", strings.Join(endpointSchemes, ", "))
+	}
+	return nil
 }
+
+// endpointSchemes are the schemes a provider client can reach: the network,
+// and the local programs whose transports the server registers.
+var endpointSchemes = []string{"http", "https", localcli.AuggieScheme}
 
 // validateProviderRow checks the fields a create or a patch can set. The
 // kind check is skipped when no registry was supplied, which is a test
 // building a server without an executor.
 func (s *Server) validateProviderRow(row store.ProviderRow) error {
+	if err := checkEndpoint(row); err != nil {
+		return err
+	}
+	return s.validateProviderFields(row)
+}
+
+// validateProviderFields is validateProviderRow without the endpoint check.
+func (s *Server) validateProviderFields(row store.ProviderRow) error {
 	if !providerIDPattern.MatchString(row.ID) {
 		return fmt.Errorf("id must match %s", providerIDPattern.String())
-	}
-	if !validBaseURL(row.BaseURL) {
-		return fmt.Errorf("base_url must be an http or https URL")
 	}
 	if s.deps.Kinds != nil && !slices.Contains(s.deps.Kinds, row.Kind) {
 		return fmt.Errorf("kind %q is not one this build serves", row.Kind)
@@ -170,11 +230,15 @@ func (s *Server) credentialView(providerID string, c store.Credential) credentia
 // per-credential rather than per-triple because the settings screen shows one
 // row per credential and "some of its models are cooling" is not a state a
 // checkbox can render.
+//
+// It reads a frozen view rather than calling Available, which claims the
+// half-open probe: a page view never records an outcome, so a claim taken here
+// would shut the credential to every request.
 func (s *Server) cooling(providerID, keyID string) bool {
 	if s.deps.Breaker == nil {
 		return false
 	}
-	return !s.deps.Breaker.Available(healthKey(providerID, keyID, ""))
+	return !s.deps.Breaker.SnapshotAvailability(time.Now()).Available(healthKey(providerID, keyID, ""))
 }
 
 type createProviderBody struct {
@@ -200,9 +264,9 @@ type createProviderBody struct {
 	// a second call could land: an opt-in that arrived after it would miss the
 	// import it was meant to widen.
 	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
-	// Location is set at creation only: changing it moves every catalogued
-	// model to a different endpoint, which is a new provider rather than an
-	// edit to this one.
+	// Location is set at creation, and a patch can only fill a missing one:
+	// changing it moves every catalogued model to a different endpoint, which
+	// is a new provider rather than an edit to this one.
 	Location string `json:"location"`
 }
 
@@ -248,9 +312,9 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 			row.AuthStyle = p.Auth.Style
 		}
 	}
-	if row.Kind == "" || row.BaseURL == "" {
+	if row.Kind == "" {
 		writeError(w, http.StatusBadRequest,
-			"kind and base_url are required unless a preset supplies them")
+			"kind is required unless a preset supplies it")
 		return
 	}
 	if row.Name == "" {
@@ -270,7 +334,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	reloadErr := s.reloadProviders(afterCommit(r))
 	// A keyless provider is discoverable the moment it exists: the sweep needs
 	// one of the provider's own keys, and this one has none to need. Waiting a
 	// quarter of an hour for its first models is the same gap the first
@@ -278,7 +342,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	if auth.IsKeyless(row.AuthStyle) && s.deps.Disc != nil {
 		s.deps.Disc.Trigger(row.ID)
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID})
+	writeJSON(w, http.StatusCreated, createdReply(map[string]any{"id": row.ID}, reloadErr))
 }
 
 func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +355,7 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Name == nil && patch.BaseURL == nil && patch.Priority == nil &&
 		patch.Enabled == nil && patch.Region == nil && patch.Project == nil &&
-		patch.FreeModelsOnly == nil && patch.AllowUnsanctionedFree == nil {
+		patch.Location == nil && patch.FreeModelsOnly == nil && patch.AllowUnsanctionedFree == nil {
 		// An empty patch is a client bug, not a no-op to absorb: it means the
 		// UI sent a form it did not fill in.
 		writeError(w, http.StatusBadRequest, "the patch names no fields")
@@ -311,15 +375,43 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	if patch.Priority != nil {
 		next.Priority = *patch.Priority
 	}
-	if err := s.validateProviderRow(next); err != nil {
+	if patch.Region != nil {
+		next.Region = *patch.Region
+	}
+	if patch.Project != nil {
+		next.Project = *patch.Project
+	}
+	if patch.Location != nil {
+		if current.Location != "" && *patch.Location != current.Location {
+			writeError(w, http.StatusBadRequest, errLocationMoved)
+			return
+		}
+		next.Location = *patch.Location
+	}
+	validate := s.validateProviderRow
+	if patch.BaseURL == nil && patch.Region == nil && patch.Project == nil && patch.Location == nil {
+		// A row can predate a stricter endpoint rule, so checking an endpoint
+		// the patch leaves alone would refuse even disabling the row.
+		validate = s.validateProviderFields
+	}
+	if err := validate(next); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.deps.DB.UpdateProvider(r.Context(), id, patch); err != nil {
+		// A concurrent patch filled the location between the read above and
+		// this write: the same refusal, arrived at later.
+		if errors.Is(err, store.ErrLocationSet) {
+			writeError(w, http.StatusBadRequest, errLocationMoved)
+			return
+		}
 		writeStoreError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	updated, err := s.deps.DB.ProviderByID(r.Context(), id)
 	if err != nil {
 		writeStoreError(w, r, err)
@@ -350,28 +442,75 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		s.forgetCredential(c.ID)
 	}
 	s.probes.drop(id)
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// errRoutingNotUpdated is what a caller hears when its write committed but the
+// running router could not load it. Both halves matter: the write must not be
+// repeated, and the router is still serving what it served before — which for
+// a disabled credential means the revoked key. Nothing reloads the provider
+// set on a timer, so this response is the only place the operator learns it.
+//
+// Every committed-but-not-loaded response carries routing_updated:false, and
+// that field is how a client recognises the case; the status depends on what
+// was written:
+//
+//   - A create answers 201 with a warning (createdReply): the row exists, and
+//     an error would invite the retry that stores a second copy.
+//   - A patch or delete of a provider, credential or model override answers
+//     500 (writeRoutingNotUpdated): a disable or delete is a revocation, and a
+//     revoked key still serving must never read as success.
+//   - A configuration or alias save answers 200 with valid:false and the
+//     previous configuration still serving (commitConfig).
+var errRoutingNotUpdated = errors.New("the change was saved, but the gateway could not " +
+	"load it and is still routing with the previous settings; see the server log")
 
 // reloadProviders pushes the mutation into the running router. Without it the
 // change is in the database and the gateway keeps serving the old provider set
 // until something else happens to reload.
-func (s *Server) reloadProviders(ctx context.Context) {
-	if s.deps.Src == nil {
-		return
+func (s *Server) reloadProviders(ctx context.Context) error {
+	var failed bool
+	if s.deps.Src != nil {
+		if err := s.deps.Src.Reload(ctx); err != nil {
+			slog.Error("provider reload after a committed change failed", "err", err)
+			failed = true
+		}
 	}
-	// A reload failure is not reported to the caller: the mutation succeeded
-	// and the database is the source of truth. The next natural reload picks it
-	// up, and reporting a 500 for a write that landed would be worse.
-	_ = s.deps.Src.Reload(ctx)
 	// Reloading the source is not enough. Provider identity, order and
 	// enablement are baked into the catalog snapshot when it is built, so
 	// without this the operator's change reaches routing only when some
 	// unrelated worker next rebuilds — up to a discovery interval away.
-	if s.deps.Catalog != nil {
-		_ = s.deps.Catalog.Rebuild(ctx)
+	if s.deps.Src != nil && s.rebuildCatalog(ctx) != nil {
+		failed = true
 	}
+	if failed {
+		return errRoutingNotUpdated
+	}
+	return nil
+}
+
+// writeRoutingNotUpdated answers a committed write the router did not load.
+// routing_updated is what lets a client tell this 500 from a write that never
+// happened, and so not repeat it.
+func writeRoutingNotUpdated(w http.ResponseWriter) {
+	writeJSON(w, http.StatusInternalServerError, map[string]any{
+		"error": errRoutingNotUpdated.Error(), "routing_updated": false,
+	})
+}
+
+// createdReply is the body of a create that committed. A reload failure does
+// not turn it into an error: the row exists, and an error invites the retry
+// that stores a second copy of it.
+func createdReply(fields map[string]any, reloadErr error) map[string]any {
+	fields["routing_updated"] = reloadErr == nil
+	if reloadErr != nil {
+		fields["warning"] = errRoutingNotUpdated.Error()
+	}
+	return fields
 }
 
 // forgetCredential drops any in-memory state the auth manager derived from a
@@ -437,7 +576,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	s.reloadProviders(afterCommit(r))
+	reloadErr := s.reloadProviders(afterCommit(r))
 	// Only on the first one. A bulk import of twenty keys would otherwise ask
 	// the provider to list its models twenty times, against a rate limit the
 	// operator has just finished telling us they care about — and the second
@@ -448,7 +587,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 	// The id and the label, never the secret — not even the one just supplied.
 	// Echoing it back would put it in a response body, a proxy log and a
 	// browser's network panel for no reason.
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "label": body.Label})
+	writeJSON(w, http.StatusCreated, createdReply(map[string]any{"id": id, "label": body.Label}, reloadErr))
 }
 
 func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
@@ -460,7 +599,10 @@ func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) 
 	// The auth manager caches an OAuth account under the credential id; a
 	// deleted credential must not keep presenting the token it minted.
 	s.forgetCredential(keyID)
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -1,6 +1,6 @@
 # Hand-reviewed corrections merged over the generated presets on every
-# presetgen run. A non-zero field here wins; an id absent from the generated
-# set is added outright.
+# presetgen run. A field declared here wins, even an explicit "", [] or false;
+# an id absent from the generated set is added outright.
 
 anthropic:
   litellm_id: anthropic
@@ -342,7 +342,10 @@ anthropic-oauth:
   quirks: [requires-max-tokens]
   oauth:
     authorize_url: https://claude.ai/oauth/authorize
-    token_url: https://console.anthropic.com/v1/oauth/token
+    # console.anthropic.com's token endpoint 404s the authorization-code grant
+    # (NousResearch/hermes-agent#52630). Claude Code 2.1.272 and pi's Anthropic
+    # login, which shares this client id, use platform.claude.com.
+    token_url: https://platform.claude.com/v1/oauth/token
     client_id: 9d1c250a-e61b-44d9-88ed-5944d1962f5e
     scopes: [org:create_api_key, user:profile, user:inference]
     redirect:
@@ -449,6 +452,10 @@ nscale:
 
 ollama-cloud:
   litellm_id: ollama
+  # OmniRoute points this at /api/tags, a native listing that names models
+  # under models[] instead of data[]. The OpenAI-compatible /v1/models answered
+  # 200 with the same 20 models when both were fetched on 2026-09-15.
+  models_url: https://ollama.com/v1/models
 
 ovhcloud:
   litellm_id: ovhcloud

@@ -27,13 +27,14 @@ func queryInt(r *http.Request, name string) (int64, bool, error) {
 func filtersFrom(r *http.Request) (RequestFilters, error) {
 	q := r.URL.Query()
 	f := RequestFilters{
-		Provider:  q.Get("provider"),
-		Model:     q.Get("model"),
-		Status:    q.Get("status"),
-		Alias:     q.Get("alias"),
-		Surface:   q.Get("surface"),
-		ErrorCode: q.Get("error_code"),
-		Source:    q.Get("source"),
+		Provider:          q.Get("provider"),
+		AttemptedProvider: q.Get("attempted_provider"),
+		Model:             q.Get("model"),
+		Status:            q.Get("status"),
+		Alias:             q.Get("alias"),
+		Surface:           q.Get("surface"),
+		ErrorCode:         q.Get("error_code"),
+		Source:            q.Get("source"),
 	}
 	var err error
 	if f.SinceMs, _, err = queryInt(r, "since_ms"); err != nil {
@@ -78,7 +79,8 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := store.RequestQuery{
-		Provider: f.Provider, Model: f.Model, Status: f.Status,
+		Provider: f.Provider, AttemptedProvider: f.AttemptedProvider,
+		Model: f.Model, Status: f.Status,
 		Alias: f.Alias, Surface: f.Surface, ErrorCode: f.ErrorCode,
 		Source: f.Source, SinceMs: f.SinceMs, UntilMs: f.UntilMs,
 	}

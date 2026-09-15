@@ -1,0 +1,6 @@
+{"model":"target-model","messages":[{"role":"user","content":[
+  {"type":"text","text":"Summarise these files."},
+  {"type":"file","file":{"filename":"notes.txt","file_data":"cGxhaW4gbm90ZXMK"}},
+  {"type":"file","file":{"filename":"README.md","file_data":"IyBIZWFkaW5nCgpib2R5Cg=="}},
+  {"type":"file","file":{"filename":"report.pdf","file_data":"data:application/pdf;base64,JVBERi0xLjQK"}},
+  {"type":"file","file":{"filename":"brief.docx","file_data":"UEsDBBQAAAA="}}]}]}

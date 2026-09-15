@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,17 +13,27 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 )
 
-// embedUpstream answers /v1/embeddings with one vector, reporting the model it
-// was asked for so a test can tell which candidate served.
+// embedUpstream answers /v1/embeddings with one vector per input, reporting the
+// model it was asked for so a test can tell which candidate served.
 func embedUpstream() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Model string `json:"model"`
+			Model string          `json:"model"`
+			Input json.RawMessage `json:"input"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
+		n := 1
+		var many []json.RawMessage
+		if json.Unmarshal(in.Input, &many) == nil {
+			n = len(many)
+		}
+		data := make([]string, n)
+		for i := range data {
+			data[i] = `{"object":"embedding","index":` + strconv.Itoa(i) + `,"embedding":[0.5,0.25]}`
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","model":"` + in.Model +
-			`","data":[{"object":"embedding","index":0,"embedding":[0.5,0.25]}],` +
+			`","data":[` + strings.Join(data, ",") + `],` +
 			`"usage":{"prompt_tokens":4,"total_tokens":4}}`))
 	}
 }

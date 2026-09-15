@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 )
 
 // fakeCLI answers without spawning anything, so the transport's own behaviour
@@ -212,6 +214,34 @@ func TestAStreamThatFailsBeforeSayingAnythingReportsTheError(t *testing.T) {
 	}
 }
 
+// The executor reads a CLI stream with the OpenAI parser, which stops at
+// [DONE]. A failure announced after it is never seen, and a truncated answer
+// is served as a complete one.
+func TestAStreamThatFailsMidwayEndsInAnErrorTheParserSees(t *testing.T) {
+	f := &fakeCLI{chunks: []string{"half an "}, err: errors.New("auggie exited 1: killed")}
+	resp := do(t, f, "POST", "fake://cli/v1/chat/completions",
+		`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	defer resp.Body.Close()
+
+	var text strings.Builder
+	var streamErr error
+	for ev, err := range openaicompat.ParseStream(resp.Body, 1<<20) {
+		if err != nil {
+			streamErr = err
+			break
+		}
+		if ev.Delta != nil {
+			text.WriteString(ev.Delta.Text)
+		}
+	}
+	if text.String() != "half an " {
+		t.Errorf("text = %q, want the part the program produced", text.String())
+	}
+	if streamErr == nil || !strings.Contains(streamErr.Error(), "killed") {
+		t.Fatalf("stream error = %v, want the program's failure", streamErr)
+	}
+}
+
 func TestASurfaceTheProgramDoesNotServeIs404(t *testing.T) {
 	// Fatal rather than retryable: no number of attempts turns a CLI into an
 	// embeddings endpoint.
@@ -317,8 +347,22 @@ cat
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "argv:--print --quiet --model sonnet4.6 --") {
-		t.Errorf("argv = %q", got)
+	argv := strings.SplitN(got, "\n", 2)[0]
+	if !strings.HasPrefix(argv, "argv:--print --quiet ") || !strings.HasSuffix(argv, " --model sonnet4.6 --") {
+		t.Errorf("argv = %q", argv)
+	}
+	for _, tool := range []string{
+		"view", "save-file", "remove-files", "str-replace-editor", "apply_patch",
+		"launch-process", "kill-process", "read-process", "write-process", "list-processes",
+		"web-fetch", "grep-search", "view-range-untruncated", "search-untruncated",
+		"codebase-retrieval-raw", "view-session",
+	} {
+		if !strings.Contains(argv, " --remove-tool "+tool+" ") {
+			t.Errorf("tool %q is not removed: %q", tool, argv)
+		}
+	}
+	if strings.Contains(argv, "--permission") {
+		t.Errorf("tools are withheld by removal, not by --permission rules: %q", argv)
 	}
 	if !strings.Contains(got, "hello there") {
 		t.Errorf("the prompt did not reach stdin: %q", got)
@@ -415,6 +459,98 @@ printf 'set=%s' "${AUGMENT_SESSION_AUTH+yes}"
 	}
 }
 
+func TestTheChildEnvironmentIsAllowlistedNotInherited(t *testing.T) {
+	// The gateway's own environment can hold its master key and provider
+	// credentials. A prompt-driven CLI must not see any of it, even though it
+	// still needs the session credential the operator configured.
+	t.Setenv("DARKROUTER_MASTER_KEY", "gateway-secret-should-not-leak")
+	bin := stubAuggie(t, `
+cat >/dev/null
+printf 'secret=%s session=%s' "${DARKROUTER_MASTER_KEY+yes}" "$AUGMENT_SESSION_AUTH"
+`)
+	a := (&Auggie{Bin: bin}).WithSession("the-configured-session")
+	var out strings.Builder
+	if err := a.Run(context.Background(), "m", "hi", &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "secret=yes") {
+		t.Errorf("a gateway secret reached the child: %q", got)
+	}
+	if !strings.Contains(got, "session=the-configured-session") {
+		t.Errorf("the configured session did not reach the child: %q", got)
+	}
+}
+
+func TestARunUsesAFreshEmptyDirectoryRemovedAfterwards(t *testing.T) {
+	// os.MkdirTemp resolves its parent from TMPDIR in this (the gateway's) own
+	// process, so pointing it at a directory the test controls lets the test
+	// see exactly where the run directory was created without the stub having
+	// to report anything back.
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	bin := stubAuggie(t, `
+cat >/dev/null
+printf '%s\n' "$PWD"
+ls -A | wc -l
+`)
+	var out strings.Builder
+	if err := (&Auggie{Bin: bin}).Run(context.Background(), "m", "hi", &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.SplitN(strings.TrimRight(out.String(), "\n"), "\n", 2)
+	if len(lines) != 2 {
+		t.Fatalf("stub output = %q", out.String())
+	}
+	dir, count := lines[0], strings.TrimSpace(lines[1])
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("the run directory %q was not created under TMPDIR %q", dir, root)
+	}
+	if count != "0" {
+		t.Errorf("the run directory was not empty: %s entries", count)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the run directory %q still exists after the process exited", dir)
+	}
+}
+
+func TestModelListingAlsoGetsAFreshDirectoryRemovedAfterwards(t *testing.T) {
+	// Models discards stdout/stderr on success, so the stub reports the
+	// directory it saw through a forced failure instead, which Models' error
+	// path carries back verbatim.
+	root := t.TempDir()
+	t.Setenv("TMPDIR", root)
+	bin := stubAuggie(t, `
+case "$1 $2" in
+  "model list")
+    echo "DIR:$PWD:COUNT:$(ls -A | wc -l)" >&2
+    exit 1 ;;
+esac
+exit 64
+`)
+	_, err := (&Auggie{Bin: bin}).Models(context.Background())
+	if err == nil {
+		t.Fatal("expected the stub's forced failure")
+	}
+	msg := err.Error()
+	dirStart := strings.Index(msg, "DIR:") + len("DIR:")
+	countIdx := strings.Index(msg, ":COUNT:")
+	if dirStart < len("DIR:") || countIdx < 0 {
+		t.Fatalf("could not find the reported directory in %q", msg)
+	}
+	dir := msg[dirStart:countIdx]
+	count := strings.TrimSpace(msg[countIdx+len(":COUNT:"):])
+	if !strings.HasPrefix(dir, root) {
+		t.Errorf("the model-list run directory %q was not created under TMPDIR %q", dir, root)
+	}
+	if count != "0" {
+		t.Errorf("the model-list run directory was not empty: %s entries", count)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("the model-list run directory %q still exists after the process exited", dir)
+	}
+}
+
 func TestTheTransportServesTheSpawnedCLIEndToEnd(t *testing.T) {
 	// The whole path an operator's request takes: an OpenAI request in, a
 	// process spawned, OpenAI SSE out.
@@ -485,4 +621,22 @@ func processGone(pid string) bool {
 		return s[i+2] == 'Z' || s[i+2] == 'X'
 	}
 	return false
+}
+
+func TestARelativeBinaryStillResolvesFromTheGatewaysDirectory(t *testing.T) {
+	// Each run's working directory is a fresh temp directory, and exec resolves
+	// a relative path containing a separator against that, not against the
+	// directory the operator configured the path from.
+	bin := stubAuggie(t, `echo ok`)
+	t.Chdir(filepath.Dir(filepath.Dir(bin)))
+	rel := filepath.Join(".", filepath.Base(filepath.Dir(bin)), "auggie")
+
+	var out strings.Builder
+	if err := (&Auggie{Bin: rel}).Run(context.Background(), "", "hi", &out); err != nil {
+		t.Fatalf("Bin %q: %v", rel, err)
+	}
+	t.Setenv("AUGGIE_BIN", rel)
+	if err := (&Auggie{}).Run(context.Background(), "", "hi", io.Discard); err != nil {
+		t.Fatalf("AUGGIE_BIN %q: %v", rel, err)
+	}
 }

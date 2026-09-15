@@ -67,12 +67,12 @@ const API_KEY_FIELD: SecretField = {
 /**
  * The secret field for one preset.
  *
- * Keyed on the preset rather than on the auth style, because the style says
- * how the credential is transmitted and this says what the operator has to go
- * and find — two different questions that happen to coincide for most of the
- * catalogue.
+ * Keyed on the preset first, because the style says how the credential is
+ * transmitted and this says what the operator has to go and find — two
+ * different questions that happen to coincide for most of the catalogue. The
+ * style decides only where it fixes the document the gateway parses.
  */
-export function secretFieldFor(presetID?: string): SecretField {
+export function secretFieldFor(presetID?: string, authStyle?: string): SecretField {
   if (presetID === "auggie") {
     return {
       label: "Augment session",
@@ -82,6 +82,24 @@ export function secretFieldFor(presetID?: string): SecretField {
         "Run `auggie login` on a machine with a browser, then paste the contents of " +
         "~/.augment/session.json. Leave this empty if you ran `auggie login` inside " +
         "the container instead — the CLI keeps its own session and needs nothing here.",
+    }
+  }
+  if (authStyle === "sigv4") {
+    return {
+      label: "AWS access key",
+      placeholder: '{"access_key_id":"AKIA…","secret_access_key":"…"}',
+      multiline: true,
+      help:
+        "A JSON document with the IAM user's access_key_id and secret_access_key, " +
+        "and session_token for temporary credentials.",
+    }
+  }
+  if (authStyle === "gcp-sa") {
+    return {
+      label: "Service account key",
+      placeholder: '{"type":"service_account","project_id":"…","private_key":"…"}',
+      multiline: true,
+      help: "Paste the whole JSON key file downloaded for the service account.",
     }
   }
   return API_KEY_FIELD
@@ -112,8 +130,17 @@ export function parseBulkAccounts(
   prefix = "key",
   needsAccount = false,
 ): ParsedAccount[] {
+  return parseBulkLines(text, prefix, needsAccount).map((l) => l.account)
+}
+
+/** parseBulkAccounts, with the line each account was read from. */
+export function parseBulkLines(
+  text: string,
+  prefix = "key",
+  needsAccount = false,
+): { account: ParsedAccount; line: string }[] {
   const seen = new Set<string>()
-  const out: ParsedAccount[] = []
+  const out: { account: ParsedAccount; line: string }[] = []
   const clean = (v: string) => v.trim().replace(/,$/, "").replace(/^["']|["']$/g, "").trim()
 
   for (const raw of text.split(/\r?\n/)) {
@@ -148,7 +175,7 @@ export function parseBulkAccounts(
     seen.add(secret)
     const entry: ParsedAccount = { label: name || `${prefix}-${out.length + 1}`, secret }
     if (account !== "") entry.account_id = account
-    out.push(entry)
+    out.push({ account: entry, line: raw })
   }
   return out
 }
@@ -224,22 +251,26 @@ export function AccountFields({
           </p>
         </div>
       ) : null}
-      <ToggleGroup
-        type="single"
-        value={value.mode}
-        onValueChange={(mode) => {
-          // An empty value comes back when the pressed item is pressed again;
-          // a mode has to be one thing or the other, so that is ignored.
-          if (mode === "single" || mode === "bulk") onChange({ ...value, mode })
-        }}
-        aria-label="How many credentials to add"
-        className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
-      >
-        <ToggleGroupItem value="single">Single credential</ToggleGroupItem>
-        <ToggleGroupItem value="bulk">Bulk import</ToggleGroupItem>
-      </ToggleGroup>
+      {/* Bulk splits on lines, and a credential that is a document spans
+          several: it would arrive as one broken credential per line. */}
+      {!field.multiline && (
+        <ToggleGroup
+          type="single"
+          value={value.mode}
+          onValueChange={(mode) => {
+            // An empty value comes back when the pressed item is pressed again;
+            // a mode has to be one thing or the other, so that is ignored.
+            if (mode === "single" || mode === "bulk") onChange({ ...value, mode })
+          }}
+          aria-label="How many credentials to add"
+          className="w-fit rounded-[var(--radius)] border bg-[hsl(var(--muted))] p-0.5"
+        >
+          <ToggleGroupItem value="single">Single credential</ToggleGroupItem>
+          <ToggleGroupItem value="bulk">Bulk import</ToggleGroupItem>
+        </ToggleGroup>
+      )}
 
-      {value.mode === "single" ? (
+      {value.mode === "single" || field.multiline ? (
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="account-label">Label</Label>

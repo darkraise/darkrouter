@@ -131,7 +131,10 @@ func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
 	// Disabling a credential is the emergency revocation control and replacing
 	// one is a rotation. Both are worthless if the decrypted set the router
 	// serves from keeps the old value until an unrelated mutation reloads it.
-	s.reloadProviders(afterCommit(r))
+	if err := s.reloadProviders(afterCommit(r)); err != nil {
+		writeRoutingNotUpdated(w)
+		return
+	}
 	// The updated credential as the listing would show it: the mask, never
 	// the value.
 	creds, err := s.deps.DB.Credentials(r.Context(), s.deps.Key, providerID)

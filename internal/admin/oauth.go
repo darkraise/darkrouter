@@ -122,15 +122,13 @@ func (s *Server) handleOAuthComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	credID, label, account, err := s.completeOAuth(r.Context(), code, state, sessionFrom(r.Context()))
+	done, err := s.completeOAuth(r.Context(), code, state, sessionFrom(r.Context()))
 	if err != nil {
 		writeError(w, statusForOAuth(err), err.Error())
 		return
 	}
 	// The token is never echoed. What comes back is what the dashboard shows.
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"credential_id": credID, "label": label, "account": account,
-	})
+	writeJSON(w, http.StatusCreated, done.reply())
 }
 
 // parseRedirected pulls the code and state out of a pasted URL, and surfaces
@@ -159,48 +157,66 @@ func parseRedirected(raw string) (code, state string, err error) {
 	return code, state, nil
 }
 
+// oauthCompletion is a credential an OAuth flow stored. reloadErr is set when
+// the router could not load it; the credential exists either way.
+type oauthCompletion struct {
+	credID, label, account string
+	reloadErr              error
+}
+
+func (c oauthCompletion) reply() map[string]any {
+	return createdReply(map[string]any{
+		"credential_id": c.credID, "label": c.label, "account": c.account,
+	}, c.reloadErr)
+}
+
 // completeOAuth is shared by the paste path and the listener path, which is how
 // spec §7's "the manual-paste path validating identically to the listener path"
 // is true by construction rather than by inspection.
+//
+// A failed reload is not returned as the error. The credential is committed by
+// then, and a failure tells the operator to reconnect, which stores a second.
 func (s *Server) completeOAuth(ctx context.Context, code, state, sessionID string) (
-	credID, label, account string, err error) {
+	oauthCompletion, error) {
 
 	flow, err := s.deps.Flows.Claim(state, sessionID)
 	if err != nil {
-		return "", "", "", err
+		return oauthCompletion{}, err
 	}
 	_, cfg, ok := s.oauthConfig(ctx, flow.ProviderID)
 	if !ok {
-		return "", "", "", fmt.Errorf("this provider is no longer configured for OAuth")
+		return oauthCompletion{}, fmt.Errorf("this provider is no longer configured for OAuth")
 	}
 
 	tok, err := auth.ExchangeCode(ctx, s.httpClient(), authConfig(cfg), auth.ExchangeInput{
 		Code: code, Verifier: flow.Verifier, RedirectURI: flow.RedirectURI,
 	})
 	if err != nil {
-		return "", "", "", err
+		return oauthCompletion{}, err
 	}
 
 	raw, err := tok.Marshal()
 	if err != nil {
-		return "", "", "", err
+		return oauthCompletion{}, err
 	}
-	label = flow.Label
+	label := flow.Label
 	if label == "" {
 		label = tok.Account
 	}
 	if label == "" {
 		label = "subscription"
 	}
-	credID, err = s.deps.DB.AddCredential(ctx, s.deps.Key, store.Credential{
+	credID, err := s.deps.DB.AddCredential(ctx, s.deps.Key, store.Credential{
 		ProviderID: flow.ProviderID, Label: label, Kind: "oauth",
 		Secret: string(raw), Enabled: true, ExpiresAt: tok.Unix(),
 	})
 	if err != nil {
-		return "", "", "", err
+		return oauthCompletion{}, err
 	}
-	s.reloadProviders(context.WithoutCancel(ctx))
-	return credID, label, tok.Account, nil
+	return oauthCompletion{
+		credID: credID, label: label, account: tok.Account,
+		reloadErr: s.reloadProviders(context.WithoutCancel(ctx)),
+	}, nil
 }
 
 // statusForOAuth maps a completion failure to a status. A refused state is the
@@ -252,19 +268,36 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	credID, label, account, err := s.completeOAuth(r.Context(), code, state, sessionFrom(r.Context()))
+	done, err := s.completeOAuth(r.Context(), code, state, sessionFrom(r.Context()))
 	if err != nil {
 		writeError(w, statusForOAuth(err), err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"credential_id": credID, "label": label, "account": account,
-	})
+	writeJSON(w, http.StatusCreated, done.reply())
 }
 
+// defaultUpstreamTimeout is discovery's own default, for a server built
+// without a config.
+const defaultUpstreamTimeout = 15 * time.Second
+
+// httpClient is the configured client bounded by discovery's timeout when it
+// carries no timeout of its own. The token exchange runs on a request context
+// with no deadline, so an upstream that accepts the connection and never
+// answers would otherwise hold the admin request for good.
 func (s *Server) httpClient() *http.Client {
-	if s.deps.HTTP != nil {
-		return s.deps.HTTP
+	c := s.deps.HTTP
+	if c == nil {
+		c = &http.Client{}
 	}
-	return http.DefaultClient
+	if c.Timeout > 0 {
+		return c
+	}
+	bounded := *c
+	bounded.Timeout = defaultUpstreamTimeout
+	if s.deps.Config != nil {
+		if t := s.deps.Config.Current().Catalog.Discovery.Timeout; t > 0 {
+			bounded.Timeout = t
+		}
+	}
+	return &bounded
 }

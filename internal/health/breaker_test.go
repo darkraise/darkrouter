@@ -462,3 +462,27 @@ func TestPolicyIsReadLiveOnEveryRecord(t *testing.T) {
 		t.Fatal("the escalated cooldown was not clamped to the edited max")
 	}
 }
+
+// The credential-level entry is checked before the model's. When the
+// credential's cooldown has just expired but the model is still cooling, no
+// attempt runs and nothing records, so the credential's probe must not be left
+// claimed by the rejection.
+func TestACoolingModelDoesNotStrandTheCredentialProbe(t *testing.T) {
+	b, now := newTestBreaker(t)
+	credKey := Key{ProviderID: triple.ProviderID, KeyID: triple.KeyID}
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	*now = now.Add(2 * time.Second)
+	b.Record(triple, Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 429})
+
+	if b.Available(triple) {
+		t.Fatal("a cooling model must be unavailable")
+	}
+	other := Key{ProviderID: triple.ProviderID, KeyID: triple.KeyID, Model: "other"}
+	if !b.Available(other) {
+		t.Fatal("the rejected model left the credential-level probe claimed")
+	}
+	b.Record(other, Signal{Outcome: adapter.OutcomeRetryableModel})
+	if !b.Available(credKey) {
+		t.Fatal("the credential-level probe was not free after the release")
+	}
+}

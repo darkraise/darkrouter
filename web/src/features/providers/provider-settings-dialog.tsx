@@ -10,7 +10,7 @@ import {
   Input,
   Label,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Provider } from "../../lib/api-types"
@@ -18,10 +18,10 @@ import type { Provider } from "../../lib/api-types"
 /**
  * The touched half of a provider's settings.
  *
- * Region and project are pointer fields on the backend
- * (`store.ProviderPatch.Region` / `.Project`): a key present with value ""
- * means "set this to empty", not "leave alone". `GET /api/providers` never
- * returns either field, so the inputs start with nothing to prefill — null
+ * Region, project and location are pointer fields on the backend
+ * (`store.ProviderPatch.Region` / `.Project` / `.Location`): a key present with
+ * value "" means "set this to empty", not "leave alone". `GET /api/providers`
+ * returns none of them, so the inputs start with nothing to prefill — null
  * distinguishes "never touched" from "touched and cleared", which "" alone
  * cannot.
  *
@@ -35,6 +35,7 @@ export type SettingsDraft = {
   freeModelsOnly: boolean
   region: string | null
   project: string | null
+  location: string | null
 }
 
 export function draftOf(p: Provider): SettingsDraft {
@@ -44,6 +45,7 @@ export function draftOf(p: Provider): SettingsDraft {
     freeModelsOnly: p.free_models_only,
     region: null,
     project: null,
+    location: null,
   }
 }
 
@@ -69,6 +71,10 @@ export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string,
   if (draft.freeModelsOnly !== p.free_models_only) patch.free_models_only = draft.freeModelsOnly
   if (draft.region !== null) patch.region = draft.region
   if (draft.project !== null) patch.project = draft.project
+  // Vertex alone reads a location, and the backend refuses changing one that
+  // is set, so a stray space or an empty value would be stored for good.
+  const location = draft.location?.trim() ?? ""
+  if (p.kind === "vertex" && location !== "") patch.location = location
   return patch
 }
 
@@ -101,8 +107,9 @@ export function ProviderSettingsDialog({
 
   const save = useApiMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      api.patch(`/api/providers/${provider.id}`, patch),
+      routingNotUpdated(api.patch(`/api/providers/${provider.id}`, patch)),
     success: "Provider settings saved",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.overview],
     onSuccess: () => onOpenChange(false),
   })
@@ -204,9 +211,25 @@ export function ProviderSettingsDialog({
                 className="w-40"
               />
             </div>
+            {/* Fills a location the provider was created without. The backend
+                refuses moving one that is set. */}
+            {provider.kind === "vertex" && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="provider-location">Location</Label>
+                <Input
+                  id="provider-location"
+                  value={draft.location ?? ""}
+                  onChange={(e) => setDraft({ ...draft, location: e.target.value })}
+                  placeholder="unset"
+                  className="w-40"
+                />
+              </div>
+            )}
             <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
               Only the ones you type are written. Leave them alone and they keep
               whatever they hold.
+              {provider.kind === "vertex" &&
+                " The location can be set once: a provider that already has one keeps it."}
             </p>
           </div>
         </div>

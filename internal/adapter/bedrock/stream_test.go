@@ -171,6 +171,7 @@ func TestStreamDecodesAToolCall(t *testing.T) {
 		"contentBlockIndex": 1,
 		"delta":             map[string]any{"toolUse": map[string]any{"input": `"Oslo"}`}}})
 	frame(t, &buf, "contentBlockStop", map[string]any{"contentBlockIndex": 1})
+	frame(t, &buf, "messageStop", map[string]any{"stopReason": "tool_use"})
 
 	events, err := collect(t, &buf)
 	if err != nil {
@@ -198,11 +199,12 @@ func TestStreamDecodesReasoningDeltas(t *testing.T) {
 	frame(t, &buf, "contentBlockDelta", map[string]any{
 		"contentBlockIndex": 0,
 		"delta":             map[string]any{"reasoningContent": map[string]any{"text": "hmm"}}})
+	frame(t, &buf, "messageStop", map[string]any{"stopReason": "end_turn"})
 	events, err := collect(t, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].Delta.Thinking != "hmm" {
+	if len(events) != 2 || events[0].Delta.Thinking != "hmm" {
 		t.Errorf("events = %+v", events)
 	}
 }

@@ -361,6 +361,29 @@ func TestBuildRendersToolStrictAndDropsBuiltInTools(t *testing.T) {
 	}
 }
 
+func TestBuildKeepsForeignToolFieldsOutOfTheFunction(t *testing.T) {
+	tgt := &adapter.Target{BaseURL: "https://up.example/v1", Model: "up-model"}
+	hr, warns, err := BuildRequest(context.Background(), tgt, &ir.Request{Tools: []ir.Tool{
+		{Name: "lookup", Schema: json.RawMessage(`{"type":"object"}`),
+			Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(hr.Body)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	fn := got["tools"].([]any)[0].(map[string]any)["function"].(map[string]any)
+	if _, present := fn["cache_control"]; present {
+		t.Errorf("function = %v; cache_control is not an OpenAI function field", fn)
+	}
+	if !hasWarning(warns, "tools[].cache_control") {
+		t.Errorf("warnings = %v; a dropped cache marker has to show in the trace", warns)
+	}
+}
+
 func TestBuildDropsTypedServerTools(t *testing.T) {
 	tgt := &adapter.Target{BaseURL: "https://up.example/v1", Model: "up-model"}
 	hr, warns, err := BuildRequest(context.Background(), tgt, &ir.Request{Tools: []ir.Tool{

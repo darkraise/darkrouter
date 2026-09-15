@@ -2,15 +2,19 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -32,10 +36,23 @@ func (f *fakeHealth) Record(k health.Key, s health.Signal) {
 	f.signals = append(f.signals, s)
 }
 
-func (f *fakeHealth) Available(k health.Key) bool {
+// SnapshotAvailability goes through a real breaker because Availability has
+// no exported constructor.
+func (f *fakeHealth) SnapshotAvailability(at time.Time) health.Availability {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return !f.cooling[health.CredKey{ProviderID: k.ProviderID, KeyID: k.KeyID}]
+	var entries []health.Entry
+	for ck, cooling := range f.cooling {
+		if cooling {
+			entries = append(entries, health.Entry{
+				Key:          health.Key{ProviderID: ck.ProviderID, KeyID: ck.KeyID},
+				CoolingUntil: at.Add(time.Hour),
+			})
+		}
+	}
+	b := health.New(1, time.Hour)
+	b.Rehydrate(entries)
+	return b.SnapshotAvailability(at)
 }
 
 func (f *fakeHealth) LastUsedSnapshot() map[health.CredKey]time.Time {
@@ -148,6 +165,57 @@ func TestSweepCoolsTheCredentialOnA401(t *testing.T) {
 	states, _ := db.DiscoveryStates(context.Background())
 	if states["p"].ConsecutiveFailures != 1 {
 		t.Errorf("failures = %d, want 1", states["p"].ConsecutiveFailures)
+	}
+}
+
+func TestSweepCoolsAGeminiKeyRefusedWithA400(t *testing.T) {
+	// Gemini refuses an unknown or expired key with a 400 naming
+	// API_KEY_INVALID, which is the same evidence as another provider's 401.
+	// A 400 without that reason says nothing about the key.
+	cases := []struct {
+		name string
+		body string
+		cool bool
+	}{
+		{name: "API_KEY_INVALID", cool: true, body: `{"error":{"code":400,
+			"message":"API Key not found. Please pass a valid API key.","status":"INVALID_ARGUMENT",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID",
+			"domain":"googleapis.com","metadata":{"service":"generativelanguage.googleapis.com"}}]}}`},
+		{name: "other 400", body: `{"error":{"code":400,
+			"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			db := discoveryDB(t, "g")
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "g", Kind: "gemini", BaseURL: srv.URL + "/v1beta",
+				Credentials: []provider.Credential{{ID: "k1", Secret: "AIza", Enabled: true}},
+			}}}
+			h := &fakeHealth{}
+			NewDiscoverer(db, src, NewStore(db, src), h, DiscoveryOptions{}).SweepOnce(context.Background())
+
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if !tc.cool {
+				if len(h.signals) != 0 {
+					t.Fatalf("recorded %+v; a 400 without the reason must not cool the key", h.signals)
+				}
+				return
+			}
+			if len(h.signals) != 1 {
+				t.Fatalf("recorded %d signals, want 1", len(h.signals))
+			}
+			if h.signals[0].Outcome != adapter.OutcomeRetryableCredential || h.keys[0].KeyID != "k1" {
+				t.Errorf("signal = %+v on %+v", h.signals[0], h.keys[0])
+			}
+		})
 	}
 }
 
@@ -431,7 +499,7 @@ func TestFreeRulesCarryTheProvidersCuratedTier(t *testing.T) {
 	// Keyed on the preset, because the curated catalogue is a fact about the
 	// upstream vendor rather than about the row an operator named.
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "my-groq", Preset: "groq"}, Preset{ModelsDevID: "groq"})
+	rules := d.freeRules(provider.Provider{ID: "my-groq", Preset: "groq"}, Preset{ModelsDevID: "groq"}, "")
 	if rules.Curated == nil {
 		t.Fatal("a provider the catalogue covers must carry its curated rule")
 	}
@@ -445,7 +513,7 @@ func TestFreeRulesCarryTheProvidersCuratedTier(t *testing.T) {
 
 func TestFreeRulesFallBackToTheProviderIDForAnUnpresetedRow(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "groq"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "groq"}, Preset{}, "")
 	if rules.Curated == nil || !rules.Curated("openai/gpt-oss-20b") {
 		t.Error("a row with no preset must fall back to its own id")
 	}
@@ -453,7 +521,7 @@ func TestFreeRulesFallBackToTheProviderIDForAnUnpresetedRow(t *testing.T) {
 
 func TestFreeRulesLeaveAnUncoveredProviderToItsPrices(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}}
-	rules := d.freeRules(provider.Provider{ID: "nobody", Preset: "nobody"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "nobody", Preset: "nobody"}, Preset{}, "")
 	if rules.Curated != nil {
 		t.Error("a provider no catalogue covers must carry no curated rule")
 	}
@@ -467,7 +535,7 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 		"newcomer": {"m": {FreeType: "recurring-daily"}},
 	}}
 	d := &Discoverer{opts: DiscoveryOptions{FreeTiers: func() FreeCatalog { return live }}}
-	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "newcomer", Preset: "newcomer"}, Preset{}, "")
 	if rules.Curated == nil || !rules.Curated("m") {
 		t.Error("the synced catalogue did not reach the import filter")
 	}
@@ -476,7 +544,7 @@ func TestFreeRulesPreferTheSyncedCatalogue(t *testing.T) {
 func TestFreeRulesFallBackToTheEmbeddedCatalogue(t *testing.T) {
 	for _, tiers := range []func() FreeCatalog{nil, func() FreeCatalog { return FreeCatalog{} }} {
 		d := &Discoverer{opts: DiscoveryOptions{FreeTiers: tiers}}
-		rules := d.freeRules(provider.Provider{ID: "groq", Preset: "groq"}, Preset{})
+		rules := d.freeRules(provider.Provider{ID: "groq", Preset: "groq"}, Preset{}, "")
 		if rules.Curated == nil || !rules.Curated("openai/gpt-oss-120b") {
 			t.Error("an unsynced gateway lost the catalogue its release shipped with")
 		}
@@ -499,6 +567,32 @@ func TestAKeyedProviderWithNoCredentialIsNotSwept(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{}, health: &fakeHealth{}}
 	if _, ok := d.pickCredential(provider.Provider{ID: "groq", AuthStyle: "bearer"}); ok {
 		t.Error("a keyed provider with no credential must not be swept")
+	}
+}
+
+// Choosing a credential to list with is a read. Nothing records a successful
+// listing, so a half-open probe claimed while choosing would never be given
+// back, and the credential would stay shut to every request.
+func TestPickingACredentialDoesNotClaimTheProbe(t *testing.T) {
+	b := health.New(3, 10*time.Millisecond)
+	p := provider.Provider{ID: "p", AuthStyle: "bearer", Credentials: []provider.Credential{
+		{ID: "a", Secret: "sk-a", Enabled: true},
+		{ID: "b", Secret: "sk-b", Enabled: true},
+	}}
+	for _, c := range p.Credentials {
+		b.Record(health.Key{ProviderID: "p", KeyID: c.ID},
+			health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: 401})
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	d := &Discoverer{opts: DiscoveryOptions{}, health: b}
+	if _, ok := d.pickCredential(p); !ok {
+		t.Fatal("no credential picked once every cooldown had expired")
+	}
+	for _, c := range p.Credentials {
+		if !b.Available(health.Key{ProviderID: "p", KeyID: c.ID}) {
+			t.Errorf("credential %s: picking claimed its probe", c.ID)
+		}
 	}
 }
 
@@ -574,7 +668,7 @@ func TestTheFreeFilterVetoesAnUnsanctionedTier(t *testing.T) {
 			}}
 			rules := d.freeRules(provider.Provider{
 				ID: "p", Preset: "opencode", AllowUnsanctionedFree: tc.optedIn,
-			}, Preset{})
+			}, Preset{}, "")
 			rules.Price = zeroPriced
 
 			out, dropped := SelectModelsForImport(
@@ -607,7 +701,7 @@ func TestTheVetoSurvivesTheKeylessFallback(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "opencode", AuthStyle: "optional",
-	}, Preset{})
+	}, Preset{}, "")
 	if !rules.Keyless {
 		t.Fatal("the fixture is not keyless; the fallback is not under test")
 	}
@@ -631,10 +725,32 @@ func TestTheKeylessFallbackStillKeepsAnUnvetoedModel(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "uncovered", AuthStyle: "none",
-	}, Preset{})
+	}, Preset{}, "")
 	out, dropped := SelectModelsForImport(discovered("a", "b"), true, rules)
 	if !slices.Equal(kept(out), []string{"a", "b"}) || dropped != nil {
 		t.Errorf("kept = %v dropped = %v, want both models and no drops", kept(out), dropped)
+	}
+}
+
+func TestTheKeylessFallbackIsNotForAnOperatorsKey(t *testing.T) {
+	// An optional-auth provider holding the operator's key lists what that
+	// account can buy. Matching nothing free there means nothing is free, not
+	// that there is no account to bill.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"paid-a"},{"id":"paid-b"}]}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "p")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: srv.URL + "/v1", AuthStyle: "optional",
+		FreeModelsOnly: true,
+		Credentials:    []provider.Credential{{ID: "k", Secret: "sk-paid", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); len(got) != 0 {
+		t.Errorf("imported %v under a free-only filter with the operator's key", got)
 	}
 }
 
@@ -648,7 +764,7 @@ func TestAWithdrawnTierDoesNotVeto(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{
 		FreeTiers: func() FreeCatalog { return live },
 	}}
-	rules := d.freeRules(provider.Provider{ID: "p", Preset: "opencode"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "opencode"}, Preset{}, "")
 	rules.Price = zeroPriced
 	if rules.Unsanctioned("withdrawn") {
 		t.Error("a withdrawn tier vetoed; only a live grading may")
@@ -666,7 +782,7 @@ func TestAnUncoveredProviderKeepsNilRules(t *testing.T) {
 	d := &Discoverer{opts: DiscoveryOptions{
 		FreeTiers: func() FreeCatalog { return unsanctionedFixture() },
 	}}
-	rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{})
+	rules := d.freeRules(provider.Provider{ID: "p", Preset: "other"}, Preset{}, "")
 	if rules.Curated != nil {
 		t.Error("an uncovered provider must keep a nil Curated rule")
 	}
@@ -683,11 +799,279 @@ func TestOptingInClearsTheVeto(t *testing.T) {
 	}}
 	rules := d.freeRules(provider.Provider{
 		ID: "p", Preset: "opencode", AllowUnsanctionedFree: true,
-	}, Preset{})
+	}, Preset{}, "")
 	if rules.Unsanctioned != nil {
 		t.Error("an opted-in provider must carry no veto")
 	}
 	if rules.Curated == nil || !rules.Curated("sanctioned") {
 		t.Error("the opt-in must leave the curated rule intact")
+	}
+}
+
+type fakeAuthResolver struct {
+	header string
+}
+
+func (f fakeAuthResolver) For(context.Context, auth.Target, auth.Credential) (auth.Authorizer, error) {
+	return func(_ context.Context, r *http.Request) error {
+		r.Header.Set("Authorization", f.header)
+		return nil
+	}, nil
+}
+
+func TestSweepAuthorizesAnOAuthListing(t *testing.T) {
+	// anthropic-oauth lists through the generic GET. Static auth writes
+	// nothing for the oauth style, so an authorizer that is resolved but never
+	// run sends the listing unauthenticated, and the 401 cools a working
+	// subscription credential on every sweep.
+	var got atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.Store(r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "Bearer oauth-access" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"claude-x"}],"has_more":false}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "sub")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "sub", Kind: "anthropic", Preset: "anthropic-oauth", BaseURL: srv.URL + "/v1",
+		Credentials: []provider.Credential{{ID: "k", Secret: `{"access_token":"t"}`, Enabled: true}},
+	}}}
+	h := &fakeHealth{}
+	NewDiscoverer(db, src, NewStore(db, src), h, DiscoveryOptions{
+		Auth: fakeAuthResolver{header: "Bearer oauth-access"},
+	}).SweepOnce(context.Background())
+
+	if v := got.Load(); v != "Bearer oauth-access" {
+		t.Errorf("listing sent Authorization %v, want the authorizer's header", v)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.signals) != 0 {
+		t.Errorf("recorded %+v against a credential the authorizer made valid", h.signals)
+	}
+	rows, err := db.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ModelID != "claude-x" {
+		t.Errorf("rows = %+v, want the listed model", rows)
+	}
+}
+
+func TestSweepFollowsAnthropicPagination(t *testing.T) {
+	// /v1/models returns twenty models a page by default, newest first. A
+	// sweep that reads one page omits the oldest models, and three omissions
+	// retire them.
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Header.Get("x-api-key") != "sk-ant" {
+			t.Errorf("page %q sent x-api-key %q", r.URL.RawQuery, r.Header.Get("x-api-key"))
+		}
+		switch r.URL.Query().Get("after_id") {
+		case "":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"},{"id":"m2"}],"has_more":true,"first_id":"m1","last_id":"m2"}`))
+		case "m2":
+			_, _ = w.Write([]byte(`{"data":[{"id":"m3"}],"has_more":false,"first_id":"m3","last_id":"m3"}`))
+		default:
+			t.Errorf("unexpected cursor %q", r.URL.RawQuery)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "a")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "a", Kind: "anthropic", BaseURL: srv.URL + "/v1", AuthStyle: "x-api-key",
+		Credentials: []provider.Credential{{ID: "k", Secret: "sk-ant", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"m1", "m2", "m3"}) {
+		t.Errorf("models = %v, want every page's models", got)
+	}
+	if n := requests.Load(); n != 2 {
+		t.Errorf("made %d requests, want 2", n)
+	}
+}
+
+func TestSweepFollowsGeminiPagination(t *testing.T) {
+	// models.list returns fifty models a page by default and continues through
+	// nextPageToken. The key travels as a query parameter, so each page must
+	// keep it alongside the token.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("key") != "g-key" {
+			t.Errorf("page %q lost the key", r.URL.RawQuery)
+		}
+		switch r.URL.Query().Get("pageToken") {
+		case "":
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/g1"}],"nextPageToken":"tok-2"}`))
+		case "tok-2":
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/g2"}]}`))
+		default:
+			t.Errorf("unexpected token %q", r.URL.RawQuery)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "g")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "g", Kind: "gemini", BaseURL: srv.URL + "/v1beta", AuthStyle: "query-param",
+		Credentials: []provider.Credential{{ID: "k", Secret: "g-key", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"g1", "g2"}) {
+		t.Errorf("models = %v, want every page's models", got)
+	}
+}
+
+func TestAnIncompleteListingIsAFailure(t *testing.T) {
+	// A listing that stopped partway is not evidence that the missing models
+	// are gone. Recording it as a success would advance their retirement.
+	for _, tc := range []struct {
+		name     string
+		requests int64
+		page     func(w http.ResponseWriter, r *http.Request)
+	}{
+		{name: "later page fails", requests: 2, page: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("after_id") == "" {
+				_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		}},
+		{name: "more promised with no cursor", requests: 1, page: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true}`))
+		}},
+		{name: "cursor never ends", requests: MaxListPages, page: func(w http.ResponseWriter, r *http.Request) {
+			n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Query().Get("after_id"), "m"))
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":"m%d"}],"has_more":true,"last_id":"m%d"}`, n+1, n+1)
+		}},
+		{name: "cursor repeats", requests: 2, page: func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				tc.page(w, r)
+			}))
+			defer srv.Close()
+			defer func() {
+				if n := requests.Load(); n != tc.requests {
+					t.Errorf("made %d requests, want %d", n, tc.requests)
+				}
+			}()
+
+			db := discoveryDB(t, "a")
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "a", Kind: "anthropic", BaseURL: srv.URL + "/v1", AuthStyle: "x-api-key",
+				Credentials: []provider.Credential{{ID: "k", Secret: "sk", Enabled: true}},
+			}}}
+			NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+			if got := modelIDs(t, db); len(got) != 0 {
+				t.Errorf("recorded %v from an incomplete listing", got)
+			}
+			states, _ := db.DiscoveryStates(context.Background())
+			if states["a"].ConsecutiveFailures != 1 {
+				t.Errorf("failures = %d, want 1", states["a"].ConsecutiveFailures)
+			}
+		})
+	}
+}
+
+func TestAnOpenAICompatibleListingIsOneRequest(t *testing.T) {
+	// OpenAI's model list is not paginated, so a has_more an aggregator adds
+	// is not a cursor this parser follows.
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true,"last_id":"m1"}`))
+	}))
+	defer srv.Close()
+
+	db := discoveryDB(t, "p")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "p", Kind: "openaicompat", BaseURL: srv.URL + "/v1",
+		Credentials: []provider.Credential{{ID: "k", Secret: "sk", Enabled: true}},
+	}}}
+	NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{}).SweepOnce(context.Background())
+
+	if n := requests.Load(); n != 1 {
+		t.Errorf("made %d requests, want 1", n)
+	}
+	if got := modelIDs(t, db); !slices.Equal(got, []string{"m1"}) {
+		t.Errorf("models = %v", got)
+	}
+}
+
+func modelIDs(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Models(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ModelID)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestSweepSeedsBothVertexPublishers(t *testing.T) {
+	// Vertex registers no lister, so a probe that stopped at the listing step
+	// never reached the seeding that is the kind's only source of models.
+	for _, presetID := range []string{"vertex", "vertex-anthropic"} {
+		t.Run(presetID, func(t *testing.T) {
+			preset := Embedded()[presetID]
+			if preset.Publisher == "" {
+				t.Fatalf("preset %q declares no publisher; seeding is not under test", presetID)
+			}
+			db := discoveryDB(t)
+			if _, err := db.Write.ExecContext(context.Background(),
+				`INSERT INTO providers (id, kind, base_url, created_at) VALUES ('v', 'vertex', ?, 0)`,
+				preset.BaseURL); err != nil {
+				t.Fatal(err)
+			}
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "v", Kind: "vertex", Preset: presetID, BaseURL: preset.BaseURL,
+				Credentials: []provider.Credential{{ID: "k", Secret: "{}", Enabled: true}},
+			}}}
+			live := Doc{preset.ModelsDevID: {"seeded-model": {ContextWindow: 7, PriceKnown: true}}}
+			h := &fakeHealth{}
+			cat := NewStore(db, src)
+			NewDiscoverer(db, src, cat, h, DiscoveryOptions{
+				Metadata: func() Doc { return live },
+			}).SweepOnce(context.Background())
+
+			rows, err := db.Models(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].ModelID != "seeded-model" {
+				t.Fatalf("rows = %+v, want the seeded model", rows)
+			}
+			if rows[0].Publisher != preset.Publisher || rows[0].ContextWindow != 7 {
+				t.Errorf("row = %+v, want publisher %q and the document's context window",
+					rows[0], preset.Publisher)
+			}
+			if _, ok := cat.Snapshot().Lookup("v", "seeded-model"); !ok {
+				t.Error("the seeded model did not reach the routing snapshot")
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.signals) != 0 {
+				t.Errorf("recorded %d health signals for a kind that makes no request", len(h.signals))
+			}
+		})
 	}
 }

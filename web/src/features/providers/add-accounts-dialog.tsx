@@ -12,8 +12,9 @@ import {
   ListboxItem,
   Progress,
   Switch,
+  toast,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
@@ -32,6 +33,8 @@ import {
   countAccounts,
   progressLabel,
   reportAdded,
+  retryDraft,
+  type AddFailure,
   type AddProgress,
 } from "./accounts"
 import { ProviderIcon } from "./provider-icon"
@@ -82,14 +85,17 @@ export function planFor(
  *
  * A provider that is about to be created carries the flag in its POST, and one
  * whose setting the operator left alone needs no write at all — so this is
- * true only for a change to a provider that already exists.
+ * true only for a change to a provider that already exists. A row this visit
+ * created is compared against what its create sent (`freeModelsOnly`), since
+ * the provider list may not hold it yet.
  */
 export function freeOnlyChange(
   draft: AccountDraft,
-  plan: { needsProvider: boolean; provider?: Provider } | null,
+  plan: { needsProvider: boolean; provider?: Provider; freeModelsOnly?: boolean } | null,
 ): boolean {
-  if (!plan || plan.needsProvider || !plan.provider) return false
-  return draft.freeModelsOnly !== plan.provider.free_models_only
+  if (!plan || plan.needsProvider) return false
+  const stored = plan.provider?.free_models_only ?? plan.freeModelsOnly
+  return stored !== undefined && draft.freeModelsOnly !== stored
 }
 
 /** What a fresh visit starts from. The free-models box is a provider setting,
@@ -100,6 +106,26 @@ function draftFor(provider?: Provider): AccountDraft {
   return provider
     ? { ...emptyAccounts, freeModelsOnly: provider.free_models_only }
     : emptyAccounts
+}
+
+/** Where a cloud provider's endpoint lives. The release cannot ship these:
+ *  Bedrock's host is derived from the region, and Vertex puts the project and
+ *  location in every request path, so a row created without them can reach
+ *  nothing. */
+export type EndpointDraft = { region: string; project: string; location: string }
+
+const emptyEndpoint: EndpointDraft = { region: "", project: "", location: "" }
+
+export function endpointFieldsFor(kind?: string): (keyof EndpointDraft)[] {
+  if (kind === "bedrock") return ["region"]
+  if (kind === "vertex") return ["project", "location"]
+  return []
+}
+
+const ENDPOINT_FIELD: Record<keyof EndpointDraft, { label: string; placeholder: string }> = {
+  region: { label: "Region", placeholder: "us-east-1" },
+  project: { label: "Project", placeholder: "my-project" },
+  location: { label: "Location", placeholder: "us-central1" },
 }
 
 function distinctSorted(values: string[]): string[] {
@@ -126,7 +152,7 @@ const PHASE_LABEL: Record<Phase, string> = {
 }
 
 /** What the accounts are being added to. A preset and a provider disagree
- *  about most things and agree about these four, which is all the summary
+ *  about most things and agree about these, which is all the summary
  *  strips and the write path need. */
 type Chosen = {
   id: string
@@ -137,6 +163,10 @@ type Chosen = {
    *  imported from config can carry a different one — reading `id` there shows
    *  an anonymous monogram beside a detail page showing the real mark. */
   preset?: string
+  /** How it authenticates — a provider's own, or the preset's — which decides
+   *  what shape of secret the gateway will parse. */
+  auth_style?: string
+  auth_kind?: string
 }
 
 /* Hand-rolled on purpose. darkraise-ui ships `Steps`, and it was tried here:
@@ -266,7 +296,16 @@ export function AddAccountsDialog({
   const [freeTier, setFreeTier] = useState(false)
   const [selected, setSelected] = useState<Preset | null>(null)
   const [accounts, setAccounts] = useState<AccountDraft>(() => draftFor(provider))
+  const [endpoint, setEndpoint] = useState<EndpointDraft>(emptyEndpoint)
   const [progress, setProgress] = useState<AddProgress | null>(null)
+  // What the last run could not store, and why. Held in the dialog as well as
+  // toasted, because the form stays open for a retry and a toast does not.
+  const [notAdded, setNotAdded] = useState<AddFailure[]>([])
+  // The provider row this visit created, and the free-models setting it now
+  // holds. The providers list does not show it until its refetch lands, and a
+  // retry sent before then must not POST it again: that 409s and abandons the
+  // keys being retried.
+  const [created, setCreated] = useState<{ id: string; freeModelsOnly: boolean } | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
 
   // The row the free-models box reads its setting from. A preset usually has
@@ -293,7 +332,10 @@ export function AddAccountsDialog({
     setStep(0)
     setSelected(null)
     setAccounts(draftFor(settled))
+    setEndpoint(emptyEndpoint)
     setProgress(null)
+    setNotAdded([])
+    setCreated(null)
     setQ("")
   }
 
@@ -302,16 +344,25 @@ export function AddAccountsDialog({
   // may have appeared since the page loaded, and a second POST would 409
   // against it.
   const target = preset ?? selected
-  const plan = provider
+  const planned = provider
     ? { needsProvider: false, provider }
     : target
       ? planFor(target, existing)
       : null
+  const plan =
+    planned?.needsProvider && created !== null && created.id === target?.id
+      ? { needsProvider: false, freeModelsOnly: created.freeModelsOnly }
+      : planned
+  // Asked only of a row about to be created: an existing one already holds
+  // them, and its settings are where they change.
+  const endpointFields = plan?.needsProvider ? endpointFieldsFor(chosen?.kind) : []
+  const endpointMissing = endpointFields.some((f) => endpoint[f].trim() === "")
 
   const submit = useApiMutation({
     mutationFn: async () => {
       if (!chosen) throw new Error("no provider chosen")
       setProgress(null)
+      setNotAdded([])
       // The provider row is created only when it does not exist yet, and from
       // the preset alone — id, kind, base URL and auth style all come from the
       // release rather than from anything typed here.
@@ -320,15 +371,23 @@ export function AddAccountsDialog({
           id: chosen.id,
           preset: chosen.id,
           free_models_only: accounts.freeModelsOnly,
+          ...Object.fromEntries(endpointFields.map((f) => [f, endpoint[f].trim()])),
         })
+        setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
       } else if (freeOnlyChange(accounts, plan)) {
         // Against a provider that already exists the flag is a setting to be
         // written, not part of the POST that creates the row. Sent on its own
         // so the box means the same thing here as it does on the provider's
         // settings, rather than being a control that looks applied and is not.
-        await api.patch(`/api/providers/${chosen.id}`, {
-          free_models_only: accounts.freeModelsOnly,
-        })
+        const notRouted = await routingNotUpdated(
+          api.patch(`/api/providers/${chosen.id}`, { free_models_only: accounts.freeModelsOnly }),
+        )
+        // Committed either way, so the keys still go in: stopping here would
+        // abandon them over a change that happened.
+        if (notRouted) toast.warning(notRouted)
+        if (created?.id === chosen.id) {
+          setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
+        }
       }
       return addCredentials(chosen.id, accounts, needsAccount(chosen.base_url), setProgress)
     },
@@ -338,6 +397,14 @@ export function AddAccountsDialog({
     invalidates: [keys.providers, keys.health, keys.overview, keys.models, keys.discovery],
     onSuccess: (result) => {
       reportAdded(result)
+      if (result.retry.length > 0) {
+        // Closing would throw away the keys that did not go in along with the
+        // reason, and the operator may have them nowhere else.
+        setProgress(null)
+        setNotAdded(result.retry)
+        setAccounts((a) => retryDraft(a, result.retry, needsAccount(chosen?.base_url)))
+        return
+      }
       const id = chosen?.id
       onOpenChange(false)
       reset()
@@ -407,14 +474,12 @@ export function AddAccountsDialog({
                 // Re-reporting the row already chosen must not advance the
                 // wizard a second time, which a click on a selected row does.
                 if (!p || p.id === selected?.id) return
-                // A provider that already exists brings its own free-models
-                // setting; the box has to show that rather than whatever the
-                // last-looked-at provider left behind.
-                const target = existing.find((e) => e.id === p.id)
-                setAccounts((a) => ({
-                  ...a,
-                  freeModelsOnly: target?.free_models_only ?? false,
-                }))
+                // A fresh draft, not the last one with its setting swapped: a
+                // key typed for the provider left behind would otherwise be
+                // stored on, and probed against, this one. A provider that
+                // already exists brings its own free-models setting.
+                setAccounts(draftFor(existing.find((e) => e.id === p.id)))
+                setEndpoint(emptyEndpoint)
                 setSelected(p)
                 setStep(step + 1)
               }}
@@ -461,8 +526,32 @@ export function AddAccountsDialog({
               value={accounts}
               onChange={setAccounts}
               autoFocus
-              field={secretFieldFor(chosen.preset ?? chosen.id)}
+              field={secretFieldFor(
+                chosen.preset ?? chosen.id,
+                chosen.auth_style || chosen.auth_kind,
+              )}
             />
+
+            {endpointFields.length > 0 && (
+              <div className="flex flex-wrap items-end gap-3 border-t pt-4">
+                {endpointFields.map((f) => (
+                  <div key={f} className="flex flex-col gap-1.5">
+                    <Label htmlFor={`endpoint-${f}`}>{ENDPOINT_FIELD[f].label}</Label>
+                    <Input
+                      id={`endpoint-${f}`}
+                      value={endpoint[f]}
+                      onChange={(e) => setEndpoint({ ...endpoint, [f]: e.target.value })}
+                      placeholder={ENDPOINT_FIELD[f].placeholder}
+                      spellCheck={false}
+                      className="w-40 font-mono"
+                    />
+                  </div>
+                ))}
+                <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
+                  Where this provider's endpoint is. Its requests go nowhere without it.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -483,6 +572,21 @@ export function AddAccountsDialog({
             </div>
           )}
 
+          {notAdded.length > 0 && (
+            <div role="alert" className="flex flex-col gap-1 text-sm text-[hsl(var(--destructive))]">
+              <span className="font-medium">
+                Not added — still in the form to fix and send again
+              </span>
+              <ul className="flex flex-col gap-0.5">
+                {notAdded.map((f, i) => (
+                  <li key={i}>
+                    <span className="font-mono">{f.label}</span>: {f.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             {step > 0 && (
               <Button
@@ -496,13 +600,19 @@ export function AddAccountsDialog({
             <div className="ml-auto flex items-center gap-2">
               {phase === "accounts" && (
                 <>
-                  {count === 0 && (
+                  {count === 0 ? (
                     <span className="text-sm text-[hsl(var(--legend))]">
                       Add at least one key to continue
                     </span>
+                  ) : (
+                    endpointMissing && (
+                      <span className="text-sm text-[hsl(var(--legend))]">
+                        Fill in {endpointFields.map((f) => ENDPOINT_FIELD[f].label.toLowerCase()).join(" and ")} to continue
+                      </span>
+                    )
                   )}
                   <Button
-                    disabled={count === 0 || submit.isPending}
+                    disabled={count === 0 || endpointMissing || submit.isPending}
                     onClick={() => submit.mutate(undefined)}
                   >
                     {submit.isPending ? "Adding…" : addAccountsLabel(count)}

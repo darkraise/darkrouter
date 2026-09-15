@@ -69,6 +69,10 @@ export function NumberBox({
       // let a blur silently clamp a value a preset had stored.
       value={value === "" ? Number.NaN : Number(value)}
       onValueChange={(d) => onChange(d.value)}
+      // The field shows and stores a JavaScript number string, whose point is
+      // always a decimal point. Left to the browser locale, parsing reads it
+      // as a group separator wherever one is a period, and "0.7" commits as 7.
+      locale="en-US"
       disabled={disabled}
       step={step}
       precision={precision}

@@ -4,14 +4,20 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
@@ -102,10 +108,37 @@ type AttemptCtx struct {
 	// resp is the upstream response, kept so the breaker signal can read its
 	// status and Retry-After whichever path emits it.
 	resp *http.Response
+	// inbound is the client's request context and upstream the attempt's own,
+	// kept so a failed body read is classified by what cancelled it, exactly
+	// as a failed send is.
+	inbound, upstream context.Context
+	// authorize signs a request to this attempt's credential, for a surface
+	// that sends more than the one request the loop sent.
+	authorize auth.Authorizer
+	// secret is this attempt's credential, so a failed send's text can be
+	// cleared of it before anyone reads it.
+	secret string
+	// idleArmed records that idle has replaced the pre-commit deadline, and
+	// timerHeld that a write to the client stopped the timer before it fired.
+	idleArmed bool
+	timerHeld bool
+	// bound is the timeoutBound the timer is enforcing, and connected records
+	// that the current send has a connection. Both are read by the timer's
+	// own goroutine when it fires.
+	bound     atomic.Int32
+	connected atomic.Bool
+	// bud is the request's timeout budget, and committed records that a write
+	// to the client has begun, after which total no longer applies. A zero
+	// budget means no total bound.
+	bud       budget
+	committed bool
+	// sent is when the attempt's first request went out, so a surface that
+	// sends more than one can record the attempt's latency across all of them.
+	sent time.Time
 	// healthDone guards the one breaker signal an attempt may emit. The first
-	// caller wins: a surface reporting a pre-commit fault beats the loop's
-	// deferred record on the way out, and a success reported once the body
-	// was read beats nothing, because nothing else reports one.
+	// caller wins: a surface reporting a pre-commit fault, or the loop
+	// reporting a failure after commit, beats the loop's deferred record of
+	// the attempt's result on the way out.
 	healthDone bool
 }
 
@@ -118,25 +151,180 @@ func (ac *AttemptCtx) recordHealth(o adapter.Outcome, resp *http.Response) {
 	ac.Exec.recordHealthFor(ac.Cand, o, resp)
 }
 
+// readOutcome classifies a failure that happened after the upstream answered:
+// a body that could not be read or parsed, or a stream that failed. Reading
+// the body is cancelled by the same two sources as the send, and they are
+// told apart in the same order classify uses, so a client that hangs up
+// mid-body is never recorded against the provider.
+//
+// A failed client write is checked before either. The response stopped
+// because the client did, and the write's failure is itself what cancels the
+// inbound context, by which time a deadline may have fired as well.
+func (ac *AttemptCtx) readOutcome(err error) adapter.Outcome {
+	if errors.Is(err, errClientWrite) {
+		return adapter.OutcomeClientCancelled
+	}
+	if ac.upstream != nil && errors.Is(context.Cause(ac.upstream), errDarkrouterTimeout) {
+		return adapter.OutcomeRetryableProvider
+	}
+	if ac.inbound != nil && errors.Is(ac.inbound.Err(), context.Canceled) {
+		return adapter.OutcomeClientCancelled
+	}
+	return outcomeForParseError(err)
+}
+
+// clientFailed ends a committed response whose client stopped taking it.
+func (ac *AttemptCtx) clientFailed(werr error) (adapter.Outcome, *ir.Error) {
+	return ac.failedAfterCommit(fmt.Errorf("%w: %w", errClientWrite, werr))
+}
+
+// delivered ends a response once its last write is done: a success, or the
+// client's hang-up when a write to it failed. The provider delivered either
+// way, so neither is a failure against it.
+func (ac *AttemptCtx) delivered(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+	if werr := cw.Err(); werr != nil {
+		return ac.clientFailed(werr)
+	}
+	return adapter.OutcomeSuccess, nil
+}
+
+// beginWrite and endWrite keep idle from running while a write to the client
+// blocks. Idle bounds a provider that goes silent; a response stalled behind a
+// client that stopped reading is bounded by the listener's write deadline, and
+// the two are the same duration, so an idle timer left running would expire
+// first and blame the provider for the client's stall.
+func (ac *AttemptCtx) beginWrite() {
+	ac.committed = true
+	if ac.Timer != nil && ac.idleArmed && ac.Timer.Stop() {
+		ac.timerHeld = true
+	}
+}
+
+func (ac *AttemptCtx) endWrite() {
+	if ac.idleArmed {
+		ac.resetIdle()
+	}
+}
+
 // resetIdle moves the attempt's bound from the pre-commit deadline to
 // policy.timeout.idle. Post-commit, total stops applying and idle bounds the
-// gap between events; a unary body is bounded the same way once its headers
+// gap between events; a unary body is bounded by idle too once its headers
 // have arrived, because connect+first_byte was never meant to cover a
 // multi-megabyte body on a slow link.
+//
+// Until the first write to the client, the bound never reaches past total.
+// idle is renewed on every read, so without that cap a body trickling a byte
+// inside every idle interval would hold the request indefinitely.
 func (ac *AttemptCtx) resetIdle() {
 	if ac.Timer == nil {
 		return
 	}
 	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
-		ac.Timer.Reset(d)
+		ac.idleArmed = true
+		b := boundIdle
+		if !ac.committed && !ac.bud.deadline.IsZero() {
+			if left := time.Until(ac.bud.deadline); left < d {
+				d, b = left, boundTotal
+			}
+		}
+		ac.rearm(d, b, false)
 	}
 }
 
+// resetSend bounds a further request the attempt sends as the loop bounded
+// its first: connect+first_byte, never past total. Idle is disarmed until
+// that request's headers arrive, since it bounds a gap inside a body and can
+// be far shorter than a provider takes to start answering.
+func (ac *AttemptCtx) resetSend() {
+	if ac.Timer == nil {
+		return
+	}
+	ac.idleArmed = false
+	d, b := ac.sendDeadline(time.Now())
+	ac.rearm(time.Until(d), b, true)
+}
+
+// rearm moves the timer to bound b, d from now. The timer's name changes only
+// when Stop shows no firing has started: a firing that has is the old bound
+// expiring, it is what cancels the attempt, and it reads the name when it
+// runs. A send also starts without a connection.
+func (ac *AttemptCtx) rearm(d time.Duration, b timeoutBound, send bool) {
+	if ac.Timer.Stop() || ac.timerHeld {
+		if send {
+			ac.connected.Store(false)
+		}
+		ac.bound.Store(int32(b))
+	}
+	ac.timerHeld = false
+	ac.Timer.Reset(d)
+}
+
+// sendDeadline is the bound on a send starting at now, and which setting it
+// is.
+func (ac *AttemptCtx) sendDeadline(now time.Time) (time.Time, timeoutBound) {
+	d := ac.bud.attemptDeadline(now)
+	if d.Equal(ac.bud.deadline) {
+		return d, boundTotal
+	}
+	return d, boundFirstByte
+}
+
+// firedCause is the cause the timer cancels the attempt with.
+func (ac *AttemptCtx) firedCause() error {
+	b := timeoutBound(ac.bound.Load())
+	if b == boundFirstByte && !ac.connected.Load() {
+		b = boundConnect
+	}
+	return timeoutCause(b)
+}
+
+// transportTimeout names a timeout the transport enforced on its own. Its
+// dialer and header timeouts are connect and first_byte as they stood at
+// startup, and fire before the attempt timer unless a reload lowered the
+// policy below them, so the failure is named as the timer would name it.
+func (ac *AttemptCtx) transportTimeout(err error) error {
+	var ne net.Error
+	if ac.upstream.Err() != nil || !errors.As(err, &ne) || !ne.Timeout() {
+		return err
+	}
+	b := boundFirstByte
+	if !ac.connected.Load() {
+		b = boundConnect
+	}
+	return fmt.Errorf("%w: %w", timeoutCause(b), err)
+}
+
+// idleBody renews the idle bound on every read that returns bytes, so idle
+// limits a gap in the transfer rather than the transfer. A surface that reads
+// a whole body, or copies audio through, would otherwise be cut once idle had
+// passed since its headers however steadily the bytes were arriving. Before
+// idle is armed a read changes nothing: until then the pre-commit deadline
+// bounds the attempt, and a trickle of events must not stretch it.
+type idleBody struct {
+	io.ReadCloser
+	ac *AttemptCtx
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.ac.idleArmed {
+		b.ac.resetIdle()
+	}
+	return n, err
+}
+
 // served marks this attempt as the one that answered: the record names its
-// target, carries its warnings and its time to first byte, and the breaker
-// hears a success. It is called once the body has been parsed or the stream
-// has committed — never from the status line alone, which a provider can
-// send ahead of a body it then fails to deliver.
+// target, carries its warnings and its time to first byte. It is called once
+// the body has been parsed or the stream has committed — never from the
+// status line alone, which a provider can send ahead of a body it then fails
+// to deliver.
+//
+// The breaker does not hear a success here. A stream can still fail after it
+// commits, and a success recorded at commit would reset the failure count
+// that failure needs, so a provider that dies after its first token on every
+// request would never cool. The attempt records its one outcome when the
+// response has ended; here the half-open probe is only given back, so a long
+// response does not keep the entry shut.
 //
 // Warnings are assigned, not appended: the request is re-rendered per
 // attempt, and the record must describe the translation the client actually
@@ -150,7 +338,9 @@ func (ac *AttemptCtx) served(warns []ir.Warning) {
 	rec.FinalProviderID = c.ProviderID
 	rec.FinalModel = c.Model
 	rec.Warnings = warningStrings(warns)
-	ac.recordHealth(adapter.OutcomeSuccess, ac.resp)
+	if f := ac.Exec.deps.Fleet; f != nil {
+		f.ReleaseProbe(health.Key{ProviderID: c.ProviderID, KeyID: c.KeyID, Model: c.Model})
+	}
 }
 
 // chatOp is the llm surface. It is the first SurfaceOp and its behavior is
@@ -206,7 +396,7 @@ func (o *chatOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) 
 	ac.served(append(ac.Warns, out.Warnings...))
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteResponse(cw, out)
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
 
 // RunSurface is the entry point for a route whose request is already parsed.

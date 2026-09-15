@@ -62,6 +62,8 @@ func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
 	switch w.Type {
 	case "error":
 		return adapter.RawEvent{ErrPayload: ev.Data}
+	case "message_stop":
+		return adapter.RawEvent{Terminal: true}
 	case "message_start":
 		if w.Message == nil {
 			return adapter.RawEvent{}

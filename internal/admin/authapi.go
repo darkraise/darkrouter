@@ -79,7 +79,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// Refused before the body is read: a flood must cost nothing but a map
 	// lookup, and a body parse is more than that.
-	if ok, wait := s.logins.take(clientAddr(r.RemoteAddr)); !ok {
+	if ok, wait := s.logins.allow(r.RemoteAddr); !ok {
 		writeRateLimited(w, wait)
 		return
 	}

@@ -1,9 +1,14 @@
 package gemini
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -49,7 +54,7 @@ func (u *wireUsage) toIR() ir.Usage {
 	}
 	return ir.Usage{
 		InputTokens:     in,
-		OutputTokens:    u.CandidatesTokenCount,
+		OutputTokens:    u.CandidatesTokenCount + u.ThoughtsTokenCount,
 		CacheReadTokens: u.CachedContentTokenCount,
 		ReasoningTokens: u.ThoughtsTokenCount,
 	}
@@ -141,7 +146,54 @@ func finishReason(s string, hasCall bool) (ir.StopReason, bool) {
 	}
 }
 
-func partToIR(p wirePart) (ir.ContentBlock, bool) {
+// callIDs names the function calls of one response. Gemini's ids are optional
+// and usually absent, while every other dialect's client correlates a result
+// with its call by id and Anthropic and Bedrock reject an empty one.
+//
+// The id derives from the response id so a replayed fixture renders the same,
+// and falls back to a random base so two turns of one conversation never name
+// a call alike. Only [A-Za-z0-9_-] survives, the alphabet Anthropic and
+// Bedrock accept for a tool-use id.
+type callIDs struct {
+	base string
+	n    int
+}
+
+func newCallIDs(responseID string) *callIDs {
+	base := strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			return r
+		}
+		return -1
+	}, responseID)
+	switch {
+	case base == "":
+		var b [8]byte
+		_, _ = rand.Read(b[:])
+		base = hex.EncodeToString(b[:])
+	case len(base) > maxCallIDBase:
+		// OpenAI rejects a tool call id over 40 characters. A digest rather
+		// than a prefix keeps two long ids that share a prefix apart.
+		sum := sha256.Sum256([]byte(base))
+		base = hex.EncodeToString(sum[:])[:maxCallIDBase]
+	}
+	return &callIDs{base: base}
+}
+
+// maxCallIDBase leaves room in 40 characters for "call_", "_" and a ten-digit
+// counter.
+const maxCallIDBase = 24
+
+// next returns the supplied id, or a new one when Gemini gave none.
+func (c *callIDs) next(supplied string) string {
+	if supplied != "" {
+		return supplied
+	}
+	c.n++
+	return "call_" + c.base + "_" + strconv.Itoa(c.n)
+}
+
+func partToIR(p wirePart, ids *callIDs) (ir.ContentBlock, bool) {
 	switch {
 	case p.FunctionCall != nil:
 		args := p.FunctionCall.Args
@@ -149,7 +201,7 @@ func partToIR(p wirePart) (ir.ContentBlock, bool) {
 			args = json.RawMessage(`{}`)
 		}
 		return ir.ContentBlock{Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{
-			ID: p.FunctionCall.ID, Name: p.FunctionCall.Name, Input: args,
+			ID: ids.next(p.FunctionCall.ID), Name: p.FunctionCall.Name, Input: args,
 			Signature: p.ThoughtSignature,
 		}}, true
 	case p.Thought:
@@ -177,7 +229,11 @@ func partToIR(p wirePart) (ir.ContentBlock, bool) {
 func ParseResponse(resp *http.Response) (*ir.Response, error) {
 	defer resp.Body.Close()
 	var w wireResponse
-	if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+	body, err := adapter.ReadResponse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&w); err != nil {
 		return nil, err
 	}
 	if w.Error != nil {
@@ -198,14 +254,20 @@ func ParseResponse(resp *http.Response) (*ir.Response, error) {
 		ID: w.ResponseID, Model: w.ModelVersion,
 		Usage: w.UsageMetadata.toIR(), StopReason: ir.StopEndTurn,
 	}
+	// An explicit empty array is a model that said nothing; no array at all
+	// is a body that is not a response.
+	if w.Candidates == nil {
+		return nil, &ir.Error{Type: ir.ErrAPI, Message: "the upstream response carried no candidates"}
+	}
 	if len(w.Candidates) == 0 {
 		return out, nil
 	}
 
 	c := w.Candidates[0]
 	hasCall := false
+	ids := newCallIDs(w.ResponseID)
 	for _, p := range c.Content.Parts {
-		blk, ok := partToIR(p)
+		blk, ok := partToIR(p, ids)
 		if !ok {
 			continue
 		}

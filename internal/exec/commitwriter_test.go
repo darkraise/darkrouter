@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -78,6 +79,34 @@ func TestFlushPassesThroughAndCommits(t *testing.T) {
 	}
 	if !rec.Flushed {
 		t.Error("the flush did not reach the underlying writer")
+	}
+}
+
+// failingWriter is a client connection that has stopped taking bytes.
+type failingWriter struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (f *failingWriter) Write([]byte) (int, error) { return 0, f.err }
+func (f *failingWriter) FlushError() error         { return f.err }
+
+func TestAFailedWriteOrFlushIsKept(t *testing.T) {
+	gone := errors.New("client gone")
+	for name, act := range map[string]func(*CommitWriter){
+		"write": func(cw *CommitWriter) { _, _ = cw.Write([]byte("x")) },
+		"flush": func(cw *CommitWriter) { cw.Flush() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cw := NewCommitWriter(&failingWriter{ResponseRecorder: httptest.NewRecorder(), err: gone})
+			if cw.Err() != nil {
+				t.Fatalf("Err = %v before anything was written", cw.Err())
+			}
+			act(cw)
+			if !errors.Is(cw.Err(), gone) {
+				t.Errorf("Err = %v, want the client's failure", cw.Err())
+			}
+		})
 	}
 }
 
