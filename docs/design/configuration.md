@@ -141,7 +141,7 @@ Providers and Routing screens rather than in Settings.
 | Key | Default | Notes |
 |---|---|---|
 | `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. No query or fragment. Empty means the console shows only the LAN address. |
-| `server.max_body_bytes` | 33554432 | Applies on reload. |
+| `server.max_body_bytes` | 33554432 | Applies on reload. For a multipart upload it bounds the part values; boundaries, part headers and a 1 KiB charge per part get a further 64 KiB. |
 | `server.shutdown_grace` | `10s` | |
 | `server.sse.max_line_bytes` | 1048576 | |
 | `server.sse.max_precommit_bytes` | 1048576 | |
