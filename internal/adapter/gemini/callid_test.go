@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/ir"
@@ -79,5 +80,33 @@ func TestParseStreamNamesCallsGeminiLeftUnidentified(t *testing.T) {
 	}
 	if len(deltaIDs) != 2 || deltaIDs[0] == "" || deltaIDs[0] == deltaIDs[1] {
 		t.Fatalf("ids = %q; each call needs its own id", deltaIDs)
+	}
+}
+
+// OpenAI rejects an assistant tool call id over 40 characters, so a long
+// response id must not produce one, nor may two long ids sharing a prefix
+// collide once shortened.
+func TestParseResponseCapsGeneratedCallIDs(t *testing.T) {
+	long := strings.Repeat("a", 60)
+	idOf := func(responseID string) string {
+		t.Helper()
+		resp, err := parseBody(t, `{"responseId":"`+responseID+`","candidates":[{"content":{"parts":[`+
+			`{"functionCall":{"name":"f","args":{}}}]},"finishReason":"STOP"}]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Content[0].ToolUse.ID
+	}
+	a, b := idOf(long+"x"), idOf(long+"y")
+	for _, id := range []string{a, b} {
+		if len(id) > 40 || !toolIDPattern.MatchString(id) {
+			t.Errorf("id %q is %d characters; want at most 40 in [A-Za-z0-9_-]", id, len(id))
+		}
+	}
+	if a == b {
+		t.Errorf("ids %q and %q collide for distinct response ids", a, b)
+	}
+	if short := idOf("r1"); short != "call_r1_1" {
+		t.Errorf("id = %q; a short response id is used as it is", short)
 	}
 }
