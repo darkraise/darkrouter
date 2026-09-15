@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useRouter, useRouterState } from "@tansta
 import { Banner, Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { DataTable, exportToCsv } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
+import { useRowHeight } from "../../lib/row-height"
 import { useAliases, useModels, useProviders, useRequests } from "../../lib/queries"
 import { useSearchFilters, filterQuery } from "../../lib/search-filters"
 import type { RequestPage, RequestRow } from "../../lib/api-types"
@@ -154,6 +155,8 @@ export function RequestsScreen() {
   // Bumped when the loaded pages are thrown away for a new first page, so an
   // older page still in flight does not land after rows it no longer follows.
   const pagesReset = useRef(0)
+  const tableRef = useRef<HTMLDivElement>(null)
+  const rowHeight = useRowHeight(tableRef)
   const [pagedUnder, setPagedUnder] = useState(filterKey)
 
   // Both adjustments run during render rather than after it. An effect would
@@ -449,13 +452,14 @@ export function RequestsScreen() {
               `overflow-wrap: anywhere`, which lets a column's minimum width
               fall to a single glyph, so a full-width table crushed its
               columns instead of overflowing — "success" one letter per line,
-              rows 240px tall under a window that places them 36px apart. */}
+              rows 240px tall under a window that places them one row apart. */}
           {/* A click anywhere on a row opens it; the Open button stays for
               the keyboard and for screen readers, since the row itself is a
               row and not a button. The table renders its own cells, so the
               id rides on the first cell and the click is delegated from
               here. */}
           <div
+            ref={tableRef}
             className="overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
             onClick={openRowUnderPointer}
           >
@@ -463,7 +467,7 @@ export function RequestsScreen() {
               columns={columns}
               data={rows}
               facets={["surface", "status", "failover"]}
-              virtualize={{ rowHeight: 36, height: 640 }}
+              virtualize={{ rowHeight, height: 640 }}
             />
           </div>
 
