@@ -239,7 +239,7 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 		// answer. The rows are durable; what failed is the republish, and the
 		// previous configuration is still serving.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false, "error": publish.Error(),
+			"valid": false, "routing_updated": false, "error": publish.Error(),
 			"serving": "the previous configuration is still serving",
 		})
 	case err != nil:

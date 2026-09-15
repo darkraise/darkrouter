@@ -431,6 +431,18 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 // repeated, and the router is still serving what it served before — which for
 // a disabled credential means the revoked key. Nothing reloads the provider
 // set on a timer, so this response is the only place the operator learns it.
+//
+// Every committed-but-not-loaded response carries routing_updated:false, and
+// that field is how a client recognises the case; the status depends on what
+// was written:
+//
+//   - A create answers 201 with a warning (createdReply): the row exists, and
+//     an error would invite the retry that stores a second copy.
+//   - A patch or delete of a provider, credential or model override answers
+//     500 (writeRoutingNotUpdated): a disable or delete is a revocation, and a
+//     revoked key still serving must never read as success.
+//   - A configuration or alias save answers 200 with valid:false and the
+//     previous configuration still serving (commitConfig).
 var errRoutingNotUpdated = errors.New("the change was saved, but the gateway could not " +
 	"load it and is still routing with the previous settings; see the server log")
 
