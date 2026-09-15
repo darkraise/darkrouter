@@ -264,7 +264,11 @@ function buildColumns(actions: RowActions): Columns {
               {r.row.id} · {r.row.kind}
             </span>
           </span>
-          {r.row.freeTier && <Badge variant="secondary">Free tier</Badge>}
+          {r.row.freeTier && (
+            <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+              Free tier
+            </Badge>
+          )}
         </span>
       ),
     },
