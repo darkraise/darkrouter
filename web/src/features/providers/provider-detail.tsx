@@ -382,6 +382,7 @@ export function ProviderDetail() {
   const modelsFailed = catalog.isError && !catalog.data
   const healthFailed = health.isError && !health.data
   const discoveryFailed = discovery.isError && !discovery.data
+  const usageFailed = usage.isError && !usage.data
 
   return (
     <>
@@ -446,12 +447,17 @@ export function ProviderDetail() {
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
           caption="requests · 30d"
-          value={requests.toLocaleString()}
+          value={usageFailed ? "—" : requests.toLocaleString()}
           note={
-            usage.data && !series.some((n) => n > 0) ? "no requests in this window" : undefined
+            usageFailed
+              ? "did not load"
+              : usage.data && !series.some((n) => n > 0)
+                ? "no requests in this window"
+                : undefined
           }
+          tone={usageFailed ? "warning" : undefined}
         >
-          <Sparkline points={series} />
+          {!usageFailed && <Sparkline points={series} />}
         </Stat>
         <Stat
           caption="credentials usable"
