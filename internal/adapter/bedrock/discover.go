@@ -126,7 +126,10 @@ func (l *Lister) profiles(ctx context.Context, p catalog.Probe, base string) ([]
 		seen = map[string]bool{}
 		next string
 	)
-	for {
+	for page := 0; ; page++ {
+		if page == catalog.MaxListPages {
+			return nil, fmt.Errorf("bedrock inference-profile listing did not end within %d pages", catalog.MaxListPages)
+		}
 		q := url.Values{"maxResults": {"1000"}}
 		if next != "" {
 			q.Set("nextToken", next)

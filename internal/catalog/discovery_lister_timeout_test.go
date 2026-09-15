@@ -79,6 +79,30 @@ func (s slowSignedLister) List(ctx context.Context, p Probe) ([]Discovered, erro
 	return []Discovered{{ModelID: "anthropic.claude-x"}}, nil
 }
 
+// Restarting the timer on every signature would let a lister that keeps
+// signing hold its sweep slot forever, so the calls themselves are capped.
+func TestAListerThatNeverStopsSigningIsCapped(t *testing.T) {
+	db := discoveryDB(t, "bed")
+	src := &staticSource{ps: []provider.Provider{{
+		ID: "bed", Kind: "bedrock", Region: "us-east-1", AuthStyle: "sigv4",
+		Credentials: []provider.Credential{{ID: "k", Secret: "AKIA:secret", Enabled: true}},
+	}}}
+	d := NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{
+		Timeout: time.Second,
+		Auth:    fakeAuthResolver{header: "signed"},
+		Listers: map[string]KindLister{"bedrock": slowSignedLister{calls: 10 * MaxListPages}},
+	})
+	d.SweepOnce(context.Background())
+
+	states, err := db.DiscoveryStates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := states["bed"]; st.ConsecutiveFailures != 1 {
+		t.Errorf("failures = %d, want 1: a listing past the call cap is a failure", st.ConsecutiveFailures)
+	}
+}
+
 // The timeout bounds one call. A listing of several calls that are each well
 // within it is a healthy listing, however long the calls take together.
 func TestTheProbeTimeoutBoundsEachListerCallNotTheWholeListing(t *testing.T) {
