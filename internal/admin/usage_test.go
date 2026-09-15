@@ -105,6 +105,55 @@ func TestManyCoolingTriplesReadAsOneDegradedProvider(t *testing.T) {
 	}
 }
 
+// The router keys a keyless provider's attempt on an empty credential id, so
+// that is where its cooldowns are.
+func TestAKeylessProvidersCooldownsReachTheOverview(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"free","name":"Free","kind":"openaicompat","base_url":"https://x/v1","auth_style":"none"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	for i := 0; i < 5; i++ {
+		k := health.Key{ProviderID: "free", KeyID: "", Model: "m" + strconv.Itoa(i)}
+		for j := 0; j < 5; j++ {
+			s.deps.Breaker.Record(k, health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500})
+		}
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 {
+		t.Fatalf("tiles = %+v", body.Providers)
+	}
+	if got := body.Providers[0]; got.Cooling != 5 || got.State != "degraded" {
+		t.Errorf("tile = %+v, want degraded with 5 cooling", got)
+	}
+}
+
+// An optional-key provider with a key routes through the key, so a cooldown
+// left under the empty id from before the key was added is not in use.
+func TestAKeylessCooldownDoesNotCountOnceAKeyIsInUse(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"opt","name":"Opt","kind":"openaicompat","base_url":"https://x/v1","auth_style":"optional"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers/opt/keys",
+		`{"label":"k","secret":"sk-optional-1234"}`); w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	for j := 0; j < 5; j++ {
+		s.deps.Breaker.Record(health.Key{ProviderID: "opt", KeyID: "", Model: "m"},
+			health.Signal{Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500})
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if got := body.Providers[0]; got.Cooling != 0 || got.State != "healthy" {
+		t.Errorf("tile = %+v, want healthy with nothing cooling", got)
+	}
+}
+
 // The Providers screen judges health by enabled credentials only, because the
 // router drops a disabled one. The overview must reach the same verdict.
 func TestAProviderWhoseCredentialsAreAllDisabledIsDegraded(t *testing.T) {
