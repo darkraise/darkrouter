@@ -164,6 +164,45 @@ func TestPutAliasesTreatsAStarIfMatchAsNoPin(t *testing.T) {
 	}
 }
 
+// The grammar makes If-Match either * or a list of tags, never both. A header
+// that mixes them still names a revision, and reading the * as "no pin" would
+// let a stale save through.
+func TestPutAliasesKeepsThePinWhenAStarIsMixedIntoAList(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	stale := do(t, s, cookie, token, "GET", "/api/aliases", "").Header().Get("ETag")
+	if w := putIfMatch(t, s, cookie, token, stale, `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("first PUT = %d: %s", w.Code, w.Body.String())
+	}
+
+	if w := putIfMatch(t, s, cookie, token, stale+`, *`, `{"fast":["groq/b"]}`); w.Code != 409 {
+		t.Errorf("PUT with a stale ETag and * in one list = %d, want 409: %s", w.Code, w.Body.String())
+	}
+
+	r := httptest.NewRequest("PUT", "/api/aliases", strings.NewReader(`{"fast":["groq/c"]}`))
+	r.AddCookie(cookie)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set(csrfHeader, token)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Add("If-Match", "*")
+	r.Header.Add("If-Match", stale)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 409 {
+		t.Errorf("PUT with * and a stale ETag on separate lines = %d, want 409: %s", w.Code, w.Body.String())
+	}
+
+	stored, err := s.deps.DB.Aliases(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stored["fast"]; len(got) != 1 || got[0] != "groq/a" {
+		t.Errorf("a stale save went through: %v", stored)
+	}
+}
+
 // The ETag GET hands out has to be computed from the same table PUT checks
 // it against. A save whose rows committed but whose republish failed leaves
 // the stored table ahead of the live snapshot; an ETag taken from the snapshot

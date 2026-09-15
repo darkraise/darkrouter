@@ -77,16 +77,15 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 // refusing it would 409 every save made through the proxy. Weak comparison is
 // sound here because the revision fingerprints the table itself, not a byte
 // encoding of it. "*" only asks that the resource exist, which the alias table
-// always does, so it pins nothing.
+// always does, so on its own it pins nothing. The grammar forbids mixing it
+// with tags; a header that does is read by its tags, since treating the "*" as
+// the answer would let a stale save through.
 func aliasesIfMatch(headers []string) []string {
 	var revisions []string
 	for _, header := range headers {
 		for _, match := range strings.Split(header, ",") {
 			match = strings.TrimSpace(match)
-			if match == "*" {
-				return nil
-			}
-			if match == "" {
+			if match == "*" || match == "" {
 				continue
 			}
 			match = strings.TrimPrefix(match, "W/")
