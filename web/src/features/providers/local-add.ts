@@ -16,15 +16,30 @@ export type LocalDraft = {
 }
 
 export type LocalOutcome =
-  | { ok: true; modelCount?: number }
+  | {
+      ok: true
+      modelCount?: number
+      /** Set when a write committed but the gateway could not load it, so it
+       *  is still routing without this runtime. The server's own words. */
+      routingNotUpdated?: string
+    }
   | { ok: false; error: string }
+
+/** What a create answers once the row is stored. */
+type Created = { routing_updated?: boolean; warning?: string }
+
+/** The server's warning when a committed create did not reach routing. */
+function routingWarning(reply: Created | undefined): string | undefined {
+  if (reply?.routing_updated !== false) return undefined
+  return reply.warning || "the gateway did not load the change"
+}
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-async function create(api: ProviderApi, d: LocalDraft, enabled: boolean): Promise<void> {
-  await api.post("/api/providers", {
+async function create(api: ProviderApi, d: LocalDraft, enabled: boolean): Promise<string | undefined> {
+  const reply = await api.post<Created>("/api/providers", {
     id: d.presetId,
     preset: d.presetId,
     base_url: d.baseUrl,
@@ -37,17 +52,19 @@ async function create(api: ProviderApi, d: LocalDraft, enabled: boolean): Promis
     // here would be offering a choice with one right answer.
     ...(d.apiKey ? { auth_style: "bearer" } : {}),
   })
+  return routingWarning(reply)
 }
 
 /** Stores the key, if there is one, before anything probes the endpoint: a
  *  probe that ran first would be refused by exactly the runtime the key is
  *  for, and report the address as unreachable. */
-async function addKey(api: ProviderApi, d: LocalDraft): Promise<void> {
-  if (!d.apiKey) return
-  await api.post(`/api/providers/${d.presetId}/keys`, {
+async function addKey(api: ProviderApi, d: LocalDraft): Promise<string | undefined> {
+  if (!d.apiKey) return undefined
+  const reply = await api.post<Created>(`/api/providers/${d.presetId}/keys`, {
     label: "default",
     secret: d.apiKey,
   })
+  return routingWarning(reply)
 }
 
 async function probe(api: ProviderApi, id: string): Promise<LocalOutcome> {
@@ -102,20 +119,24 @@ export async function testLocalRuntime(api: ProviderApi, d: LocalDraft): Promise
  * exist to be testable, and what survives is what works.
  */
 export async function addLocalRuntime(api: ProviderApi, d: LocalDraft): Promise<LocalOutcome> {
+  let routingNotUpdated: string | undefined
   try {
-    await create(api, d, true)
+    routingNotUpdated = await create(api, d, true)
   } catch (err) {
     return { ok: false, error: messageOf(err) }
   }
   let outcome: LocalOutcome
   try {
-    await addKey(api, d)
+    routingNotUpdated = (await addKey(api, d)) ?? routingNotUpdated
     outcome = await probe(api, d.presetId)
   } catch (err) {
     outcome = { ok: false, error: messageOf(err) }
   }
   // The delete cascades to the credential, so a rolled-back add leaves no
   // orphaned key behind.
-  if (!outcome.ok) await remove(api, d.presetId)
-  return outcome
+  if (!outcome.ok) {
+    await remove(api, d.presetId)
+    return outcome
+  }
+  return routingNotUpdated ? { ...outcome, routingNotUpdated } : outcome
 }
