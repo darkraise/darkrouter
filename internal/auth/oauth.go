@@ -336,6 +336,14 @@ func (m *Manager) renew(ctx context.Context, acct *oauthAccount,
 	if acct.unpersisted {
 		err := m.persist(ctx, acct, credID, acct.tok)
 		acct.unpersisted = err != nil && !errors.Is(err, ErrCredentialChanged)
+		// An operator changed the row since the rotation, and until the write
+		// lands there is no telling whether the change was a disable, a
+		// delete or a replacement. The rotation is kept for the retry, which
+		// the row's compare-and-swap settles, but it does not serve meanwhile.
+		if acct.unpersisted && acct.stale.Load() {
+			return "", fmt.Errorf("credential %s was changed and its refreshed token is not yet saved: %w",
+				credID, err)
+		}
 	}
 	if acct.stale.Load() && !acct.unpersisted {
 		if err := m.reload(ctx, acct, credID); err != nil {
