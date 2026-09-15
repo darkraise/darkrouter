@@ -55,6 +55,8 @@ export type Turn = {
   content: string
   model?: string
   failed?: boolean
+  /** A reply the operator cut short. Shown as far as it got, never sent. */
+  stopped?: boolean
   /** Shown, never sent: a provider is not handed its own reasoning back. */
   reasoning?: string
 }
@@ -64,12 +66,14 @@ export type Turn = {
  *
  * A failed or empty assistant turn is a diagnostic the drawer drew, not
  * something the model said, and the prompt it failed to answer goes with it:
- * sent on, the error text reads to the model as its own previous reply.
+ * sent on, the error text reads to the model as its own previous reply. A
+ * stopped reply is left out the same way: it ends where the operator cut it,
+ * not where the model did.
  */
 export function conversationHistory(turns: Turn[]): Turn[] {
   const out: Turn[] = []
   for (const turn of turns) {
-    if (turn.role === "assistant" && (turn.failed || turn.content === "")) {
+    if (turn.role === "assistant" && (turn.failed || turn.stopped || turn.content === "")) {
       if (out[out.length - 1]?.role === "user") out.pop()
       continue
     }
@@ -204,6 +208,11 @@ function Bubble({
             </span>
           )}
           {turn.content}
+          {turn.stopped && (
+            <span className="mt-1 block text-[hsl(var(--legend))]">
+              Stopped here; not sent with the next message.
+            </span>
+          )}
           {streaming && (
             // The caret is the difference between "thinking" and "stopped".
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-[hsl(var(--foreground))] align-text-bottom" />
@@ -297,7 +306,8 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   // In the transcript too: the conversation is where an operator is looking,
   // and a turn that simply never arrives reads as a hang. A partial reply is
   // kept on screen but marked failed, so the next message does not send it
-  // to the model as an answer it gave. A stop keeps its partial reply as one.
+  // to the model as an answer it gave. A stop keeps its partial reply as it
+  // read, marked stopped rather than failed, and unsent for the same reason.
   function failOpenTurn(reason: string, partial: "fail" | "keep" = "fail") {
     setMessages((prev) => {
       const next = prev.slice()
@@ -307,6 +317,8 @@ function TestSession({ row }: { row: ProviderRow | null }) {
         next[next.length - 1] = { ...last, content: reason, failed: true }
       } else if (partial === "fail") {
         next[next.length - 1] = { ...last, content: `${last.content}\n\n${reason}`, failed: true }
+      } else {
+        next[next.length - 1] = { ...last, stopped: true }
       }
       return next
     })

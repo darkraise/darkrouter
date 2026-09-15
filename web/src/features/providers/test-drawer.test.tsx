@@ -476,6 +476,44 @@ describe("the conversation", () => {
     expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
   })
 
+  it("does not send the partial reply of a run the operator stopped", async () => {
+    // Truncated where the operator cut it, so replaying it would put words in
+    // the model's mouth it never finished saying.
+    let first = true
+    stubRoutes()
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) !== "/api/playground" || !first) return routes(url, init)
+        first = false
+        const signal = init?.signal ?? undefined
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"half a reply"}}]}\n\n'))
+              signal?.addEventListener("abort", () =>
+                c.error(new DOMException("The operation was aborted.", "AbortError")),
+              )
+            },
+          }),
+        )
+      },
+    )
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findByText(/half a reply/)
+    await userEvent.click(screen.getByRole("button", { name: /stop/i }))
+    await screen.findByText(/stopped before the reply finished/i)
+    expect(screen.getByText(/half a reply/)).toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText("Test message"), "and again")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(2))
+    expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
+  })
+
   it("does not send the empty turn a failed setup left behind", async () => {
     stubRoutes()
     const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
