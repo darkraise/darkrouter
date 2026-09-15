@@ -417,7 +417,12 @@ export function AliasEditor({
                 <span className="w-32 shrink-0 truncate font-mono text-sm" title={name}>
                   {name}
                 </span>
-                <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                {/* A real basis, not flex-1's zero: with no width of its own
+                    to claim, the list never pushed the buttons onto the next
+                    line and shrank to nothing under them instead. The buttons
+                    are one group so a narrow row wraps them together rather
+                    than stranding one beside a truncated target. */}
+                <span className="flex min-w-0 grow basis-48 flex-wrap items-center gap-1.5">
                   {rows.length === 0 ? (
                     <span className="text-sm text-[hsl(var(--muted-foreground))]">
                       no targets yet
@@ -432,52 +437,54 @@ export function AliasEditor({
                     ))
                   )}
                 </span>
-                {onPreview && (
+                <span className="ml-auto flex items-center gap-2">
+                  {onPreview && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onPreview(name)}
+                      // The endpoint resolves what is stored, so a chain with
+                      // unsaved edits would be previewed as it was, beside pills
+                      // drawn from the draft.
+                      title={
+                        unsaved
+                          ? "Previews the saved chain — this one has unsaved changes"
+                          : undefined
+                      }
+                    >
+                      Preview{unsaved ? " (saved)" : ""}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => onPreview(name)}
-                    // The endpoint resolves what is stored, so a chain with
-                    // unsaved edits would be previewed as it was, beside pills
-                    // drawn from the draft.
-                    title={
-                      unsaved
-                        ? "Previews the saved chain — this one has unsaved changes"
-                        : undefined
+                    onClick={() => setEditing(open ? null : name)}
+                    aria-expanded={open}
+                  >
+                    {open ? "Done" : "Edit"}
+                  </Button>
+                  {/* A whole chain is worth asking about; a single target row is
+                      not — that is one click of Add target to put back, and a
+                      prompt per row would make the editor unusable. */}
+                  <ConfirmButton
+                    size="sm"
+                    variant="ghost"
+                    className="text-[hsl(var(--destructive))]"
+                    title={`Remove the ${name} chain?`}
+                    description={`Requests asking for ${name} stop resolving through it and fall back to whatever a bare model name of that spelling finds. Nothing is written until you save.`}
+                    confirmLabel="Remove chain"
+                    destructive
+                    onConfirm={() =>
+                      setDraft((d) => {
+                        const next = { ...d }
+                        delete next[name]
+                        return next
+                      })
                     }
                   >
-                    Preview{unsaved ? " (saved)" : ""}
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setEditing(open ? null : name)}
-                  aria-expanded={open}
-                >
-                  {open ? "Done" : "Edit"}
-                </Button>
-                {/* A whole chain is worth asking about; a single target row is
-                    not — that is one click of Add target to put back, and a
-                    prompt per row would make the editor unusable. */}
-                <ConfirmButton
-                  size="sm"
-                  variant="ghost"
-                  className="text-[hsl(var(--destructive))]"
-                  title={`Remove the ${name} chain?`}
-                  description={`Requests asking for ${name} stop resolving through it and fall back to whatever a bare model name of that spelling finds. Nothing is written until you save.`}
-                  confirmLabel="Remove chain"
-                  destructive
-                  onConfirm={() =>
-                    setDraft((d) => {
-                      const next = { ...d }
-                      delete next[name]
-                      return next
-                    })
-                  }
-                >
-                  Remove
-                </ConfirmButton>
+                    Remove
+                  </ConfirmButton>
+                </span>
               </div>
 
               {open && (
