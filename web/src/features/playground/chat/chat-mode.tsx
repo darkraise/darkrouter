@@ -477,6 +477,10 @@ export function ChatMode({ active = true }: { active?: boolean }) {
 
   function removeConversation(c: PlaygroundConversation) {
     remove.mutate({ id: c.id, title: c.title })
+    // Its held exchanges have nowhere left to be saved, and the banner names
+    // deleting the conversation as the way to be rid of them.
+    backlog.current = backlog.current.filter((exchange) => exchange.id !== c.id)
+    publishBacklog()
     if (c.id === conversationRef.current) startNew()
   }
 
