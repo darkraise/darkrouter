@@ -385,6 +385,47 @@ func TestRollupCatchesUpTheDaysSinceItsLastRun(t *testing.T) {
 	}
 }
 
+// Rollups can keep failing while retention keeps pruning. The catch-up must
+// not rebuild a day retention has cut into: the day's early requests are
+// gone, and recomputing from what is left would replace a correct total with
+// a smaller one for good.
+func TestRollupCatchUpLeavesADayRetentionCutIntoAlone(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	lastRun := time.Date(2026, 8, 22, 23, 30, 0, 0, time.UTC)
+
+	insertRequest(t, db, "early", time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), "groq", "m", 10, 20, nil)
+	insertRequest(t, db, "late", time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC), "groq", "m", 5, 7, nil)
+	if err := db.Rollup(ctx, lastRun); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cutoff 2026-08-22 12:00: "early" goes, "late" stays.
+	if _, err := db.Prune(ctx, time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
+		48*time.Hour, 72*time.Hour, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Lengthening log.retention afterwards does not bring "early" back.
+	if _, err := db.Prune(ctx, time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC),
+		720*time.Hour, 72*time.Hour, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, in int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT requests, tokens_in FROM usage_daily WHERE day = '2026-08-22'`).
+		Scan(&requests, &in); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || in != 15 {
+		t.Errorf("2026-08-22 = %d requests, %d tokens in; want the rolled-up 2 and 15", requests, in)
+	}
+}
+
 // The catch-up has to happen at startup: the first interval is most of an
 // hour, and retention's first prune could remove the rows it owes by then.
 func TestRunRollupRunsOnceAtStartup(t *testing.T) {

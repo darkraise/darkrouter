@@ -13,6 +13,10 @@ import (
 // rollup.
 const settingRollupLastRun = "usage_rollup_last_run"
 
+// settingPruneCutoff is the highest unix-millisecond cutoff retention has
+// pruned requests before.
+const settingPruneCutoff = "log_prune_cutoff"
+
 // Rollup recomputes usage_daily in UTC for yesterday and today, reaching back
 // to the day of the previous run when that is older.
 //
@@ -24,9 +28,11 @@ const settingRollupLastRun = "usage_rollup_last_run"
 // after its last run sit on that run's day, which a restart days later would
 // otherwise never recompute again.
 func (d *DB) Rollup(ctx context.Context, now time.Time) error {
+	started := time.Now()
 	utc := now.UTC()
 	startOfToday := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
-	from := startOfToday.AddDate(0, 0, -1)
+	yesterday := startOfToday.AddDate(0, 0, -1)
+	from := yesterday
 	to := startOfToday.AddDate(0, 0, 1)
 
 	// Yesterday and today are recomputed wholesale. That is safe because
@@ -36,7 +42,9 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	// run, while the gateway was still up, cannot have reached two days
 	// before it, and RunRollup catches up at startup, before retention's
 	// first prune. Not the day before it, which a prune in the hour after
-	// that run can have cut into.
+	// that run can have cut into. None of that holds when rollups kept
+	// failing while retention ran on, so the reach-back also stops at the
+	// first day no prune has reached.
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
@@ -59,6 +67,20 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 		lu := time.UnixMilli(ms).UTC()
 		if lastDay := time.Date(lu.Year(), lu.Month(), lu.Day(), 0, 0, 0, 0, time.UTC); lastDay.Before(from) {
 			from = lastDay
+			// Rollups that keep failing while the gateway stays up leave the
+			// last run's day behind retention. A day a prune has cut into can
+			// no longer be rebuilt whole, so what usage_daily already holds for
+			// it is the better record.
+			fence, ferr := firstUnprunedDay(ctx, tx)
+			if ferr != nil {
+				return fmt.Errorf("rollup: %w", ferr)
+			}
+			if fence.After(from) {
+				from = fence
+			}
+			if from.After(yesterday) {
+				from = yesterday
+			}
 		}
 	}
 
@@ -118,7 +140,36 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	if err := putSetting(ctx, tx, settingRollupLastRun, strconv.FormatInt(now.UnixMilli(), 10)); err != nil {
 		return fmt.Errorf("rollup: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// A catch-up holds the single write connection for the whole span.
+	if from.Before(yesterday) {
+		slog.Info("usage rollup caught up",
+			"from", from.Format("2006-01-02"),
+			"days", int(to.Sub(from)/(24*time.Hour)),
+			"duration", time.Since(started))
+	}
+	return nil
+}
+
+// firstUnprunedDay is the start of the earliest UTC day no prune has reached
+// into, or the zero time when retention has never run.
+func firstUnprunedDay(ctx context.Context, q queryer) (time.Time, error) {
+	v, ok, err := getSetting(ctx, q, settingPruneCutoff)
+	if err != nil || !ok {
+		return time.Time{}, err
+	}
+	ms, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}, nil
+	}
+	c := time.UnixMilli(ms).UTC()
+	day := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC)
+	if day.Before(c) {
+		day = day.AddDate(0, 0, 1)
+	}
+	return day, nil
 }
 
 // RunRollup runs the rollup once at startup, then on an interval until ctx is
