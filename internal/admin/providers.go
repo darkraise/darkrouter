@@ -44,6 +44,10 @@ var authStyles = []string{
 // base_url is an endpoint for them once those are set; Vertex needs its
 // project and location in the request path whatever the host.
 func checkEndpoint(row store.ProviderRow) error {
+	if row.Kind != "vertex" && row.Location != "" {
+		// Nothing else reads it, so it would be stored and never validated.
+		return fmt.Errorf("location applies only to a vertex provider")
+	}
 	if row.Kind == "vertex" {
 		if row.Project == "" || row.Location == "" {
 			return fmt.Errorf("a vertex provider needs a project and a location")

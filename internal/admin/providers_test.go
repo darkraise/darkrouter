@@ -305,6 +305,32 @@ func TestConcurrentLocationFillsCannotMoveIt(t *testing.T) {
 	}
 }
 
+func TestALocationIsRefusedOnAProviderThatIsNotVertex(t *testing.T) {
+	// Only Vertex has a regional endpoint named this way; anywhere else the
+	// value is stored, never validated and never read.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p1","name":"P","kind":"openaicompat","base_url":"https://x/v1","location":"evil.example/"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("create: status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p2","name":"P","kind":"openaicompat","base_url":"https://x/v1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p2",
+		`{"location":"us-central1"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("patch: status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "p2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != "" {
+		t.Errorf("location = %q; a refused patch wrote it", row.Location)
+	}
+}
+
 func TestAnEndpointThatCannotBeReachedIsRejected(t *testing.T) {
 	cases := map[string]string{
 		"bedrock with no region":  `{"id":"b","preset":"bedrock"}`,
