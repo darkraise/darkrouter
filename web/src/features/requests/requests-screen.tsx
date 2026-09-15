@@ -443,13 +443,22 @@ export function RequestsScreen() {
           )}
           {/* Scrolls sideways inside its own box rather than pushing the page
               wider: ten columns do not fit a laptop, and the Path column at
-              the far end is the one that used to fall off. */}
+              the far end is the one that used to fall off.
+
+              Cells do not wrap. darkraise-ui gives every table cell
+              `overflow-wrap: anywhere`, which lets a column's minimum width
+              fall to a single glyph, so a full-width table crushed its
+              columns instead of overflowing — "success" one letter per line,
+              rows 240px tall under a window that places them 36px apart. */}
           {/* A click anywhere on a row opens it; the Open button stays for
               the keyboard and for screen readers, since the row itself is a
               row and not a button. The table renders its own cells, so the
               id rides on the first cell and the click is delegated from
               here. */}
-          <div className="overflow-x-auto [&_tbody_tr]:cursor-pointer" onClick={openRowUnderPointer}>
+          <div
+            className="overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
+            onClick={openRowUnderPointer}
+          >
             <DataTable
               columns={columns}
               data={rows}

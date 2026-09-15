@@ -133,6 +133,22 @@ describe("a requests screen opened while empty", () => {
   })
 })
 
+describe("the requests table", () => {
+  it("keeps every cell on one line", async () => {
+    // The library lets a table cell break anywhere, so a full-width table
+    // crushed its columns to a letter each and rows grew far past the fixed
+    // height the virtual window places them at. jsdom has no layout, so
+    // this pins the rule that stops it rather than a measured height.
+    mockRequests([{ requests: [row({ id: "r1", model: "distinctive-model" })] }])
+    await renderScreen()
+
+    const cell = (await screen.findByText("distinctive-model")).closest("td")
+    expect(cell).not.toBeNull()
+    const nowrap = cell?.closest("[class*='[&_td]:whitespace-nowrap']")
+    expect(nowrap).not.toBeNull()
+  })
+})
+
 describe("dedupeAppend", () => {
   it("drops a row already displayed, by id", async () => {
     const { dedupeAppend } = await import("./requests-screen")

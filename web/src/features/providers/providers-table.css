@@ -55,21 +55,9 @@
 
    The actions column is already sticky against the right edge, so where the
    two meet the header has to win: its cell is the one that must cover both the
-   rows passing underneath and the column passing across. */
-/* One scroll container, not two. The wrapper carries overflow-x for the wide
-   table, and a box with overflow-x: auto computes overflow-y to auto as well
-   -- so it, not the viewport, was the nearest scrolling ancestor, and a header
-   sticking to it stuck to a box that never scrolls vertically. Handing both
-   axes to the viewport gives the header and the actions column the same box to
-   stick to, which is the one that actually moves. */
-.providers-table .dr-data-table-frame .dr-table-wrapper {
-  overflow: visible;
-}
-
-.providers-table .dr-data-table-viewport {
-  overflow-x: auto;
-}
-
+   rows passing underneath and the column passing across. Both stick to the
+   viewport, which globals.css makes the one scroll container of every
+   virtualised table. */
 .providers-table .dr-data-table-frame thead th {
   position: sticky;
   top: 0;

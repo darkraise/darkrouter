@@ -112,3 +112,19 @@
 .dr-table-wrapper {
   overflow-x: auto;
 }
+
+/* One scroll container, not two, for a virtualised table. The wrapper
+   carries overflow-x for the wide table, and a box with overflow-x: auto
+   computes overflow-y to auto as well -- so it, not the viewport, was the
+   nearest scrolling ancestor. Its horizontal scrollbar then sat at the
+   bottom of every row the window pads out, thousands of pixels below the
+   fold, and a header sticking to it stuck to a box that never scrolls
+   vertically. Handing both axes to the viewport puts the scrollbar at the
+   bottom of the visible box and gives sticky cells the box that moves. */
+.dr-data-table-viewport .dr-table-wrapper {
+  overflow: visible;
+}
+
+.dr-data-table-viewport {
+  overflow-x: auto;
+}
