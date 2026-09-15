@@ -55,6 +55,8 @@ export type Turn = {
   content: string
   model?: string
   failed?: boolean
+  /** Shown, never sent: a provider is not handed its own reasoning back. */
+  reasoning?: string
 }
 
 /**
@@ -191,6 +193,16 @@ function Bubble({
               : "rounded-[var(--radius)] rounded-bl-sm border bg-[hsl(var(--muted))] px-3 py-2 text-sm whitespace-pre-wrap break-words"
           }
         >
+          {turn.reasoning && (
+            <span className="mb-1 block text-[hsl(var(--muted-foreground))] italic">
+              {turn.reasoning}
+            </span>
+          )}
+          {turn.reasoning && turn.content === "" && !streaming && !turn.failed && (
+            <span className="block text-[hsl(var(--legend))]">
+              Only reasoning arrived; the reply carried no text.
+            </span>
+          )}
           {turn.content}
           {streaming && (
             // The caret is the difference between "thinking" and "stopped".
@@ -267,13 +279,17 @@ function TestSession({ row }: { row: ProviderRow | null }) {
   // A functional update: a stream appends many times inside one render, and a
   // version that read the turns this render closed over would append every
   // chunk to the same stale array.
-  function appendToOpenTurn(text: string) {
+  function appendToOpenTurn(text: string, reasoning = "") {
     setMessages((prev) => {
       const next = prev.slice()
       const lastIndex = next.length - 1
       const last = next[lastIndex]
       if (!last) return prev
-      next[lastIndex] = { ...last, content: last.content + text }
+      next[lastIndex] = {
+        ...last,
+        content: last.content + text,
+        ...(reasoning ? { reasoning: (last.reasoning ?? "") + reasoning } : {}),
+      }
       return next
     })
   }
@@ -389,14 +405,14 @@ function TestSession({ row }: { row: ProviderRow | null }) {
       )) {
         if (controller.signal.aborted) break
         buffer += chunk
-        const { text, rest, error } = drainSSE(buffer, "openai")
+        const { text, reasoning, rest, error } = drainSSE(buffer, "openai")
         buffer = rest
-        if (text) {
+        if (text || reasoning) {
           if (firstToken === 0) {
             firstToken = performance.now()
             say("info", `first token at ${at()}`)
           }
-          appendToOpenTurn(text)
+          appendToOpenTurn(text, reasoning)
         }
         // A provider failing after the 200 went out can only say so in the
         // stream, so this frame is the run's real outcome.

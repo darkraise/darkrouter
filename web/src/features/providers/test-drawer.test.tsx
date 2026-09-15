@@ -314,6 +314,26 @@ describe("the verdict", () => {
     expect(screen.queryByText(/served in/i)).not.toBeInTheDocument()
   })
 
+  it("counts a stream that carried only reasoning as served", async () => {
+    stubRoutes(
+      () =>
+        new Response(
+          sse(
+            'data: {"choices":[{"delta":{"reasoning_content":"thinking it over"}}]}\n\n',
+            "data: [DONE]\n\n",
+          ),
+        ),
+    )
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    expect(await screen.findByText(/served in/i)).toBeInTheDocument()
+    expect(screen.getByText(/thinking it over/)).toBeInTheDocument()
+    expect(screen.getByText(/only reasoning arrived/i)).toBeInTheDocument()
+    expect(screen.queryByText(/without a reply/i)).not.toBeInTheDocument()
+  })
+
   it("carries the reason a refusal happened, not just that it did", async () => {
     // "Refused" alone sends an operator to the log, whose first useful line
     // is the one already in hand.
