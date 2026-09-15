@@ -59,3 +59,37 @@ func TestJSONSchemaLeavesJSONSchemaAlone(t *testing.T) {
 		t.Errorf("JSONSchema(nil) = %s", got)
 	}
 }
+
+func TestJSONSchemaKeepsANullableRootAnObject(t *testing.T) {
+	in := `{"type":"OBJECT","nullable":true,"properties":{"a":{"type":"STRING","nullable":true}}}`
+	want := `{"type":"object","properties":{"a":{"type":["string","null"]}}}`
+	assertSchema(t, JSONSchema(json.RawMessage(in), ir.SchemaOpenAPI), want)
+}
+
+func TestJSONSchemaSpellsReferencesAsJSONSchemaDoes(t *testing.T) {
+	in := `{
+	  "type": "OBJECT",
+	  "properties": {"pet": {"ref": "#/defs/Pet"}, "pets": {"type": "ARRAY", "items": {"ref": "#/defs/Pet"}}},
+	  "defs": {"Pet": {"type": "OBJECT", "properties": {"name": {"type": "STRING"}, "parent": {"ref": "#/defs/Pet"}}}}
+	}`
+	want := `{
+	  "type": "object",
+	  "properties": {"pet": {"$ref": "#/$defs/Pet"}, "pets": {"type": "array", "items": {"$ref": "#/$defs/Pet"}}},
+	  "$defs": {"Pet": {"type": "object", "properties": {"name": {"type": "string"}, "parent": {"$ref": "#/$defs/Pet"}}}}
+	}`
+	assertSchema(t, JSONSchema(json.RawMessage(in), ir.SchemaOpenAPI), want)
+}
+
+func assertSchema(t *testing.T, got json.RawMessage, want string) {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, got)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(g, w) {
+		t.Errorf("JSONSchema =\n%s\nwant\n%s", got, want)
+	}
+}

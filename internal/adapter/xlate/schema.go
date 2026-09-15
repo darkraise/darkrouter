@@ -21,7 +21,7 @@ func JSONSchema(schema json.RawMessage, dialect string) json.RawMessage {
 	if json.Unmarshal(schema, &v) != nil {
 		return schema
 	}
-	out, err := json.Marshal(openAPIToJSONSchema(v))
+	out, err := json.Marshal(openAPIToJSONSchema(v, true))
 	if err != nil {
 		return schema
 	}
@@ -48,7 +48,11 @@ var countKeywords = []string{
 // null type (or a null branch of anyOf, or null in an enum); and the fields
 // with no JSON Schema meaning — propertyOrdering, Google's own, and example,
 // OpenAPI's singular form of examples — are dropped.
-func openAPIToJSONSchema(v any) any {
+//
+// On the root, nullable is dropped rather than rewritten: Anthropic and
+// Bedrock Converse both require a tool's input schema to have type object at
+// the top level, and refuse ["object", "null"].
+func openAPIToJSONSchema(v any, root bool) any {
 	in, ok := v.(map[string]any)
 	if !ok {
 		return v
@@ -80,29 +84,44 @@ func openAPIToJSONSchema(v any) any {
 		}
 	}
 
-	for _, k := range []string{"properties", "defs"} {
+	// Google's ref and defs are JSON Schema's $ref and $defs without the
+	// sigil, and a ref points into defs as "#/defs/Name". JSON Schema ignores
+	// unknown keywords, so an unrenamed ref leaves its property unconstrained.
+	if ref, ok := s["ref"].(string); ok {
+		delete(s, "ref")
+		if name, found := strings.CutPrefix(ref, "#/defs/"); found {
+			ref = "#/$defs/" + name
+		}
+		s["$ref"] = ref
+	}
+	if defs, ok := s["defs"]; ok {
+		delete(s, "defs")
+		s["$defs"] = defs
+	}
+
+	for _, k := range []string{"properties", "$defs"} {
 		if m, ok := s[k].(map[string]any); ok {
 			conv := make(map[string]any, len(m))
 			for name, sub := range m {
-				conv[name] = openAPIToJSONSchema(sub)
+				conv[name] = openAPIToJSONSchema(sub, false)
 			}
 			s[k] = conv
 		}
 	}
 	for _, k := range []string{"items", "additionalProperties"} {
 		if sub, ok := s[k]; ok {
-			s[k] = openAPIToJSONSchema(sub)
+			s[k] = openAPIToJSONSchema(sub, false)
 		}
 	}
 	if list, ok := s["anyOf"].([]any); ok {
 		conv := make([]any, 0, len(list)+1)
 		for _, sub := range list {
-			conv = append(conv, openAPIToJSONSchema(sub))
+			conv = append(conv, openAPIToJSONSchema(sub, false))
 		}
 		s["anyOf"] = conv
 	}
 
-	if nullable {
+	if nullable && !root {
 		switch t := s["type"].(type) {
 		case string:
 			s["type"] = []any{t, "null"}
