@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -73,6 +74,57 @@ func TestRenderBlocksEmitsImageSources(t *testing.T) {
 	}
 	if s := got[2]["source"].(map[string]any); s["type"] != "file" || s["file_id"] != "file_1" {
 		t.Errorf("file source = %v", s)
+	}
+}
+
+func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// Anthropic takes a base64 document only as application/pdf, and plain text
+// only as a text source carrying the text itself.
+func TestRenderBlocksSendsTextDocumentsAsATextSource(t *testing.T) {
+	got, warns := blocks(t, []ir.ContentBlock{
+		{Type: ir.BlockDocument, Media: &ir.Media{MIME: "text/plain", Data: b64("plain notes")}},
+		{Type: ir.BlockDocument, Media: &ir.Media{MIME: "text/markdown", Data: b64("# Heading\n\nbody")}},
+		{Type: ir.BlockDocument, Media: &ir.Media{MIME: "text/csv", Data: b64("a,b\n1,2")}},
+		{Type: ir.BlockDocument, Media: &ir.Media{MIME: "application/pdf", Data: "JVBERi0="}},
+	}, nil)
+	if len(warns) != 0 {
+		t.Errorf("warnings = %+v, want none", warns)
+	}
+	if len(got) != 4 {
+		t.Fatalf("blocks = %v, want four documents", got)
+	}
+	for i, want := range []string{"plain notes", "# Heading\n\nbody", "a,b\n1,2"} {
+		s := got[i]["source"].(map[string]any)
+		if got[i]["type"] != "document" || s["type"] != "text" || s["media_type"] != "text/plain" || s["data"] != want {
+			t.Errorf("document %d source = %v, want a text/plain text source of %q", i, s, want)
+		}
+	}
+	if s := got[3]["source"].(map[string]any); s["type"] != "base64" ||
+		s["media_type"] != "application/pdf" || s["data"] != "JVBERi0=" {
+		t.Errorf("pdf source = %v", s)
+	}
+}
+
+func TestRenderBlocksDropsDocumentsAnthropicCannotTake(t *testing.T) {
+	for name, m := range map[string]*ir.Media{
+		"docx":      {MIME: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Data: "UEsDBA=="},
+		"no type":   {Data: b64("untyped")},
+		"not utf-8": {MIME: "text/plain", Data: base64.StdEncoding.EncodeToString([]byte{0xff, 0xfe, 0x00})},
+		"bad data":  {MIME: "text/plain", Data: "not base64!"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, warns := blocks(t, []ir.ContentBlock{
+				{Type: ir.BlockText, Text: "read this"},
+				{Type: ir.BlockDocument, Media: m},
+			}, nil)
+			if len(got) != 1 {
+				t.Errorf("blocks = %v, want the document dropped", got)
+			}
+			if !hasWarning(warns, "messages[].document") {
+				t.Errorf("warnings = %+v, want the drop recorded", warns)
+			}
+		})
 	}
 }
 
