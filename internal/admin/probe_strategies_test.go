@@ -2,16 +2,22 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/health"
@@ -200,6 +206,95 @@ func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	}
 	if !strings.Contains(got.Error, "region") {
 		t.Errorf("the error should name the cause: %q", got.Error)
+	}
+}
+
+// vertexProbeServer builds a server whose every outbound request, the token
+// exchange and the generation alike, lands on one fake answering the
+// generation with status.
+func vertexProbeServer(t *testing.T, status int) (*Server, *http.Cookie, string) {
+	t.Helper()
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"at","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(fake.Close)
+	target, err := url.Parse(fake.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r = r.Clone(r.Context())
+		r.URL.Scheme, r.URL.Host, r.Host = target.Scheme, target.Host, target.Host
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+
+	s, cookie, token, _ := strategyServer(t, nil, client)
+	cat := &catalog.Store{}
+	cat.Set(catalog.NewSnapshot([]catalog.Model{{
+		ProviderID: "vx", ModelID: "gemini-2.0-flash", Publisher: vertex.PublisherGoogle, State: catalog.StateLive,
+	}}, []string{"vx"}))
+	s.deps.Catalog = cat
+
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"vx","preset":"vertex","project":"proj","location":"us-central1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := json.Marshal(map[string]string{
+		"type": "service_account", "project_id": "proj", "client_email": "sa@proj.iam.gserviceaccount.com",
+		"private_key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"token_uri":   "https://oauth2.googleapis.com/token",
+	})
+	body, _ := json.Marshal(map[string]string{"label": "sa", "secret": string(doc)})
+	if w := do(t, s, cookie, token, "POST", "/api/providers/vx/keys", string(body)); w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	return s, cookie, token
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestGCPProbeDoesNotRejectAKeyOnPermissionDenied(t *testing.T) {
+	// On Google Cloud a 403 is an API not enabled, a missing IAM role or a
+	// model not enabled in the project. The key authenticated; the console
+	// deletes a rejected key, and this one is good.
+	s, cookie, token := vertexProbeServer(t, http.StatusForbidden)
+
+	got := probeProvider(t, s, cookie, token, "vx")
+	if got.OK {
+		t.Fatal("a 403 must not report success")
+	}
+	if got.Probe != "permission" {
+		t.Errorf("probe = %q, want permission", got.Probe)
+	}
+	if got.Rejected {
+		t.Errorf("a permission failure is not a rejected credential: %s", got.Error)
+	}
+}
+
+func TestGCPProbeMarksAnUnauthenticatedKeyRejected(t *testing.T) {
+	s, cookie, token := vertexProbeServer(t, http.StatusUnauthorized)
+
+	got := probeProvider(t, s, cookie, token, "vx")
+	if got.OK {
+		t.Fatal("a 401 must not report success")
+	}
+	if !got.Rejected {
+		t.Errorf("a refused credential is rejected: %s", got.Error)
 	}
 }
 
