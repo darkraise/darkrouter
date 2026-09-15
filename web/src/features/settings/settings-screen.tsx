@@ -65,7 +65,7 @@ export function settingsPatch(
       if (meta.source === "database") clear.push(field)
       continue
     }
-    if (next !== current) set[field] = next
+    if (!sameSetting(next, current, meta.kind)) set[field] = next
   }
 
   for (const field of reset) {
