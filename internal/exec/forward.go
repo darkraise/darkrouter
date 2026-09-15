@@ -119,6 +119,15 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		return adapter.OutcomeSuccess, nil
 	}
 
+	// clientGone ends a response the client stopped taking. An error event
+	// the provider already sent came first, and is what the breaker hears.
+	clientGone := func(werr error) (adapter.Outcome, *ir.Error) {
+		if failed != nil {
+			return ac.failedAfterCommit(failed)
+		}
+		return ac.clientFailed(werr)
+	}
+
 	buf := make([]byte, copyChunkBytes)
 	for {
 		n, rerr := resp.Body.Read(buf)
@@ -129,7 +138,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					return out, ierr
 				}
 				if werr := cw.Err(); werr != nil {
-					return ac.clientFailed(werr)
+					return clientGone(werr)
 				}
 			}
 			if serr != nil {
@@ -151,7 +160,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					return ac.failedAfterCommit(err)
 				}
 				if werr := cw.Err(); werr != nil {
-					return ac.clientFailed(werr)
+					return clientGone(werr)
 				}
 				return adapter.OutcomeSuccess, nil
 			}
@@ -204,7 +213,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		commit()
 	}
 	if werr := cw.Err(); werr != nil {
-		return ac.clientFailed(werr)
+		return clientGone(werr)
 	}
 	if failed != nil {
 		return ac.failedAfterCommit(failed)
