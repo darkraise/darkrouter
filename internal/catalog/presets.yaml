@@ -1760,7 +1760,7 @@ ollama-cloud:
   litellm_id: ollama
   free_tier: true
   website: https://ollama.com/settings/keys
-  models_url: https://ollama.com/api/tags
+  models_url: https://ollama.com/v1/models
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat

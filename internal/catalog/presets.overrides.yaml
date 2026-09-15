@@ -449,6 +449,10 @@ nscale:
 
 ollama-cloud:
   litellm_id: ollama
+  # OmniRoute points this at /api/tags, a native listing that names models
+  # under models[] instead of data[]. The OpenAI-compatible /v1/models answered
+  # 200 with the same 20 models when both were fetched on 2026-09-15.
+  models_url: https://ollama.com/v1/models
 
 ovhcloud:
   litellm_id: ovhcloud
