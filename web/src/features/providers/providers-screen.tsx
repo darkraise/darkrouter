@@ -833,10 +833,11 @@ export function ProvidersScreen() {
         // pagination row model for a scrolling window, so every row is
         // reachable by scrolling and only the visible ones are rendered.
         //
-        // The row height is declared, not measured, so providers-table.css
-        // pins every row to it. The two numbers have to agree.
+        // The row height is declared, not measured, so the row-height-pinned
+        // rule in globals.css pins every row to it. The two numbers have to
+        // agree.
         <div
-          className="providers-table"
+          className="providers-table row-height-pinned"
           ref={tableRef}
           style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
         >

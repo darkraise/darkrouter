@@ -147,6 +147,27 @@ describe("the requests table", () => {
     const nowrap = cell?.closest("[class*='[&_td]:whitespace-nowrap']")
     expect(nowrap).not.toBeNull()
   })
+
+  it("pins every row to the height it measured", async () => {
+    // The window places rows from that one figure, so it holds only if every
+    // row is held to it. jsdom has no layout: the height is stubbed, and the
+    // pin is read from the variable and class the stylesheet applies it by.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const h = this.tagName === "TR" && !this.classList.contains("dr-data-table-virtual-pad") ? 47.2 : 0
+      return { height: h, width: 0, top: 0, left: 0, bottom: h, right: 0, x: 0, y: 0, toJSON() {} }
+    })
+    mockRequests([{ requests: [row({ id: "r1", model: "distinctive-model" })] }])
+    await renderScreen()
+
+    const cell = await screen.findByText("distinctive-model")
+    await waitFor(() => {
+      const pinned = cell.closest<HTMLElement>(".row-height-pinned")
+      expect(pinned?.style.getPropertyValue("--row-h")).toBe("48px")
+    })
+    vi.restoreAllMocks()
+  })
 })
 
 describe("dedupeAppend", () => {

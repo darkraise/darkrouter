@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react"
 import { ChevronDown } from "lucide-react"
 import { Link, useNavigate, useParams, useRouter, useRouterState } from "@tanstack/react-router"
 import { Banner, Button, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
@@ -460,7 +460,8 @@ export function RequestsScreen() {
               here. */}
           <div
             ref={tableRef}
-            className="overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
+            className="row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
+            style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
             onClick={openRowUnderPointer}
           >
             <DataTable
