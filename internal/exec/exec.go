@@ -616,6 +616,10 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		return failBefore(adapter.OutcomeFatal, err, msgRenderFailed, ir.ErrDarkrouter)
 	}
 	if err := applyAuthorizer(ctx, hr, authorizer); err != nil {
+		if o := stoppedWaiting(r.Context(), ctx); o != "" {
+			ie := errorFor(o, err)
+			return failBefore(o, err, ie.Message, ie.Type)
+		}
 		// A credential that cannot be produced is a credential failure, not a
 		// provider one: an expired OAuth grant must cool the account rather
 		// than the upstream, which is serving everyone else fine.
@@ -980,6 +984,21 @@ func timeoutCause(b timeoutBound) error { return &timeoutError{bound: b} }
 // The deadline is checked first. Both cancel the same derived context, and if
 // the client also disappears in that instant, checking the disconnect first
 // would silently reclassify a genuine provider timeout as a client hang-up.
+// stoppedWaiting names why an attempt ended while its credential was still
+// being produced, when that was not the credential's doing: the attempt timer
+// fired, or the client (or the gateway shutting down) cancelled the request.
+// A refresh cut short that way says nothing about the account, and blaming it
+// would cool a healthy one. Empty when the authorizer failed on its own.
+func stoppedWaiting(inbound, upstream context.Context) adapter.Outcome {
+	switch {
+	case errors.Is(context.Cause(upstream), errDarkrouterTimeout):
+		return adapter.OutcomeRetryableProvider
+	case inbound.Err() != nil:
+		return adapter.OutcomeClientCancelled
+	}
+	return ""
+}
+
 func (e *Executor) classify(ad adapter.Adapter, inbound, upstream context.Context,
 	resp *http.Response, err error) adapter.Outcome {
 

@@ -193,6 +193,9 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 		return fail(adapter.OutcomeFatal, nil, err, errorFor(adapter.OutcomeFatal, err))
 	}
 	if err := applyAuthorizer(o.ctx, hr, ac.authorize); err != nil {
+		if stopped := stoppedWaiting(ac.inbound, ac.upstream); stopped != "" {
+			return fail(stopped, nil, err, errorFor(stopped, err))
+		}
 		return fail(adapter.OutcomeRetryableCredential, nil, err,
 			&ir.Error{Type: ir.ErrAuthentication, Message: msgCredentialUnavailable})
 	}
