@@ -141,7 +141,8 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 		// the decode above and is still the vendor speaking. A page that is
 		// not JSON came from something in the way.
 		var obj map[string]json.RawMessage
-		fromVendor := json.Unmarshal(raw, &obj) == nil
+		// null decodes into a map without error and leaves it nil.
+		fromVendor := json.Unmarshal(raw, &obj) == nil && obj != nil
 		if terminal(resp.StatusCode, w.Error, fromVendor) {
 			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(raw))
 		}
