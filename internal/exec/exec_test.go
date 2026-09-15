@@ -650,6 +650,85 @@ func TestAClientHangUpAfterCommitIsRecordedAsCancelled(t *testing.T) {
 	}
 }
 
+// sawMarker is a recorder that reports when a write carrying marker reaches it.
+type sawMarker struct {
+	*httptest.ResponseRecorder
+	marker string
+	once   sync.Once
+	saw    chan struct{}
+}
+
+func (s *sawMarker) Write(b []byte) (int, error) {
+	n, err := s.ResponseRecorder.Write(b)
+	if strings.Contains(string(b), s.marker) {
+		s.once.Do(func() { close(s.saw) })
+	}
+	return n, err
+}
+
+// A client may close as soon as it has read the stream's terminal event, before
+// the provider's connection has finished closing. The next upstream read then
+// fails with the cancellation, but the client received the whole response, so
+// the row records a success rather than a hang-up.
+func TestAClientClosingAfterTheTerminalEventIsASuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, path, body, events, marker string
+		dialect                                edge.Dialect
+	}{
+		{name: "openai", kind: "openaicompat", path: "/v1/chat/completions",
+			body: `{"model":"target-model","stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			events: "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+				"data: [DONE]\n\n",
+			marker: "[DONE]", dialect: openaiedge.New()},
+		{name: "anthropic", kind: "anthropic", path: "/v1/messages",
+			body: `{"model":"target-model","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			events: "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"usage\":{\"input_tokens\":1}}}\n\n" +
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"a\"}}\n\n" +
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+			marker: "message_stop", dialect: anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(tc.events))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger := &captureLogger{}
+			e := newExecutorFor(t, tc.kind, up.URL, Deps{Log: logger})
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &sawMarker{ResponseRecorder: httptest.NewRecorder(), marker: tc.marker, saw: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.saw:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the terminal event never reached the client")
+			}
+			cancel()
+			<-done
+
+			got := logger.only(t)
+			if n := len(got.Attempts); n != 1 || got.Attempts[0].Path != PathPassthrough {
+				t.Fatalf("attempts = %+v, want one forwarded attempt", got.Attempts)
+			}
+			if got.Status != "success" || got.ErrorCode != "" {
+				t.Errorf("record = status %q error %q, want success with no error code",
+					got.Status, got.ErrorCode)
+			}
+		})
+	}
+}
+
 func TestHandleSurvivesMalformedSSE(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

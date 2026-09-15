@@ -41,6 +41,8 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		usage        ir.Usage
 		// failed is an error event the provider sent after commit.
 		failed error
+		// terminated records that the event ending the response went out.
+		terminated bool
 	)
 
 	// recordWarning notes a post-commit fault on the row. Failover is
@@ -116,6 +118,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		_, _ = cw.Write(raw)
 		cw.Flush()
 		ac.resetIdle()
+		terminated = terminated || re.Terminal
 		return adapter.OutcomeSuccess, nil
 	}
 
@@ -182,6 +185,18 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				// context still gets the error event: at shutdown the server
 				// cancels it while the client is connected and reading.
 				out, ierr := ac.failedAfterCommit(cause)
+				if terminated && failed == nil && out == adapter.OutcomeClientCancelled {
+					// The client closed once it had the whole response, before
+					// the provider's connection finished closing. That is a
+					// response delivered, not one abandoned.
+					if tail := sp.flush(); len(tail) > 0 {
+						_, _ = cw.Write(tail)
+					}
+					if werr := cw.Err(); werr != nil {
+						return clientGone(werr)
+					}
+					return adapter.OutcomeSuccess, nil
+				}
 				// Spec §9: after commit a failure becomes an in-stream error.
 				// Whatever the splitter still holds goes out first, so the
 				// error event lands on an event boundary rather than inside a
