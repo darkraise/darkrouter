@@ -86,7 +86,7 @@ func (o *transcriptionOp) Respond(cw *CommitWriter, resp *http.Response, ac *Att
 		cw.Header().Set("Content-Type", ct)
 		_, _ = cw.Write(raw)
 		ac.Rec.ResponseBytes = cw.Bytes()
-		return adapter.OutcomeSuccess, nil
+		return ac.delivered(cw)
 	}
 
 	// Text and SSE alike are opaque and are forwarded with a flush per chunk.

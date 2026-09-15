@@ -175,6 +175,16 @@ func (ac *AttemptCtx) clientFailed(werr error) (adapter.Outcome, *ir.Error) {
 	return ac.failedAfterCommit(fmt.Errorf("%w: %w", errClientWrite, werr))
 }
 
+// delivered ends a response once its last write is done: a success, or the
+// client's hang-up when a write to it failed. The provider delivered either
+// way, so neither is a failure against it.
+func (ac *AttemptCtx) delivered(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
+	if werr := cw.Err(); werr != nil {
+		return ac.clientFailed(werr)
+	}
+	return adapter.OutcomeSuccess, nil
+}
+
 // beginWrite and endWrite keep idle from running while a write to the client
 // blocks. Idle bounds a provider that goes silent; a response stalled behind a
 // client that stopped reading is bounded by the listener's write deadline, and
@@ -355,7 +365,7 @@ func (o *chatOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx) 
 	ac.served(append(ac.Warns, out.Warnings...))
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteResponse(cw, out)
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
 
 // RunSurface is the entry point for a route whose request is already parsed.
