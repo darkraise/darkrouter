@@ -7,25 +7,6 @@
             "parts": [
               {
                 "text": "91 = 7 * 13",
-                "thought": true
-              }
-            ],
-            "role": "model"
-          },
-          "index": 0
-        }
-      ],
-      "modelVersion": "target-model"
-    }
-  },
-  {
-    "data": {
-      "candidates": [
-        {
-          "content": {
-            "parts": [
-              {
-                "text": "",
                 "thought": true,
                 "thoughtSignature": "ErUBCkYIBRgCIkA="
               }
