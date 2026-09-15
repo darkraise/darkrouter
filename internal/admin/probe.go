@@ -210,7 +210,10 @@ func (s *Server) runProbe(ctx context.Context, row store.ProviderRow,
 	}
 
 	count, err := s.countListing(ctx, pr)
-	return "listing", count, err
+	if err != nil {
+		return listingProbeKind(err), count, err
+	}
+	return "listing", count, nil
 }
 
 // countListing reads every page of a listing through discovery's own loop, so
@@ -221,8 +224,23 @@ func (s *Server) countListing(ctx context.Context, pr catalog.Probe) (int, error
 	return len(models), err
 }
 
+// refusedPermission marks a probe the provider refused without refusing the
+// credential: the key authenticated, or may have, and something about the
+// account, project or key restrictions stopped the call.
+type refusedPermission struct{ error }
+
+func (e refusedPermission) Unwrap() error { return e.error }
+
+// listingProbeKind names what a failed listing probe found.
+func listingProbeKind(err error) string {
+	if errors.As(err, new(refusedPermission)) {
+		return "permission"
+	}
+	return "listing"
+}
+
 func classifyProbeListing(resp *http.Response) error {
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return rejectedCredential{
 			errors.New("the provider rejected this credential: " + resp.Status)}
 	}
@@ -236,6 +254,19 @@ func classifyProbeListing(resp *http.Response) error {
 		return rejectedCredential{errors.New(
 			"the provider rejected this credential: " + resp.Status + ": " +
 				upstreamMessage(bytes.NewReader(raw)))}
+	}
+	// A 403 is not a bad key. OpenAI sends one for an unsupported country,
+	// Anthropic for a key without a permission, and Gemini for a disabled API,
+	// a key restriction, or a key it reports as leaked — a flag Google has
+	// raised on working keys. A new key would meet every one of them again.
+	if resp.StatusCode == http.StatusForbidden {
+		msg := "the provider refused this call: " + resp.Status
+		if why := upstreamMessage(bytes.NewReader(raw)); why != "" {
+			msg += ": " + why
+		}
+		return refusedPermission{errors.New(msg +
+			"; the credential was not refused, so check the account's permissions, " +
+			"region and any restrictions on the key")}
 	}
 	// The status alone is a poor answer when the provider said something
 	// specific: "Bad Gateway" for a local CLI that is merely logged out
@@ -516,5 +547,8 @@ func (s *Server) probeOAuth(ctx context.Context, row store.ProviderRow,
 		}
 		return "refresh", 0, err
 	}
-	return "listing", count, err
+	if err != nil {
+		return listingProbeKind(err), count, err
+	}
+	return "listing", count, nil
 }
