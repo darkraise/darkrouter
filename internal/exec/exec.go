@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"time"
@@ -487,11 +488,17 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	// moved once set.
 	ctx, cancel := context.WithCancelCause(r.Context())
 	defer cancel(nil)
-	timer := time.AfterFunc(time.Until(bud.attemptDeadline(time.Now())), func() {
-		cancel(errDarkrouterTimeout)
+	// The pre-commit bound is connect and first_byte together; whether a
+	// connection was reached is what tells the operator which one ran out.
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { ac.connected.Store(true) },
+	})
+	ac.bud = bud
+	timer := time.AfterFunc(time.Until(ac.sendDeadline(time.Now())), func() {
+		cancel(ac.firedCause())
 	})
 	defer timer.Stop()
-	ac.Timer, ac.bud = timer, bud
+	ac.Timer = timer
 	ac.inbound, ac.upstream = r.Context(), ctx
 
 	path := PathIR
@@ -900,7 +907,43 @@ func (ac *AttemptCtx) recordFailure(o adapter.Outcome, resp *http.Response, err 
 	ac.recordHealth(o, resp)
 }
 
-var errDarkrouterTimeout = errors.New("darkrouter: total timeout exceeded")
+// errDarkrouterTimeout is what every attempt-timer cause matches with
+// errors.Is, whichever bound fired.
+var errDarkrouterTimeout = errors.New("darkrouter: timeout exceeded")
+
+// timeoutBound names the policy.timeout setting an attempt's timer is
+// enforcing.
+type timeoutBound int32
+
+const (
+	boundFirstByte timeoutBound = iota
+	boundConnect
+	boundIdle
+	boundTotal
+)
+
+func (b timeoutBound) String() string {
+	switch b {
+	case boundConnect:
+		return "connect"
+	case boundIdle:
+		return "idle"
+	case boundTotal:
+		return "total"
+	default:
+		return "first_byte"
+	}
+}
+
+type timeoutError struct{ bound timeoutBound }
+
+func (e *timeoutError) Error() string {
+	return "darkrouter: " + e.bound.String() + " timeout exceeded"
+}
+
+func (e *timeoutError) Is(target error) bool { return target == errDarkrouterTimeout }
+
+func timeoutCause(b timeoutBound) error { return &timeoutError{bound: b} }
 
 // classify asks the adapter, then overrides for the two cases no adapter can
 // see: a Darkrouter-imposed deadline, and a cancellation whose origin is the
