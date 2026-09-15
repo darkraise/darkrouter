@@ -202,6 +202,94 @@ describe("an alias added somewhere else", () => {
   })
 })
 
+describe("a refetch that brings another admin's save", () => {
+  function mountRefetchable(initial: Record<string, string[]>) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (aliases: Record<string, string[]>) => (
+      <QueryClientProvider client={client}>
+        <AliasEditor aliases={aliases} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(initial))
+    return (next: Record<string, string[]>) => rerender(view(next))
+  }
+
+  function saveBody(): Record<string, string[]> {
+    const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][]
+    const last = calls.at(-1)
+    if (!last) throw new Error("expected a save")
+    return JSON.parse(last[1].body as string) as Record<string, string[]>
+  }
+
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    toast.dismiss()
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ valid: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ))
+  })
+
+  it("takes the server's value for a chain the operator never touched", async () => {
+    // PUT replaces the whole map. A stale copy of an untouched chain sent
+    // with a fresh If-Match would overwrite the other admin's edit.
+    const refetch = mountRefetchable({ chain: ["groq/a"], gone: ["groq/g"] })
+    refetch({ chain: ["groq/theirs"] })
+
+    expect(screen.getByText("groq/theirs")).toBeInTheDocument()
+    expect(screen.queryByText("gone")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(saveBody()).toEqual({ chain: ["groq/theirs"] }))
+  })
+
+  it("keeps the operator's own additions, deletions and edits", async () => {
+    const refetch = mountRefetchable({ chain: ["groq/a"], doomed: ["groq/d"] })
+    const user = userEvent.setup()
+
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[1] as HTMLElement)
+    await user.click(screen.getByRole("button", { name: "Remove chain" }))
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/a"], doomed: ["groq/d"], other: ["groq/o"] })
+
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/mine")
+    expect(screen.queryByText("doomed")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(saveBody()).toEqual({ chain: ["groq/mine"], other: ["groq/o"] }),
+    )
+  })
+
+  it("says which of the operator's chains the server also changed", () => {
+    // The operator's edit is kept, so the next Save overwrites the other
+    // admin's. That has to be a choice made knowing it, not a surprise.
+    const refetch = mountRefetchable({ chain: ["groq/a"], quiet: ["groq/q"] })
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0] as HTMLElement)
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/theirs"], quiet: ["groq/q"] })
+
+    expect(screen.getByLabelText("chain target 1")).toHaveValue("groq/mine")
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("chain")
+    expect(alert).not.toHaveTextContent("quiet")
+  })
+
+  it("does not report the operator's own save as someone else's change", () => {
+    const refetch = mountRefetchable({ chain: ["groq/a"] })
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/mine" } })
+
+    refetch({ chain: ["groq/mine"] })
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+})
+
 describe("AliasEditor keyboard reorder", () => {
   it("moves a target with the buttons, for whoever cannot drag", async () => {
     // Drag and drop is pointer-only. The fallback order is the whole point
