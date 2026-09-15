@@ -60,7 +60,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// they do for gemini and anthropic.
 	sysBlocks, sysWarns := xlate.CollectSystemBlocks(req, targetName)
 	warns = append(warns, sysWarns...)
-	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model), toolPoints: isAnthropicModel(t.Model)}
+	marks := &cacheMarks{hourTTL: hourCacheModel(t.Model), toolPoints: toolCacheModel(t.Model)}
 
 	// Converse forwards all of this to Claude's native request, so the shapes
 	// a generation refuses, and the controls Anthropic rejects while thinking
@@ -179,7 +179,8 @@ type cacheMarks struct {
 	hourTTL  bool
 	sentFive bool
 	// toolPoints is whether the model takes a cachePoint in tools. AWS lists
-	// tools among the checkpoint fields for Claude models only.
+	// tools among the checkpoint fields for the Claude models in its caching
+	// table only.
 	toolPoints bool
 }
 
@@ -231,18 +232,37 @@ var hourCacheModels = []string{
 	"haiku-4-5",
 }
 
+// toolCacheModels are the Claude families in the same AWS table, every one of
+// which lists tools among its checkpoint fields. Claude models missing from it,
+// such as Sonnet 4, Opus 4 and 4.1, and the 3.x Haiku models, are sent no tool
+// cachePoint.
+var toolCacheModels = append([]string{
+	"3-7-sonnet", "3-5-sonnet-20241022-v2",
+}, hourCacheModels...)
+
 // hourCacheModel reports whether a Bedrock model id names a model that takes a
 // one-hour cache TTL. An id that does not name its model, such as an
 // application inference profile ARN, is not assumed to: the one-hour marker
 // degrades to five minutes rather than failing the request.
 func hourCacheModel(model string) bool {
+	return claudeFamilyIn(model, hourCacheModels)
+}
+
+// toolCacheModel reports whether a Bedrock model id names a model that takes a
+// cachePoint in tools. As with hourCacheModel, an id that does not name its
+// model is not assumed to.
+func toolCacheModel(model string) bool {
+	return claudeFamilyIn(model, toolCacheModels)
+}
+
+func claudeFamilyIn(model string, families []string) bool {
 	m := strings.ToLower(model)
 	i := strings.Index(m, "anthropic.claude-")
 	if i < 0 {
 		return false
 	}
 	family := m[i+len("anthropic.claude-"):]
-	for _, p := range hourCacheModels {
+	for _, p := range families {
 		if strings.HasPrefix(family, p) {
 			return true
 		}

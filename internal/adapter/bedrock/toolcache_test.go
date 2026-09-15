@@ -95,3 +95,31 @@ func TestToolCacheControlIsDroppedForANonClaudeModel(t *testing.T) {
 		t.Errorf("tool marker dropped without a warning: %+v", warns)
 	}
 }
+
+// AWS's explicit caching table is the list of models that take a tool
+// cachePoint. A Claude model missing from it is sent the tool without one.
+func TestToolCachePointFollowsAWSsCachingTable(t *testing.T) {
+	for model, want := range map[string]bool{
+		"us.anthropic.claude-3-7-sonnet-20250219-v1:0": true,
+		"anthropic.claude-3-5-sonnet-20241022-v2:0":    true,
+		"global.anthropic.claude-opus-4-6-v1":          true,
+		"us.anthropic.claude-sonnet-4-20250514-v1:0":   false,
+		"us.anthropic.claude-opus-4-20250514-v1:0":     false,
+		"us.anthropic.claude-opus-4-1-20250805-v1:0":   false,
+		"anthropic.claude-3-5-haiku-20241022-v1:0":     false,
+		"anthropic.claude-3-haiku-20240307-v1:0":       false,
+		"anthropic.claude-3-5-sonnet-20240620-v1:0":    false,
+	} {
+		req := simple()
+		req.Model = model
+		req.Tools = []ir.Tool{{Name: "f", Extra: map[string]json.RawMessage{"cache_control": json.RawMessage(`{"type":"ephemeral"}`)}}}
+		body, _, warns := build(t, anthropicTarget(model), req)
+		tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+		if got := len(tools) == 2; got != want {
+			t.Errorf("%s: tools = %#v, want a tool cachePoint: %v", model, tools, want)
+		}
+		if dropped := hasWarning(warns, "tools[].cache_control"); dropped == want {
+			t.Errorf("%s: drop warning = %v, want %v: %+v", model, dropped, !want, warns)
+		}
+	}
+}
