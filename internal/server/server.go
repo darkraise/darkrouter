@@ -719,8 +719,8 @@ func (s *Server) Run(ctx context.Context) error {
 		Handler: s.ProxyHandler(),
 		// No WriteTimeout: it would kill long streams at a fixed age. Slowloris
 		// protection comes from ReadHeaderTimeout; ReadTimeout bounds a client
-		// that sends its body at a trickle; the handler's writeDeadlines
-		// bounds a client that stops reading, one write at a time.
+		// that sends its body at a trickle; writedeadline.Handler around the
+		// proxy handler bounds a client that stops reading, one write at a time.
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		IdleTimeout:       idleTimeout,
