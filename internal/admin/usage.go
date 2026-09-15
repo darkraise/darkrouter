@@ -136,7 +136,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		// arcs is worse than an overview that fails to load.
 		edges = []store.FailoverEdge{}
 	}
-	series, err := s.deps.DB.UsageBy(r.Context(), time.Now(), 30, store.UsageByDayOnly)
+	series, err := s.deps.DB.UsageBy(r.Context(), s.now(), 30, store.UsageByDayOnly)
 	if err != nil {
 		series = []store.UsageRow{}
 	}
@@ -145,7 +145,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// as the day's, so it is sourced from the day rather than from
 	// overviewWindow, or a busy gateway would report a few minutes of spend
 	// as though it were the whole day.
-	spendMicros, spendPriced, spendEstimated, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(time.Now()))
+	spendMicros, spendPriced, spendEstimated, err := s.deps.DB.SpendSince(r.Context(), startOfUTCDay(s.now()))
 	if err != nil {
 		internalError(w, r, err)
 		return
@@ -199,7 +199,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
+	now := s.now()
 	rows, err := s.deps.DB.UsageBy(r.Context(), now, days, dim)
 	if err != nil {
 		internalError(w, r, err)
