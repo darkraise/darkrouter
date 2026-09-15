@@ -24,6 +24,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/router"
 	"github.com/darkraise/darkrouter/internal/store"
 )
@@ -524,6 +525,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 	ac.authorize = authorizer
+	ac.secret = secretOf(p, c.KeyID, styleOf(p))
 	// The endpoint is per credential for a provider whose base URL carries an
 	// account, so this resolves after the credential is chosen and fails the
 	// same way: the next credential may well carry the account this one lacks.
@@ -600,6 +602,9 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 
 	attemptStart := time.Now()
 	resp, doErr := e.client.Do(hr)
+	// A query-param key is in the URL a transport error quotes, and this text
+	// goes to the attempt row and to the client.
+	doErr = redact.Error(doErr, ac.secret)
 	ac.resp = resp
 	outcome := e.classify(ac.Adapter, r.Context(), ctx, resp, doErr)
 
@@ -1112,10 +1117,7 @@ func applyAuthorizer(ctx context.Context, hr *http.Request, a auth.Authorizer) e
 func (e *Executor) credentialFor(ctx context.Context, p provider.Provider,
 	c router.Candidate) (string, auth.Authorizer, error) {
 
-	style := p.AuthStyle
-	if style == "" {
-		style = presetStyle(p.Preset)
-	}
+	style := styleOf(p)
 	secret := secretOf(p, c.KeyID, style)
 	switch style {
 	case auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam:
@@ -1167,6 +1169,14 @@ func credentialKind(p provider.Provider, keyID string) string {
 // override it. It mirrors rerankPath, which already reaches presets from here.
 func presetStyle(preset string) string {
 	return presetAuth(preset).Style
+}
+
+// styleOf is the provider's effective auth style: the row's, else its preset's.
+func styleOf(p provider.Provider) string {
+	if p.AuthStyle != "" {
+		return p.AuthStyle
+	}
+	return presetStyle(p.Preset)
 }
 
 // secretOf resolves the bare credential for one candidate. The style is the

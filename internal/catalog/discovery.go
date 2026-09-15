@@ -8,9 +8,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -345,15 +344,7 @@ func (d *Discoverer) probe(ctx context.Context, p provider.Provider) {
 func (d *Discoverer) recordFailure(ctx context.Context, providerID string, at time.Time,
 	cause error, secrets ...string) {
 
-	msg := cause.Error()
-	for _, s := range secrets {
-		if s == "" {
-			continue
-		}
-		for _, form := range []string{url.QueryEscape(s), url.PathEscape(s), s} {
-			msg = strings.ReplaceAll(msg, form, "[redacted]")
-		}
-	}
+	msg := redact.Error(cause, secrets...).Error()
 	if err := d.db.RecordDiscoveryFailure(context.WithoutCancel(ctx), providerID, at, msg); err != nil {
 		slog.Error("discovery: recording failure failed", "provider", providerID, "err", err)
 	}

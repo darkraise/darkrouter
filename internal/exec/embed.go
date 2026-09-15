@@ -11,6 +11,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/edge"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/router"
 )
 
@@ -183,6 +184,7 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 	// for the previous body would otherwise have to cover.
 	ac.resetIdle()
 	resp, doErr := ac.Exec.client.Do(hr)
+	doErr = redact.Error(doErr, ac.secret)
 	ac.resp = resp
 	outcome := ac.Exec.classify(ac.Adapter, ac.inbound, ac.upstream, resp, doErr)
 	if outcome != adapter.OutcomeSuccess {

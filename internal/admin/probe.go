@@ -18,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider"
+	"github.com/darkraise/darkrouter/internal/redact"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -107,7 +108,8 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		// could not finish — a timeout, a rate limit, an outage — so a caller
 		// deciding whether to discard the key does not discard a good one.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "probe": kind, "latency_ms": latency, "error": perr.Error(),
+			"ok": false, "probe": kind, "latency_ms": latency,
+			"error":    redact.Error(perr, cred.Secret).Error(),
 			"rejected": errors.As(perr, new(rejectedCredential)),
 		})
 		return
