@@ -23,8 +23,8 @@ const maxEmbeddingBytes = 32 << 20
 func (a *Adapter) BuildEmbedding(ctx context.Context, t *adapter.Target,
 	req *ir.EmbeddingRequest) (*http.Request, []ir.Warning, error) {
 
-	if t.Project == "" || t.Location == "" {
-		return nil, nil, fmt.Errorf("vertex target needs a project and a location")
+	if err := CheckEndpoint(t.Project, t.Location); err != nil {
+		return nil, nil, err
 	}
 	if publisherOf(t) != PublisherGoogle {
 		return nil, nil, fmt.Errorf("vertex publisher %q serves no embedding model", t.Publisher)
