@@ -169,11 +169,10 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					cause = failed
 				}
 				// Classified before anything more is written, since a client
-				// that is gone fails those writes as well.
+				// that is gone fails those writes as well. A cancelled request
+				// context still gets the error event: at shutdown the server
+				// cancels it while the client is connected and reading.
 				out, ierr := ac.failedAfterCommit(cause)
-				if out == adapter.OutcomeClientCancelled {
-					return out, ierr
-				}
 				// Spec §9: after commit a failure becomes an in-stream error.
 				// Whatever the splitter still holds goes out first, so the
 				// error event lands on an event boundary rather than inside a

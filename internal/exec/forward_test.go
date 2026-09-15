@@ -262,6 +262,32 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	}
 }
 
+// At shutdown the server cancels every request context while the clients are
+// still connected and reading, and the upstream read fails with that
+// cancellation. Nothing has failed at the client, so the stream still owes it
+// a terminal error event rather than simply stopping.
+func TestForwardStreamStillEndsWithAnErrorEventWhenTheRequestIsCancelled(t *testing.T) {
+	cw, ac := forwardFixture(t)
+	inbound, cancel := context.WithCancel(context.Background())
+	cancel()
+	ac.inbound = inbound
+	body := "data: c-first\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: context.Canceled}),
+	}
+	se := &recordedStreamError{}
+	out, _ := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
+	if out != adapter.OutcomeClientCancelled {
+		t.Errorf("outcome = %v, want %v", out, adapter.OutcomeClientCancelled)
+	}
+	want := body + "data: {\"error\":\"" + msgUpstreamReadFailed + "\"}\n\n"
+	if got := recorderBody(cw); got != want {
+		t.Errorf("client saw %q, want %q", got, want)
+	}
+}
+
 func TestForwardStreamEndsWithOneErrorEventWhenTheProviderSentOne(t *testing.T) {
 	// A provider can announce its failure in an error event and then drop the
 	// connection, as a local CLI does. The client has its error already; a
