@@ -623,6 +623,9 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 			msgCredentialUnavailable, ir.ErrAuthentication)
 	}
 
+	// A credential refreshed above reached its token endpoint through ctx,
+	// and the trace counted that connection as this send's.
+	ac.connected.Store(false)
 	ac.sent = time.Now()
 	resp, doErr := e.client.Do(hr)
 	// A query-param key is in the URL a transport error quotes, and this text
