@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { TestDrawer, logLine } from "./test-drawer"
+import { TestDrawer, conversationHistory, logLine } from "./test-drawer"
 import type { ProviderRow } from "./provider-rows"
 
 vi.mock("@tanstack/react-router", () => ({
@@ -675,5 +675,32 @@ describe("aiming the drawer at another provider", () => {
     expect(screen.getByLabelText("Model")).toHaveValue("")
     expect(screen.queryByText("ok")).not.toBeInTheDocument()
     expect(screen.getByText(/not tested yet/i)).toBeInTheDocument()
+  })
+})
+
+describe("conversationHistory", () => {
+  const thinking = { role: "assistant" as const, content: "", reasoning: "thinking it over" }
+
+  it("keeps an answered prompt when the prompt folded into it fails", () => {
+    const history = conversationHistory([
+      { role: "user", content: "remember the number 7" },
+      thinking,
+      { role: "user", content: "which number?" },
+      { role: "assistant", content: "upstream exploded", failed: true },
+    ])
+    expect(history).toEqual([{ role: "user", content: "remember the number 7" }])
+  })
+
+  it("drops only the last folded prompt when several were folded", () => {
+    const history = conversationHistory([
+      { role: "user", content: "one" },
+      thinking,
+      { role: "user", content: "two" },
+      thinking,
+      { role: "user", content: "three" },
+      { role: "assistant", content: "", stopped: true },
+      { role: "user", content: "four" },
+    ])
+    expect(history).toEqual([{ role: "user", content: "one\n\ntwo\n\nfour" }])
   })
 })

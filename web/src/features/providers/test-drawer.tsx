@@ -73,24 +73,40 @@ export type Turn = {
  * A reply that carried only reasoning did answer its prompt, so the prompt
  * stays; there is just no text to send back. The prompt after it is folded
  * into the same user turn, because two user turns in a row are refused by a
- * provider that holds to strict alternation.
+ * provider that holds to strict alternation. A failure after that takes back
+ * only the prompt it failed to answer, not the answered ones it was folded
+ * into; leaving it unfolded instead would send two user turns in a row.
  */
 export function conversationHistory(turns: Turn[]): Turn[] {
   const out: Turn[] = []
+  // The prompts each user turn in `out` was folded from, so the last one can
+  // be taken back out.
+  const prompts: string[][] = []
   for (const turn of turns) {
     const prev = out[out.length - 1]
     if (turn.role === "assistant") {
       const reasoningOnly = turn.content === "" && !!turn.reasoning && !turn.failed && !turn.stopped
       if (reasoningOnly) continue
       if (turn.failed || turn.stopped || turn.content === "") {
-        if (prev?.role === "user") out.pop()
+        if (prev?.role === "user") {
+          const parts = prompts[prompts.length - 1]!
+          parts.pop()
+          if (parts.length === 0) {
+            out.pop()
+            prompts.pop()
+          } else {
+            out[out.length - 1] = { ...prev, content: parts.join("\n\n") }
+          }
+        }
         continue
       }
     } else if (prev?.role === "user") {
+      prompts[prompts.length - 1]!.push(turn.content)
       out[out.length - 1] = { ...prev, content: `${prev.content}\n\n${turn.content}` }
       continue
     }
     out.push(turn)
+    prompts.push(turn.role === "user" ? [turn.content] : [])
   }
   return out
 }
