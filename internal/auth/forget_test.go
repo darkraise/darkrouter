@@ -241,3 +241,75 @@ func TestForgetDropsACachedToken(t *testing.T) {
 		t.Errorf("Authorization = %q, want the replaced credential's token", got)
 	}
 }
+
+// The vendor rotated the pair and the database refused the write, and then an
+// operator disabled the credential. While the write keeps failing the rotated
+// token is the only copy, and it went on serving past the disable because the
+// unsaved rotation took priority over re-reading the row.
+func TestForgetStopsAnUnpersistedRotationServing(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	m := oauthManager(t, srv, tokens)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1000
+	tokens.mu.Unlock()
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+
+	m.Forget("cred-1")
+	r := blank(t)
+	if err := az(context.Background(), r); err == nil {
+		t.Errorf("a forgotten credential authorized with %q while its row could not be reconciled",
+			r.Header.Get("Authorization"))
+	}
+
+	// The row still holds the predecessor, so once the database answers the
+	// rotation is saved rather than lost.
+	tokens.mu.Lock()
+	tokens.failWrites = 0
+	tokens.mu.Unlock()
+	r = blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatalf("after the database recovered: %v", err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-1" {
+		t.Errorf("Authorization = %q, want the saved rotation's token", got)
+	}
+	stored, err := ParseToken([]byte(tokens.stored("cred-1")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.RefreshToken != "rt-1" {
+		t.Errorf("stored refresh token = %q, want rt-1", stored.RefreshToken)
+	}
+}
+
+// The same unsaved rotation, but the operator replaced the secret. Once the
+// database answers, the write finds the row moved on and the replacement
+// serves: the rotation descends from a secret the operator discarded.
+func TestForgetAfterAReplacementDropsAnUnpersistedRotation(t *testing.T) {
+	_, srv := newAuthServer(t)
+	tokens := newMemTokens()
+	m := oauthManager(t, srv, tokens)
+	az := oauthAz(t, m, expiring(t, -time.Minute))
+
+	tokens.mu.Lock()
+	tokens.failWrites = 1
+	tokens.mu.Unlock()
+	if err := az(context.Background(), blank(t)); err != nil {
+		t.Fatalf("rotation: %v", err)
+	}
+
+	tokens.seed("cred-1", replacementSecret(t))
+	m.Forget("cred-1")
+	r := blank(t)
+	if err := az(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Get("Authorization"); got != "Bearer at-replaced" {
+		t.Errorf("Authorization = %q, want the replacement's token", got)
+	}
+}
