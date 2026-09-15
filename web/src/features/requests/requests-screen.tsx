@@ -405,12 +405,14 @@ export function RequestsScreen() {
         />
       ) : (
         <>
-          {/* A failed poll on a screen that already has rows is a staleness
+          {/* A failed poll on a screen that has already loaded is a staleness
               note, not an alarm: the rows below are real, just older than
-              they look. */}
-          {first.isError && held && held.requests.length > 0 && (
+              they look, and an empty log may have filled since. */}
+          {first.isError && held && (
             <p className="mb-2 text-sm text-[hsl(var(--warning))]">
-              last refresh failed — rows may be stale
+              {held.requests.length > 0
+                ? "last refresh failed — rows may be stale"
+                : "last refresh failed — requests may have arrived since"}
             </p>
           )}
           {/* Scrolls sideways inside its own box rather than pushing the page
