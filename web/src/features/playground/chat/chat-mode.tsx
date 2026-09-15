@@ -76,6 +76,15 @@ type PendingExchange = {
   id: string
   /** Set once the question is stored, so a retry sends only the answer. */
   userSeq: number | null
+  /** Its last save failed in a way that may pass on retry. */
+  failed: boolean
+}
+
+/** Exchanges of one thread share a key before and after its conversation is
+ *  created, so one still waiting on the create cannot jump ahead of one that
+ *  already has the id. */
+function queueOf(exchange: PendingExchange): string {
+  return exchange.id !== "" ? exchange.id : `selection:${exchange.owner.selection}`
 }
 
 /** A network failure, a server fault, a timeout or a rate limit can pass on a
@@ -155,22 +164,36 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // storing its question twice.
   const backlog = useRef<PendingExchange[]>([])
   const draining = useRef(false)
+  // A drain asked for while one runs, by a discard or a retry, starts another
+  // pass once it ends rather than being dropped.
+  const drainAgain = useRef(false)
   // How many are held after a failure that may pass on retry. Later exchanges
-  // wait behind them, because saving past one would scramble the order too.
+  // of the same conversation wait behind them, because saving past one would
+  // scramble the order too; other conversations' exchanges do not.
   const [unsaved, setUnsaved] = useState(0)
 
   function persistTurn(turn: CompletedTurn, owner: ExchangeOwner) {
-    backlog.current.push({ turn, owner, id: owner.id, userSeq: null })
+    backlog.current.push({ turn, owner, id: owner.id, userSeq: null, failed: false })
     void drain()
   }
 
   async function drain() {
-    if (draining.current) return
+    if (draining.current) {
+      drainAgain.current = true
+      return
+    }
     draining.current = true
+    let blocked = new Set<string>()
     try {
       for (;;) {
-        const next = backlog.current[0]
-        if (next === undefined) break
+        const next = backlog.current.find((exchange) => !blocked.has(queueOf(exchange)))
+        if (next === undefined) {
+          if (!drainAgain.current) break
+          drainAgain.current = false
+          blocked = new Set()
+          continue
+        }
+        next.failed = false
         try {
           await saveExchange(next)
         } catch (err) {
@@ -179,14 +202,26 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           // with it. A refusal -- saving switched off, the conversation
           // deleted -- will refuse again, so only a failure that can pass is
           // held for another try.
-          if (mayPassOnRetry(err)) break
+          if (mayPassOnRetry(err)) {
+            next.failed = true
+            blocked.add(queueOf(next))
+            continue
+          }
         }
-        backlog.current.shift()
+        backlog.current = backlog.current.filter((exchange) => exchange !== next)
       }
     } finally {
       draining.current = false
       setUnsaved(backlog.current.length)
     }
+  }
+
+  // Only exchanges whose last save failed: one mid-save has failed cleared,
+  // and one merely waiting behind a failure was never tried.
+  function discardFailed() {
+    backlog.current = backlog.current.filter((exchange) => !exchange.failed)
+    setUnsaved(backlog.current.length)
+    void drain()
   }
 
   async function saveExchange(exchange: PendingExchange) {
@@ -212,6 +247,9 @@ export function ChatMode({ active = true }: { active?: boolean }) {
         }
         const made = await pending
         id = made.id
+        for (const waiting of backlog.current) {
+          if (waiting.id === "" && waiting.owner.selection === owner.selection) waiting.id = id
+        }
         exchange.id = id
         if (selectionGeneration.current === owner.selection) {
           conversationRef.current = id
@@ -445,12 +483,16 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           <div role="alert" className="flex flex-wrap items-center gap-2">
             <p className="text-sm text-[hsl(var(--destructive))]">
               {unsaved === 1
-                ? "1 exchange was not saved. Newer exchanges wait for it"
-                : `${unsaved} exchanges were not saved. Newer exchanges wait for them`}
-              , so the stored conversation keeps the order they were sent in.
+                ? "1 exchange was not saved. Newer exchanges in its conversation wait for it"
+                : `${unsaved} exchanges were not saved. Newer exchanges in the same conversation wait for them`}
+              , so the stored conversation keeps the order they were sent in. Discard leaves a
+              failed exchange on screen but out of the stored conversation.
             </p>
             <Button variant="outline" size="sm" onClick={() => void drain()}>
               Retry saving
+            </Button>
+            <Button variant="outline" size="sm" onClick={discardFailed}>
+              Discard
             </Button>
           </div>
         ) : null}
