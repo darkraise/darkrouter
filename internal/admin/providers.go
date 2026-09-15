@@ -456,8 +456,23 @@ func (s *Server) reloadProviders(ctx context.Context) error {
 }
 
 // writeRoutingNotUpdated answers a committed write the router did not load.
+// routing_updated is what lets a client tell this 500 from a write that never
+// happened, and so not repeat it.
 func writeRoutingNotUpdated(w http.ResponseWriter) {
-	writeError(w, http.StatusInternalServerError, errRoutingNotUpdated.Error())
+	writeJSON(w, http.StatusInternalServerError, map[string]any{
+		"error": errRoutingNotUpdated.Error(), "routing_updated": false,
+	})
+}
+
+// createdReply is the body of a create that committed. A reload failure does
+// not turn it into an error: the row exists, and an error invites the retry
+// that stores a second copy of it.
+func createdReply(fields map[string]any, reloadErr error) map[string]any {
+	fields["routing_updated"] = reloadErr == nil
+	if reloadErr != nil {
+		fields["warning"] = errRoutingNotUpdated.Error()
+	}
+	return fields
 }
 
 // forgetCredential drops any in-memory state the auth manager derived from a
@@ -523,10 +538,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	if err := s.reloadProviders(afterCommit(r)); err != nil {
-		writeRoutingNotUpdated(w)
-		return
-	}
+	reloadErr := s.reloadProviders(afterCommit(r))
 	// Only on the first one. A bulk import of twenty keys would otherwise ask
 	// the provider to list its models twenty times, against a rate limit the
 	// operator has just finished telling us they care about — and the second
@@ -537,7 +549,7 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 	// The id and the label, never the secret — not even the one just supplied.
 	// Echoing it back would put it in a response body, a proxy log and a
 	// browser's network panel for no reason.
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "label": body.Label})
+	writeJSON(w, http.StatusCreated, createdReply(map[string]any{"id": id, "label": body.Label}, reloadErr))
 }
 
 func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {

@@ -390,3 +390,37 @@ func TestCompleteGivesUpOnATokenEndpointThatNeverAnswers(t *testing.T) {
 		t.Fatal("the completion is still waiting on a token endpoint that will never answer")
 	}
 }
+
+// An OAuth completion that stored its credential and then could not reload
+// must still hand back the credential: reported as a failure, the operator
+// reconnects and a second credential is stored for the same account.
+func TestACompletionTheRouterDidNotLoadReturnsTheCredential(t *testing.T) {
+	s, cookie, token, _ := serverWithFakeAuthServer(t)
+	id := oauthProvider(t, s, cookie, token)
+	breakNextReload(t, s, cookie, token)
+	start := startFlow(t, s, cookie, token, id, `{"label":"personal"}`)
+
+	pasted := "http://localhost/callback?code=the-code&state=" + url.QueryEscape(start.State)
+	body, _ := json.Marshal(map[string]string{"redirected_url": pasted})
+	w := do(t, s, cookie, token, "POST", "/api/providers/"+id+"/oauth/complete", string(body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("complete = %d %s; the credential was stored", w.Code, w.Body.String())
+	}
+	got := decodeRouting(t, w.Body.Bytes())
+	if got.CredentialID == "" {
+		t.Error("no credential id in the reply")
+	}
+	if got.RoutingUpdated == nil || *got.RoutingUpdated {
+		t.Errorf("routing_updated = %v, want false", got.RoutingUpdated)
+	}
+	if !strings.Contains(got.Warning, "saved") {
+		t.Errorf("warning = %q; it must say the change was saved but not loaded", got.Warning)
+	}
+	creds, err := s.deps.DB.CredentialSummaries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(creds[id]) != 1 {
+		t.Errorf("credentials = %+v, want the one stored", creds[id])
+	}
+}
