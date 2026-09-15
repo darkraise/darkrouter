@@ -316,10 +316,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, r, err)
 		return
 	}
-	if err := s.reloadProviders(afterCommit(r)); err != nil {
-		writeRoutingNotUpdated(w)
-		return
-	}
+	reloadErr := s.reloadProviders(afterCommit(r))
 	// A keyless provider is discoverable the moment it exists: the sweep needs
 	// one of the provider's own keys, and this one has none to need. Waiting a
 	// quarter of an hour for its first models is the same gap the first
@@ -327,7 +324,7 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	if auth.IsKeyless(row.AuthStyle) && s.deps.Disc != nil {
 		s.deps.Disc.Trigger(row.ID)
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": row.ID})
+	writeJSON(w, http.StatusCreated, createdReply(map[string]any{"id": row.ID}, reloadErr))
 }
 
 func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
