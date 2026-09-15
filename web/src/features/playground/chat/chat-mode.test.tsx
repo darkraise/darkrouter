@@ -286,6 +286,9 @@ describe("Chat mode", () => {
     expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
 
     await send("second")
+    expect(await screen.findByText(/2 exchanges were not saved/i)).toBeInTheDocument()
+    expect(posts).toEqual(["user:first", "assistant:an answer"])
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
     await waitFor(() => expect(posts).toHaveLength(5))
     expect(posts).toEqual([
       "user:first",
@@ -412,6 +415,88 @@ describe("Chat mode", () => {
     await waitFor(() => expect(posts).toHaveLength(3))
     expect(posts).toEqual(["user:first", "user:second", "assistant:an answer"])
     expect(screen.queryByText(/was not saved/i)).toBeNull()
+  })
+
+  it("does not discard an exchange whose question is already stored", async () => {
+    // Dropping it would leave the stored conversation with a question and no
+    // answer, and the next exchange's question straight after it.
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    const banner = await screen.findByRole("alert")
+    expect(within(banner).getByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    expect(within(banner).queryByRole("button", { name: "Discard" })).toBeNull()
+    expect(within(banner).getByText(/question is already stored/i)).toBeInTheDocument()
+
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument())
+    expect(posts).not.toContain("user:second")
+  })
+
+  it("discards only the failed exchanges of the conversation on screen", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: `${body.title}1`, title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      throw new ApiError(503, "store is busy")
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("elsewhere")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("here")
+    await screen.findByText(/2 exchanges were not saved/i)
+    expect(screen.getByText(/1 of them is in another conversation/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+    expect(screen.getByText(/it is in another conversation/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Discard" })).toBeNull()
+
+    const before = posts.length
+    await userEvent.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitFor(() => expect(posts.length).toBe(before + 1))
+    expect(posts.at(-1)).toBe("/api/playground/conversations/elsewhere1/messages:user:elsewhere")
+  })
+
+  it("does not retry a held conversation when another conversation's exchange is saved", async () => {
+    // Every retry of a save that keeps failing is another failing request and
+    // another error toast, and nothing the operator did asked for it.
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: body.title === "stuck" ? "stuck1" : "next1", title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      if (path.includes("stuck1")) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("stuck")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("next")
+    await waitFor(() =>
+      expect(posts).toContain("/api/playground/conversations/next1/messages:assistant:an answer"),
+    )
+    await send("again")
+    await waitFor(() => expect(posts.filter((p) => p.includes("next1"))).toHaveLength(4))
+    expect(posts.filter((p) => p.includes("stuck1"))).toHaveLength(1)
   })
 
   it.each([408, 429])("holds an exchange refused with %i for another try", async (status) => {

@@ -87,6 +87,9 @@ function queueOf(exchange: PendingExchange): string {
   return exchange.id !== "" ? exchange.id : `selection:${exchange.owner.selection}`
 }
 
+/** A held exchange, as the banner needs to describe it. */
+type HeldExchange = { id: string; selection: number; failed: boolean; questionStored: boolean }
+
 /** A network failure, a server fault, a timeout or a rate limit can pass on a
  *  later try; any other refusal answers the same way every time. */
 function mayPassOnRetry(err: unknown): boolean {
@@ -169,13 +172,24 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // storing its question twice.
   const backlog = useRef<PendingExchange[]>([])
   const draining = useRef(false)
-  // A drain asked for while one runs, by a discard or a retry, starts another
-  // pass once it ends rather than being dropped.
+  // A drain asked for while one runs starts another pass once it ends rather
+  // than being dropped.
   const drainAgain = useRef(false)
-  // How many are held after a failure that may pass on retry. Later exchanges
-  // of the same conversation wait behind them, because saving past one would
-  // scramble the order too; other conversations' exchanges do not.
-  const [unsaved, setUnsaved] = useState(0)
+  // What is held, as of the last drain. Later exchanges of a conversation wait
+  // behind one of its failed ones, because saving past it would scramble the
+  // order too; other conversations' exchanges do not.
+  const [unsaved, setUnsaved] = useState<HeldExchange[]>([])
+
+  function publishBacklog() {
+    setUnsaved(
+      backlog.current.map((exchange) => ({
+        id: exchange.id,
+        selection: exchange.owner.selection,
+        failed: exchange.failed,
+        questionStored: exchange.userSeq !== null,
+      })),
+    )
+  }
 
   function persistTurn(turn: CompletedTurn, owner: ExchangeOwner) {
     const id = owner.id || (createdIds.current.get(owner.selection) ?? "")
@@ -189,14 +203,17 @@ export function ChatMode({ active = true }: { active?: boolean }) {
       return
     }
     draining.current = true
-    let blocked = new Set<string>()
     try {
       for (;;) {
+        // A failed exchange keeps its conversation held until the operator
+        // retries or discards it. Any drain may start a pass -- another
+        // conversation's exchange finishing does -- and retrying on that
+        // would repeat a failing request and its error toast each time.
+        const blocked = new Set(backlog.current.filter((e) => e.failed).map(queueOf))
         const next = backlog.current.find((exchange) => !blocked.has(queueOf(exchange)))
         if (next === undefined) {
           if (!drainAgain.current) break
           drainAgain.current = false
-          blocked = new Set()
           continue
         }
         next.failed = false
@@ -210,7 +227,6 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           // held for another try.
           if (mayPassOnRetry(err)) {
             next.failed = true
-            blocked.add(queueOf(next))
             continue
           }
         }
@@ -218,16 +234,31 @@ export function ChatMode({ active = true }: { active?: boolean }) {
       }
     } finally {
       draining.current = false
-      setUnsaved(backlog.current.length)
+      publishBacklog()
     }
   }
 
-  // Only exchanges whose last save failed: one mid-save has failed cleared,
-  // and one merely waiting behind a failure was never tried.
-  function discardFailed() {
-    backlog.current = backlog.current.filter((exchange) => !exchange.failed)
-    setUnsaved(backlog.current.length)
+  function retryFailed() {
+    for (const exchange of backlog.current) exchange.failed = false
     void drain()
+  }
+
+  // Only exchanges whose last save failed: one mid-save has failed cleared,
+  // and one merely waiting behind a failure was never tried. One whose
+  // question is stored stays, since there is no way to remove that question
+  // and dropping the answer would leave the next question straight after it.
+  function discardFailed() {
+    backlog.current = backlog.current.filter(
+      (exchange) =>
+        !(exchange.failed && exchange.userSeq === null && onScreen(exchange.id, exchange.owner.selection)),
+    )
+    publishBacklog()
+    void drain()
+  }
+
+  /** Whether an exchange belongs to the conversation the screen shows. */
+  function onScreen(id: string, owner: number): boolean {
+    return id !== "" ? id === activeId : owner === selection
   }
 
   async function saveExchange(exchange: PendingExchange) {
@@ -486,22 +517,13 @@ export function ChatMode({ active = true }: { active?: boolean }) {
             Could not load the selected conversation. Select another conversation and try again.
           </p>
         ) : null}
-        {unsaved > 0 ? (
-          <div role="alert" className="flex flex-wrap items-center gap-2">
-            <p className="text-sm text-[hsl(var(--destructive))]">
-              {unsaved === 1
-                ? "1 exchange was not saved. Newer exchanges in its conversation wait for it"
-                : `${unsaved} exchanges were not saved. Newer exchanges in the same conversation wait for them`}
-              , so the stored conversation keeps the order they were sent in. Discard leaves a
-              failed exchange on screen but out of the stored conversation.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => void drain()}>
-              Retry saving
-            </Button>
-            <Button variant="outline" size="sm" onClick={discardFailed}>
-              Discard
-            </Button>
-          </div>
+        {unsaved.length > 0 ? (
+          <UnsavedBanner
+            held={unsaved}
+            onScreen={onScreen}
+            onRetry={retryFailed}
+            onDiscard={discardFailed}
+          />
         ) : null}
         <ConversationHeader
           config={config}
@@ -625,5 +647,64 @@ export function ChatMode({ active = true }: { active?: boolean }) {
         </SheetContent>
       </Sheet>
     </>
+  )
+}
+
+function UnsavedBanner({
+  held,
+  onScreen,
+  onRetry,
+  onDiscard,
+}: {
+  held: HeldExchange[]
+  onScreen: (id: string, selection: number) => boolean
+  onRetry: () => void
+  onDiscard: () => void
+}) {
+  const count = held.length
+  const elsewhere = held.filter((h) => !onScreen(h.id, h.selection)).length
+  const here = held.filter((h) => h.failed && onScreen(h.id, h.selection))
+  const discardable = here.filter((h) => !h.questionStored).length
+  const answerOnly = here.length - discardable
+
+  const sentences = [
+    count === 1
+      ? "1 exchange was not saved. Newer exchanges in its conversation wait for it, so the stored conversation keeps the order they were sent in."
+      : `${count} exchanges were not saved. Newer exchanges in the same conversation wait for them, so the stored conversation keeps the order they were sent in.`,
+  ]
+  if (elsewhere > 0) {
+    sentences.push(
+      count === 1
+        ? "It is in another conversation."
+        : elsewhere === 1
+          ? "1 of them is in another conversation."
+          : `${elsewhere} of them are in other conversations.`,
+    )
+  }
+  if (discardable > 0) {
+    sentences.push(
+      "Discard drops this conversation's failed exchanges that have nothing stored yet: they stay on screen but out of the stored conversation.",
+    )
+  }
+  if (answerOnly > 0) {
+    sentences.push(
+      answerOnly === 1
+        ? "One exchange here cannot be discarded because its question is already stored: retrying saves its answer, and deleting the conversation removes both."
+        : `${answerOnly} exchanges here cannot be discarded because their question is already stored: retrying saves their answers, and deleting the conversation removes them.`,
+    )
+  }
+
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-2">
+      <p className="text-sm text-[hsl(var(--destructive))]">{sentences.join(" ")}</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Retry saving
+      </Button>
+      {discardable > 0 ? (
+        <Button variant="outline" size="sm" onClick={onDiscard}>
+          Discard
+        </Button>
+      ) : null}
+    </div>
   )
 }
