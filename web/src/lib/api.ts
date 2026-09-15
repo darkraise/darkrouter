@@ -130,12 +130,14 @@ async function isExpectedRejection(res: Response, expected: string): Promise<boo
   }
 }
 
-async function request<T>(
+/** Sends one admin request and hands back its response once it is known to
+ *  be OK, having turned a failure into the ApiError every caller shares. */
+async function send(
   method: string,
   path: string,
   body?: unknown,
   opts?: RequestOptions,
-): Promise<T> {
+): Promise<Response> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
   if (method !== "GET") {
@@ -171,6 +173,16 @@ async function request<T>(
     }
     throw new ApiError(res.status, message, parsed)
   }
+  return res
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  opts?: RequestOptions,
+): Promise<T> {
+  const res = await send(method, path, body, opts)
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -184,26 +196,7 @@ export async function getWithETag<T>(
   path: string,
   opts?: RequestOptions,
 ): Promise<{ data: T; etag: string | null }> {
-  const res = await fetch(path, {
-    method: "GET",
-    credentials: "same-origin",
-    signal: opts?.signal,
-  })
-  if (res.status === 401) {
-    const expected = opts?.expectedRejection !== undefined && (await isExpectedRejection(res, opts.expectedRejection))
-    if (!expected) loggedOut()
-  }
-  if (!res.ok) {
-    let message = res.statusText
-    try {
-      const parsed = (await res.json()) as { error?: string }
-      if (parsed.error) message = parsed.error
-    } catch {
-      // A non-JSON error body means something upstream of the API answered.
-      // The status line is all there is to report.
-    }
-    throw new ApiError(res.status, message)
-  }
+  const res = await send("GET", path, undefined, opts)
   return { data: (await res.json()) as T, etag: res.headers.get("ETag") }
 }
 
