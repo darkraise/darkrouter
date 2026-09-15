@@ -60,7 +60,10 @@ type forwardChunk struct {
 }
 
 func (a *Adapter) RecognizeEvent(ev sse.Event) adapter.RawEvent {
-	if ev.Data == "" || ev.Data == sse.Done {
+	if ev.Data == sse.Done {
+		return adapter.RawEvent{Terminal: true}
+	}
+	if ev.Data == "" {
 		return adapter.RawEvent{}
 	}
 	var c forwardChunk

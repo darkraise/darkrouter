@@ -231,6 +231,10 @@ type RawEvent struct {
 	// produced, which is stripped when Darkrouter asked for it and the client
 	// did not.
 	UsageOnly bool
+	// Terminal marks the event that ends the response on the wire, after
+	// which the client holds all of it: OpenAI's [DONE], Anthropic's
+	// message_stop. A connection that fails after it has cut nothing.
+	Terminal bool
 }
 
 // Forwarder is implemented by an adapter whose wire format is close enough to
