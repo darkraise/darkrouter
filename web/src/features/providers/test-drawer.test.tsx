@@ -431,6 +431,31 @@ describe("the conversation", () => {
     expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
   })
 
+  it("does not send the partial reply of a stream that failed", async () => {
+    let first = true
+    stubRoutes(() => {
+      if (!first) return new Response(sse(OK_FRAME))
+      first = false
+      return new Response(
+        sse(
+          'data: {"choices":[{"delta":{"content":"half a reply"}}]}\n\n',
+          'data: {"error":{"message":"upstream exploded","type":"api_error"}}\n\n',
+        ),
+      )
+    })
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findAllByText(/upstream exploded/i)
+    expect(screen.getByText(/half a reply/)).toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText("Test message"), "and again")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(2))
+    expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
+  })
+
   it("does not send the empty turn a failed setup left behind", async () => {
     stubRoutes()
     const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
