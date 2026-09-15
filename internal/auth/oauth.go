@@ -143,9 +143,9 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 		var obj map[string]json.RawMessage
 		fromVendor := json.Unmarshal(raw, &obj) == nil
 		if terminal(resp.StatusCode, w.Error, fromVendor) {
-			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
+			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(raw))
 		}
-		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(w))
+		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(raw))
 	}
 	if decodeErr != nil || w.AccessToken == "" {
 		// A success status with no token in it is a page from something in
@@ -153,7 +153,7 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 		// the provider refusing this credential. Only an explicit refusal
 		// code is evidence enough to disable an account.
 		if decodeErr == nil && terminal(0, w.Error, true) {
-			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
+			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(raw))
 		}
 		return Token{}, fmt.Errorf("token endpoint returned %s with no usable token", resp.Status)
 	}
@@ -190,13 +190,32 @@ func terminal(status int, code string, jsonBody bool) bool {
 }
 
 // describe renders the provider's own words without any token material: the
-// error code and description are the useful half of the body.
-func describe(w wireToken) string {
+// error code and description are the useful half of the body. It reads the
+// raw body rather than wireToken because Anthropic sends "error" as an object
+// of its API error shape, which wireToken's string field cannot hold.
+func describe(raw []byte) string {
+	var body struct {
+		Error            json.RawMessage `json:"error"`
+		ErrorDescription string          `json:"error_description"`
+	}
+	_ = json.Unmarshal(raw, &body)
+	code, detail := "", body.ErrorDescription
+	if json.Unmarshal(body.Error, &code) != nil {
+		var obj struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body.Error, &obj) == nil {
+			code, detail = obj.Type, obj.Message
+		}
+	}
 	switch {
-	case w.Error != "" && w.ErrorDescription != "":
-		return w.Error + ": " + w.ErrorDescription
-	case w.Error != "":
-		return w.Error
+	case code != "" && detail != "":
+		return code + ": " + detail
+	case code != "":
+		return code
+	case detail != "":
+		return detail
 	}
 	return "no error detail"
 }

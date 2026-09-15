@@ -437,11 +437,17 @@ func TestAVendorShapedRefusalStillDisables(t *testing.T) {
 	tokens := newMemTokens()
 	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
 
-	if err := az(context.Background(), blank(t)); err == nil {
+	err := az(context.Background(), blank(t))
+	if err == nil {
 		t.Fatal("a refused refresh must be an error")
 	}
 	if _, disabled := tokens.disabledReason("cred-1"); !disabled {
 		t.Error("a JSON 400 from the vendor must still disable the credential")
+	}
+	// The vendor's words are the only clue to what an operator must fix.
+	want := "invalid_request_error: Client with id 00000000-0000-0000-0000-000000000000 not found"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to carry %q", err, want)
 	}
 }
 
