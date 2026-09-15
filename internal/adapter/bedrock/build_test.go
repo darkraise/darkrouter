@@ -197,6 +197,81 @@ func TestImagesBecomeImageBlocks(t *testing.T) {
 	}
 }
 
+func documentsIn(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	var docs []map[string]any
+	for _, msg := range body["messages"].([]any) {
+		for _, b := range msg.(map[string]any)["content"].([]any) {
+			if d, ok := b.(map[string]any)["document"].(map[string]any); ok {
+				docs = append(docs, d)
+			}
+		}
+	}
+	return docs
+}
+
+func TestDocumentsBecomeDocumentBlocks(t *testing.T) {
+	req := simple()
+	for _, mime := range []string{"application/pdf", "text/plain", "text/markdown", "text/csv", "text/html",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"} {
+		req.Messages[0].Content = append(req.Messages[0].Content, ir.ContentBlock{
+			Type: ir.BlockDocument, Media: &ir.Media{MIME: mime, Data: "aGk="},
+		})
+	}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if len(warns) != 0 {
+		t.Errorf("warnings = %+v, want none", warns)
+	}
+	docs := documentsIn(t, body)
+	wantFormats := []string{"pdf", "txt", "md", "csv", "html", "xlsx"}
+	if len(docs) != len(wantFormats) {
+		t.Fatalf("documents = %#v, want %d", docs, len(wantFormats))
+	}
+	seen := map[string]bool{}
+	for i, d := range docs {
+		if d["format"] != wantFormats[i] {
+			t.Errorf("document %d format = %v, want %s", i, d["format"], wantFormats[i])
+		}
+		if src, _ := d["source"].(map[string]any); src["bytes"] != "aGk=" {
+			t.Errorf("document %d source = %#v, want the base64 bytes", i, d["source"])
+		}
+		// Converse requires a name, and AWS recommends a neutral one: the
+		// model can read it as an instruction.
+		name, _ := d["name"].(string)
+		if name == "" || seen[name] {
+			t.Errorf("document %d name = %q, want a distinct non-empty name", i, name)
+		}
+		seen[name] = true
+		for _, r := range name {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+				t.Errorf("document %d name = %q holds %q, outside Converse's name alphabet", i, name, r)
+			}
+		}
+	}
+}
+
+func TestADocumentConverseCannotTakeIsWarned(t *testing.T) {
+	for name, m := range map[string]*ir.Media{
+		"unsupported format": {MIME: "application/zip", Data: "UEsDBA=="},
+		"url only":           {MIME: "application/pdf", URL: "https://example.invalid/a.pdf"},
+		"file id only":       {FileID: "file_1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := simple()
+			req.Messages[0].Content = append(req.Messages[0].Content, ir.ContentBlock{
+				Type: ir.BlockDocument, Media: m,
+			})
+			body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+			if docs := documentsIn(t, body); len(docs) != 0 {
+				t.Errorf("documents = %#v, want it dropped", docs)
+			}
+			if len(warns) != 1 || warns[0].Field != "document" {
+				t.Errorf("warnings = %+v, want one document warning", warns)
+			}
+		})
+	}
+}
+
 func TestAURLImageIsWarnedNotFetched(t *testing.T) {
 	// Converse takes bytes only. Fetching the URL here would make an outbound
 	// request from a request builder, which no other adapter does.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -576,6 +577,7 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 		out     = make([]any, 0, len(msgs))
 		curRole string
 		content []any
+		docs    int
 	)
 	flush := func() {
 		if curRole == "" {
@@ -589,7 +591,7 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 		if m.Role == ir.RoleAssistant {
 			role = "assistant"
 		}
-		blocks, w := renderBlocks(m.Content, marks)
+		blocks, w := renderBlocks(m.Content, marks, &docs)
 		warns = append(warns, w...)
 		if len(blocks) == 0 {
 			continue
@@ -606,8 +608,9 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 
 // renderBlocks renders content, placing cache breakpoints only when marks is
 // non-nil: tool-result content is rendered without them, because
-// ToolResultContentBlock has no cachePoint member.
-func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warning) {
+// ToolResultContentBlock has no cachePoint member. docs counts the documents
+// rendered so far in the request, which names each one.
+func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks, docs *int) ([]any, []ir.Warning) {
 	var warns []ir.Warning
 	out := make([]any, 0, len(blocks))
 	for _, b := range blocks {
@@ -620,6 +623,12 @@ func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warn
 			}
 		case ir.BlockImage:
 			blk, w := imageBlock(b.Media)
+			warns = append(warns, w...)
+			if blk != nil {
+				out = append(out, blk)
+			}
+		case ir.BlockDocument:
+			blk, w := documentBlock(b.Media, docs)
 			warns = append(warns, w...)
 			if blk != nil {
 				out = append(out, blk)
@@ -643,7 +652,7 @@ func renderBlocks(blocks []ir.ContentBlock, marks *cacheMarks) ([]any, []ir.Warn
 			if b.ToolResult == nil {
 				continue
 			}
-			inner, w := renderBlocks(b.ToolResult.Content, nil)
+			inner, w := renderBlocks(b.ToolResult.Content, nil, docs)
 			warns = append(warns, w...)
 			// A marker inside the result closes the result as a whole, which
 			// is the nearest place Converse admits one.
@@ -722,6 +731,47 @@ func imageBlock(m *ir.Media) (map[string]any, []ir.Warning) {
 		// The IR carries base64; Converse's bytes member is base64 on the wire.
 		"source": map[string]any{"bytes": m.Data},
 	}}, nil
+}
+
+// documentBlock names each document by its position rather than by the client's
+// filename. Converse requires a name and restricts its alphabet, and AWS
+// recommends a neutral one because the model can read a name as an instruction.
+func documentBlock(m *ir.Media, docs *int) (map[string]any, []ir.Warning) {
+	if m == nil {
+		return nil, nil
+	}
+	if m.Data == "" {
+		return nil, []ir.Warning{{
+			Field: "document", Target: targetName,
+			Reason: "Converse takes document bytes only; a URL or file id cannot be sent",
+		}}
+	}
+	format, ok := documentFormats[strings.ToLower(strings.TrimSpace(m.MIME))]
+	if !ok {
+		return nil, []ir.Warning{{
+			Field: "document", Target: targetName,
+			Reason: "Converse accepts pdf, csv, doc, docx, xls, xlsx, html, txt and md documents only; " +
+				m.MIME + " was dropped",
+		}}
+	}
+	*docs++
+	return map[string]any{"document": map[string]any{
+		"format": format,
+		"name":   "document-" + strconv.Itoa(*docs),
+		"source": map[string]any{"bytes": m.Data},
+	}}, nil
+}
+
+var documentFormats = map[string]string{
+	"application/pdf":    "pdf",
+	"text/csv":           "csv",
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/vnd.ms-excel": "xls",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+	"text/html":     "html",
+	"text/plain":    "txt",
+	"text/markdown": "md",
 }
 
 func imageFormat(mime string) (string, bool) {
