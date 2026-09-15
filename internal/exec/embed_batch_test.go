@@ -69,6 +69,37 @@ func batchingExecutor(t *testing.T, url string, size int, tune func(*config.Conf
 	return e, rec
 }
 
+// A later sub-batch is sent by the op rather than the loop, and a timeout the
+// transport enforces on it is named as one on the loop's own send is.
+func TestATransportTimeoutOnALaterSubBatchNamesTheBound(t *testing.T) {
+	var n atomic.Int64
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) > 1 {
+			stall(r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[1]}],` +
+			`"usage":{"prompt_tokens":1,"total_tokens":1}}`))
+	}))
+	defer up.Close()
+
+	e, rec := batchingExecutor(t, up.URL, 1, func(c *config.Config) {
+		c.Policy.Timeout.FirstByte = 2 * time.Second
+	})
+	e.client.Transport.(*http.Transport).ResponseHeaderTimeout = 100 * time.Millisecond
+	e.HandleEmbeddings(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"e5","input":["a","b"]}`)), openaiedge.New())
+
+	a := rec.only(t).Attempts
+	if len(a) == 0 || !strings.Contains(a[0].Error, "darkrouter: first_byte timeout exceeded") {
+		t.Errorf("attempts = %+v, want the second sub-batch's error to name first_byte", a)
+	}
+	if n.Load() < 2 {
+		t.Errorf("upstream saw %d calls, want the second sub-batch sent", n.Load())
+	}
+}
+
 // An upstream that caps inputs per request is sent consecutive sub-batches,
 // and the client receives one response in its own input order.
 func TestEmbeddingsAreSplitToTheAdaptersBatchLimit(t *testing.T) {

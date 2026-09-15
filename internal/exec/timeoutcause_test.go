@@ -81,6 +81,33 @@ func TestATimeoutNamesTheBoundThatFired(t *testing.T) {
 		},
 		body: unary, want: "darkrouter: first_byte timeout exceeded", outcome: "retryable_provider",
 	}, {
+		// The transport's dialer carries connect itself, fixed at startup, and
+		// fires before the attempt timer whenever a reload has not lowered it.
+		name:    "connect by the transport",
+		handler: func(w http.ResponseWriter, r *http.Request) {},
+		tune: func(c *config.Config) {
+			c.Policy.Timeout.Connect = time.Second
+			c.Policy.Timeout.FirstByte = time.Second
+		},
+		prepare: func(e *Executor, _ <-chan struct{}) {
+			e.client.Transport.(*http.Transport).DialContext =
+				(&net.Dialer{Deadline: time.Now().Add(-time.Second)}).DialContext
+		},
+		body: unary, want: "darkrouter: connect timeout exceeded", outcome: "retryable_provider",
+	}, {
+		name: "first_byte by the transport",
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			stall(r)
+		},
+		tune: func(c *config.Config) {
+			c.Policy.Timeout.Connect = time.Second
+			c.Policy.Timeout.FirstByte = 2 * time.Second
+		},
+		prepare: func(e *Executor, _ <-chan struct{}) {
+			e.client.Transport.(*http.Transport).ResponseHeaderTimeout = 100 * time.Millisecond
+		},
+		body: unary, want: "darkrouter: first_byte timeout exceeded", outcome: "retryable_provider",
+	}, {
 		name:    "idle",
 		handler: partialBody,
 		tune: func(c *config.Config) {

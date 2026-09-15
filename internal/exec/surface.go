@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -275,6 +276,22 @@ func (ac *AttemptCtx) firedCause() error {
 		b = boundConnect
 	}
 	return timeoutCause(b)
+}
+
+// transportTimeout names a timeout the transport enforced on its own. Its
+// dialer and header timeouts are connect and first_byte as they stood at
+// startup, and fire before the attempt timer unless a reload lowered the
+// policy below them, so the failure is named as the timer would name it.
+func (ac *AttemptCtx) transportTimeout(err error) error {
+	var ne net.Error
+	if ac.upstream.Err() != nil || !errors.As(err, &ne) || !ne.Timeout() {
+		return err
+	}
+	b := boundFirstByte
+	if !ac.connected.Load() {
+		b = boundConnect
+	}
+	return fmt.Errorf("%w: %w", timeoutCause(b), err)
 }
 
 // idleBody renews the idle bound on every read that returns bytes, so idle
