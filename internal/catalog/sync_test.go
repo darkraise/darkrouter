@@ -416,6 +416,50 @@ func TestSyncKeepsWhetherADiscoveredCacheRateWasQuoted(t *testing.T) {
 	}
 }
 
+// A sync writes models.dev's cache rate onto a models.dev row, and a listing
+// then quotes the same model's input and output only. The row is discovered
+// from then on, so every later sync keeps its cache columns: holding the old
+// models.dev figure there froze it as if the listing had quoted it.
+func TestAListingDoesNotFreezeADirectoryCacheRate(t *testing.T) {
+	cacheWrite := atomic.Value{}
+	cacheWrite.Store("6.25")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"` + embeddedPreset + `":{"id":"` + embeddedPreset + `","models":{
+  "` + embeddedModel + `":{"id":"` + embeddedModel + `","limit":{"context":131072,"output":8192},
+         "cost":{"input":5,"output":25,"cache_write":` + cacheWrite.Load().(string) + `}}}}}`))
+	}))
+	defer srv.Close()
+
+	db, cat := liveDocFixture(t)
+	ctx := context.Background()
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL})
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheWrite.Store("7.5")
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, ok := cat.Snapshot().Lookup("p", embeddedModel)
+	if !ok {
+		t.Fatalf("%s is not in the snapshot", embeddedModel)
+	}
+	if m.Pricing.InputMicrosPerMTok != 4_000_000 {
+		t.Errorf("input = %d, want the listing's 4000000", m.Pricing.InputMicrosPerMTok)
+	}
+	if m.Pricing.CacheWriteMicrosPerMTok != 7_500_000 {
+		t.Errorf("cache write = %d, want models.dev's current 7500000", m.Pricing.CacheWriteMicrosPerMTok)
+	}
+}
+
 func TestSyncKeepsADiscoveredFreeModelPriced(t *testing.T) {
 	// A free model's rates are zero, so only the flag separates it from one
 	// nobody has priced. models.dev listing no cost for the same name must not
