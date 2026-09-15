@@ -212,7 +212,7 @@ func documentsIn(t *testing.T, body map[string]any) []map[string]any {
 
 func TestDocumentsBecomeDocumentBlocks(t *testing.T) {
 	req := simple()
-	for _, mime := range []string{"application/pdf", "text/plain", "text/markdown", "text/csv", "text/html",
+	for _, mime := range []string{"application/pdf", "text/plain", "text/markdown", "text/csv",
 		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"} {
 		req.Messages[0].Content = append(req.Messages[0].Content, ir.ContentBlock{
 			Type: ir.BlockDocument, Media: &ir.Media{MIME: mime, Data: "aGk="},
@@ -223,7 +223,7 @@ func TestDocumentsBecomeDocumentBlocks(t *testing.T) {
 		t.Errorf("warnings = %+v, want none", warns)
 	}
 	docs := documentsIn(t, body)
-	wantFormats := []string{"pdf", "txt", "md", "csv", "html", "xlsx"}
+	wantFormats := []string{"pdf", "txt", "md", "csv", "xlsx"}
 	if len(docs) != len(wantFormats) {
 		t.Fatalf("documents = %#v, want %d", docs, len(wantFormats))
 	}
@@ -247,6 +247,78 @@ func TestDocumentsBecomeDocumentBlocks(t *testing.T) {
 				t.Errorf("document %d name = %q holds %q, outside Converse's name alphabet", i, name, r)
 			}
 		}
+	}
+}
+
+func doc() ir.ContentBlock {
+	return ir.ContentBlock{Type: ir.BlockDocument, Media: &ir.Media{MIME: "application/pdf", Data: "aGk="}}
+}
+
+func messagesIn(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, m := range body["messages"].([]any) {
+		out = append(out, m.(map[string]any))
+	}
+	return out
+}
+
+// Converse refuses a message carrying a document without a text block
+// alongside it. A client can send a file with its instruction in the system
+// prompt, which Anthropic takes as it is.
+func TestADocumentOnlyTurnGetsTheTextBlockConverseRequires(t *testing.T) {
+	req := simple()
+	req.Messages[0].Content = []ir.ContentBlock{doc()}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	content := messagesIn(t, body)[0]["content"].([]any)
+	var texts, docs int
+	for _, b := range content {
+		blk := b.(map[string]any)
+		if _, ok := blk["text"]; ok {
+			texts++
+		}
+		if _, ok := blk["document"]; ok {
+			docs++
+		}
+	}
+	if docs != 1 || texts != 1 {
+		t.Errorf("content = %#v, want the document and one text block", content)
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
+	}
+}
+
+// Converse takes five documents in a message. Consecutive user messages merge
+// into one, so two turns of three files each would reach six.
+func TestAMessageKeepsAtMostFiveDocuments(t *testing.T) {
+	req := simple()
+	three := []ir.ContentBlock{{Type: ir.BlockText, Text: "read"}, doc(), doc(), doc()}
+	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: three}, {Role: ir.RoleUser, Content: three}}
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if msgs := messagesIn(t, body); len(msgs) != 1 {
+		t.Fatalf("messages = %d, want the two user turns merged into one", len(msgs))
+	}
+	if docs := documentsIn(t, body); len(docs) != 5 {
+		t.Errorf("documents = %d, want five", len(docs))
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
+	}
+}
+
+// Converse takes documents in user turns only.
+func TestADocumentInAnAssistantTurnIsDropped(t *testing.T) {
+	req := simple()
+	req.Messages = append(req.Messages,
+		ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "here"}, doc()}},
+		ir.Message{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "thanks"}}})
+	body, _, warns := build(t, &adapter.Target{Region: "us-east-1", Model: req.Model}, req)
+	if docs := documentsIn(t, body); len(docs) != 0 {
+		t.Errorf("documents = %#v, want the assistant's dropped", docs)
+	}
+	if len(warns) != 1 || warns[0].Field != "document" {
+		t.Errorf("warnings = %+v, want one document warning", warns)
 	}
 }
 

@@ -583,6 +583,11 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 		if curRole == "" {
 			return
 		}
+		if curRole == "user" {
+			var w []ir.Warning
+			content, w = conformDocuments(content)
+			warns = append(warns, w...)
+		}
 		out = append(out, map[string]any{"role": curRole, "content": content})
 		curRole, content = "", nil
 	}
@@ -593,6 +598,16 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 		}
 		blocks, w := renderBlocks(m.Content, marks, &docs)
 		warns = append(warns, w...)
+		if role == "assistant" {
+			var dropped bool
+			blocks, dropped = withoutDocuments(blocks)
+			if dropped {
+				warns = append(warns, ir.Warning{
+					Field: "document", Target: targetName,
+					Reason: "Converse takes documents in user turns only; an assistant turn's document was dropped",
+				})
+			}
+		}
 		if len(blocks) == 0 {
 			continue
 		}
@@ -603,6 +618,73 @@ func renderMessages(msgs []ir.Message, marks *cacheMarks) ([]any, []ir.Warning) 
 		content = append(content, blocks...)
 	}
 	flush()
+	return out, warns
+}
+
+// maxDocumentsPerMessage is Converse's limit on documents in one message.
+const maxDocumentsPerMessage = 5
+
+func isDocument(block any) bool {
+	m, ok := block.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = m["document"]
+	return ok
+}
+
+func withoutDocuments(blocks []any) ([]any, bool) {
+	out := blocks[:0:0]
+	dropped := false
+	for _, b := range blocks {
+		if isDocument(b) {
+			dropped = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, dropped
+}
+
+// conformDocuments applies the rules Converse sets on documents in a user
+// message, after consecutive turns have merged into it: at most five, and a
+// text block beside them. A client can send a file with its instruction in the
+// system prompt, which Converse would refuse outright.
+func conformDocuments(content []any) ([]any, []ir.Warning) {
+	var (
+		warns       []ir.Warning
+		out         = make([]any, 0, len(content)+1)
+		docs, extra int
+		hasText     bool
+	)
+	for _, b := range content {
+		if isDocument(b) {
+			if docs == maxDocumentsPerMessage {
+				extra++
+				continue
+			}
+			docs++
+		}
+		if m, ok := b.(map[string]any); ok {
+			if _, ok := m["text"]; ok {
+				hasText = true
+			}
+		}
+		out = append(out, b)
+	}
+	if extra > 0 {
+		warns = append(warns, ir.Warning{
+			Field: "document", Target: targetName,
+			Reason: "Converse takes five documents in a message; " + strconv.Itoa(extra) + " more were dropped",
+		})
+	}
+	if docs > 0 && !hasText {
+		out = append([]any{map[string]any{"text": "Attached documents."}}, out...)
+		warns = append(warns, ir.Warning{
+			Field: "document", Target: targetName,
+			Reason: "Converse needs a text block beside documents; a short one was added",
+		})
+	}
 	return out, warns
 }
 
