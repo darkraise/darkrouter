@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "darkraise-ui"
-import { addCredentials, reportAdded } from "./accounts"
-import { emptyAccounts } from "./account-fields"
+import { addCredentials, reportAdded, retryDraft } from "./accounts"
+import { draftAccounts, emptyAccounts } from "./account-fields"
 
 const ROUTING =
   "the change was saved, but the gateway could not load it and is still routing with the previous settings; see the server log"
@@ -80,6 +80,41 @@ describe("addCredentials when the gateway did not load the change", () => {
     expect(result.added).toBe(1)
     expect(result.failed.map((f) => f.error)).toEqual(["kept unverified: database is locked"])
     expect(result.routingNotUpdated).toBeUndefined()
+  })
+})
+
+describe("retryDraft", () => {
+  const failedOn = (secrets: string[], d: typeof draft, needsAccount = false) =>
+    draftAccounts(d, needsAccount)
+      .filter((a) => secrets.includes(a.secret))
+      .map((account) => ({ label: account.label, error: "boom", account }))
+
+  it("gives back an auto-named line as the operator typed it", () => {
+    const bulk = { ...emptyAccounts, mode: "bulk" as const, bulk: "sk-one\nsk-two\nsk-three" }
+
+    const next = retryDraft(bulk, failedOn(["sk-two"], bulk), false)
+
+    expect(next.bulk).toBe("sk-two")
+  })
+
+  it("does not split a label prefix carrying a pipe into the secret", () => {
+    const bulk = { ...emptyAccounts, mode: "bulk" as const, label: "team|a", bulk: "sk-one\nsk-two" }
+
+    const next = retryDraft(bulk, failedOn(["sk-one", "sk-two"], bulk), false)
+
+    expect(draftAccounts(next).map((a) => a.secret)).toEqual(["sk-one", "sk-two"])
+  })
+
+  it("gives back lines carrying an account unchanged", () => {
+    const bulk = {
+      ...emptyAccounts,
+      mode: "bulk" as const,
+      bulk: "alpha | acct-1 | sk-one\n  acct-2|sk-two  \nbeta|acct-3|sk-three",
+    }
+
+    const next = retryDraft(bulk, failedOn(["sk-two", "sk-three"], bulk, true), true)
+
+    expect(next.bulk).toBe("  acct-2|sk-two  \nbeta|acct-3|sk-three")
   })
 })
 

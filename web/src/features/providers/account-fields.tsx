@@ -130,8 +130,17 @@ export function parseBulkAccounts(
   prefix = "key",
   needsAccount = false,
 ): ParsedAccount[] {
+  return parseBulkLines(text, prefix, needsAccount).map((l) => l.account)
+}
+
+/** parseBulkAccounts, with the line each account was read from. */
+export function parseBulkLines(
+  text: string,
+  prefix = "key",
+  needsAccount = false,
+): { account: ParsedAccount; line: string }[] {
   const seen = new Set<string>()
-  const out: ParsedAccount[] = []
+  const out: { account: ParsedAccount; line: string }[] = []
   const clean = (v: string) => v.trim().replace(/,$/, "").replace(/^["']|["']$/g, "").trim()
 
   for (const raw of text.split(/\r?\n/)) {
@@ -166,7 +175,7 @@ export function parseBulkAccounts(
     seen.add(secret)
     const entry: ParsedAccount = { label: name || `${prefix}-${out.length + 1}`, secret }
     if (account !== "") entry.account_id = account
-    out.push(entry)
+    out.push({ account: entry, line: raw })
   }
   return out
 }
