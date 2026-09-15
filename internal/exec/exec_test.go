@@ -584,6 +584,72 @@ func TestHandleClientDisconnectMidStreamIsNotAProviderFault(t *testing.T) {
 	}
 }
 
+// firstWrite is a recorder that reports when the first byte reaches it.
+type firstWrite struct {
+	*httptest.ResponseRecorder
+	once  sync.Once
+	wrote chan struct{}
+}
+
+func (f *firstWrite) Write(b []byte) (int, error) {
+	f.once.Do(func() { close(f.wrote) })
+	return f.ResponseRecorder.Write(b)
+}
+
+// A client that hangs up after the response has committed did not receive a
+// complete response, so the row says cancelled, as it does for a hang-up
+// before commit, rather than success. It is still not an error: the provider
+// did nothing wrong.
+func TestAClientHangUpAfterCommitIsRecordedAsCancelled(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body string
+		dialect          edge.Dialect
+	}{
+		{"forwarded stream", "/v1/chat/completions",
+			`{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`, openaiedge.New()},
+		{"translated stream", "/v1/messages",
+			`{"model":"m","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"ping"}]}`,
+			anthropicedge.New()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
+				w.(http.Flusher).Flush()
+				<-release
+			}))
+			defer up.Close()
+			defer close(release)
+
+			logger := &captureLogger{}
+			e := newExecutorWith(t, up.URL, Deps{Log: logger}, 0)
+			ctx, cancel := context.WithCancel(context.Background())
+			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body)).WithContext(ctx)
+			w := &firstWrite{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				e.Handle(w, r, tc.dialect)
+			}()
+			select {
+			case <-w.wrote:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the response never committed")
+			}
+			cancel()
+			<-done
+
+			got := logger.only(t)
+			if got.Status != "cancelled" || got.ErrorCode != "" {
+				t.Errorf("record = status %q error %q, want cancelled with no error code",
+					got.Status, got.ErrorCode)
+			}
+		})
+	}
+}
+
 func TestHandleSurvivesMalformedSSE(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
