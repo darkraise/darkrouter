@@ -231,6 +231,14 @@ type refusedPermission struct{ error }
 
 func (e refusedPermission) Unwrap() error { return e.error }
 
+// unauthorizedWithoutBadKey reports whether a 401's message blames something
+// other than the key itself.
+func unauthorizedWithoutBadKey(message string) bool {
+	m := strings.ToLower(message)
+	return strings.Contains(m, "ip not authorized") || strings.Contains(m, "allowlist") ||
+		strings.Contains(m, "member of an organization")
+}
+
 // listingProbeKind names what a failed listing probe found.
 func listingProbeKind(err error) string {
 	if errors.As(err, new(refusedPermission)) {
@@ -240,14 +248,27 @@ func listingProbeKind(err error) string {
 }
 
 func classifyProbeListing(resp *http.Response) error {
-	if resp.StatusCode == http.StatusUnauthorized {
-		return rejectedCredential{
-			errors.New("the provider rejected this credential: " + resp.Status)}
-	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode == http.StatusUnauthorized {
+		why := upstreamMessage(bytes.NewReader(raw))
+		// OpenAI also answers 401 for a key that is fine: a request from
+		// outside the project's IP allowlist, or an account with no
+		// organization. Its documentation gives those no error code, so the
+		// message is all there is to tell them from a bad key.
+		if unauthorizedWithoutBadKey(why) {
+			return refusedPermission{errors.New("the provider refused this call: " + resp.Status +
+				": " + why + "; the credential was not refused, so check the account's " +
+				"organization and IP allowlist")}
+		}
+		msg := "the provider rejected this credential: " + resp.Status
+		if why != "" {
+			msg += ": " + why
+		}
+		return rejectedCredential{errors.New(msg)}
+	}
 	// Google refuses an unknown or expired API key with a 400, naming the
 	// refusal only in the ErrorInfo reason.
 	if catalog.GoogleAPIKeyInvalid(raw) {

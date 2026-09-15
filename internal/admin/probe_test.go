@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -173,11 +174,21 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 	cases := []struct {
 		name     string
 		status   int
+		body     string
 		down     bool
 		rejected bool
 		probe    string
 	}{
 		{name: "401", status: http.StatusUnauthorized, rejected: true},
+		{name: "401 bad key", status: http.StatusUnauthorized, rejected: true,
+			body: `{"error":{"message":"Incorrect API key provided: sk-abc***xyz.","type":"invalid_request_error","code":"invalid_api_key"}}`},
+		// OpenAI answers these with a 401 too, for a key that is fine: the
+		// request came from outside the project's IP allowlist, or the account
+		// is not in an organization. A new key would meet the same answer.
+		{name: "401 ip allowlist", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"IP not authorized: your request IP does not match the configured IP allowlist for your project or organization."}}`},
+		{name: "401 organization", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"You must be a member of an organization to use the API."}}`},
 		{name: "403", status: http.StatusForbidden, probe: "permission"},
 		{name: "429", status: http.StatusTooManyRequests},
 		{name: "503", status: http.StatusServiceUnavailable},
@@ -187,6 +198,7 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer upstream.Close()
 			if tc.down {
