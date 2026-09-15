@@ -12,6 +12,10 @@ var ErrNotFound = errors.New("not found")
 // ErrConflict marks a write refused because a unique value is already taken.
 var ErrConflict = errors.New("conflict")
 
+// ErrLocationSet marks a patch refused because it would move a provider's
+// location, which is set once.
+var ErrLocationSet = errors.New("location is already set")
+
 // isUniqueViolation reports whether err is SQLite refusing a duplicate key.
 // The driver's error text is the stable part of its contract; its numeric
 // codes live in a sub-package this file would otherwise import for one

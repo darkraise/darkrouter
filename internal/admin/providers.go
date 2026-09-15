@@ -30,6 +30,8 @@ var providerIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 // distinct ranks is more than any provider set needs.
 const maxPriority = 1000
 
+const errLocationMoved = "location is set at creation; a provider in another location is a new provider"
+
 // authStyles is the closed vocabulary a provider row may carry.
 var authStyles = []string{
 	auth.StyleBearer, auth.StyleXAPIKey, auth.StyleAPIKey, auth.StyleQueryParam,
@@ -377,8 +379,7 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Location != nil {
 		if current.Location != "" && *patch.Location != current.Location {
-			writeError(w, http.StatusBadRequest,
-				"location is set at creation; a provider in another location is a new provider")
+			writeError(w, http.StatusBadRequest, errLocationMoved)
 			return
 		}
 		next.Location = *patch.Location
@@ -394,6 +395,12 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.deps.DB.UpdateProvider(r.Context(), id, patch); err != nil {
+		// A concurrent patch filled the location between the read above and
+		// this write: the same refusal, arrived at later.
+		if errors.Is(err, store.ErrLocationSet) {
+			writeError(w, http.StatusBadRequest, errLocationMoved)
+			return
+		}
 		writeStoreError(w, r, err)
 		return
 	}
