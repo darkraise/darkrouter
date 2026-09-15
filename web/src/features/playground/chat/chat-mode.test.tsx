@@ -442,6 +442,28 @@ describe("Chat mode", () => {
     expect(posts).not.toContain("user:second")
   })
 
+  it("clears a deleted conversation's unsaved exchanges", async () => {
+    // The banner offers deleting the conversation as the way out for a
+    // question already stored; following that advice must end the hold rather
+    // than leave a Retry aimed at a conversation that no longer exists.
+    postMock.mockImplementation(async (path: string, body: { role?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored }
+      if (body.role === "assistant") throw new ApiError(503, "store is busy")
+      return { seq: 0 }
+    })
+    delMock.mockResolvedValue(null)
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Delete conversation" }))
+
+    await waitFor(() => expect(delMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/exchange was not saved/i)).toBeNull())
+  })
+
   it("discards only the failed exchanges of the conversation on screen", async () => {
     const posts: string[] = []
     postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
