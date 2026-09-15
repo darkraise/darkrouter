@@ -199,7 +199,7 @@ func (o *embedOp) fetch(em adapter.Embedder, ac *AttemptCtx, i int) (*ir.Embeddi
 	ac.resetSend()
 	resp, doErr := ac.Exec.client.Do(hr)
 	spanLatency()
-	doErr = redact.Error(doErr, ac.secret)
+	doErr = ac.transportTimeout(redact.Error(doErr, ac.secret))
 	ac.resp = resp
 	outcome := ac.Exec.classify(ac.Adapter, ac.inbound, ac.upstream, resp, doErr)
 	if outcome != adapter.OutcomeSuccess {

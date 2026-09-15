@@ -627,7 +627,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	resp, doErr := e.client.Do(hr)
 	// A query-param key is in the URL a transport error quotes, and this text
 	// goes to the attempt row and to the client.
-	doErr = redact.Error(doErr, ac.secret)
+	doErr = ac.transportTimeout(redact.Error(doErr, ac.secret))
 	ac.resp = resp
 	outcome := e.classify(ac.Adapter, r.Context(), ctx, resp, doErr)
 
