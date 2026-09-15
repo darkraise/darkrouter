@@ -107,8 +107,13 @@ func (l *loginLimiter) acquire() (release func(), ok bool) {
 // deliberately not consulted; a client that can set it could choose its own
 // bucket.
 //
-// IPv6 is keyed by its /64: that is the smallest allocation a client is handed,
-// so per address a single sender would hold 2^64 buckets.
+// Global IPv6 is keyed by its /64: that is the smallest allocation a client is
+// handed, so per address a single sender would hold 2^64 buckets. Unique local
+// and link-local addresses are the exception. Those prefixes are the operator's
+// own network, where SLAAC puts every device in one /64, and a /64 bucket would
+// let one mistyping device lock out the whole LAN. A link-local address keeps
+// its zone: the same address on two links is two hosts, and the zone is the
+// receiving interface, which the sender cannot choose.
 func clientAddr(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
@@ -118,8 +123,11 @@ func clientAddr(remoteAddr string) string {
 	if err != nil {
 		return host
 	}
+	if addr.IsLinkLocalUnicast() {
+		return addr.String()
+	}
 	addr = addr.WithZone("")
-	if addr.Is6() && !addr.Is4In6() {
+	if addr.Is6() && !addr.Is4In6() && !addr.IsPrivate() {
 		return netip.PrefixFrom(addr, 64).Masked().String()
 	}
 	return addr.String()

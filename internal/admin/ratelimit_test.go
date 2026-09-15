@@ -63,3 +63,24 @@ func TestAnIPv6SenderSharesOneBucketPerSlash64(t *testing.T) {
 		}
 	}
 }
+
+func TestALANsIPv6DevicesDoNotShareABucket(t *testing.T) {
+	// SLAAC puts every device on a LAN in one /64. On a unique local or
+	// link-local prefix that /64 is the operator's own network, not one
+	// sender's allocation, so one mistyping laptop would lock out the rest.
+	distinct := [][2]string{
+		{"[fd12:3456:789a:1::10]:4000", "[fd12:3456:789a:1::11]:4000"},
+		{"[fc00:1:2:3::10]:4000", "[fc00:1:2:3::11]:4000"},
+		{"[fe80::1c2d:3e4f:5a6b:7c8d]:4000", "[fe80::9a8b:7c6d:5e4f:3a2b]:4000"},
+		// The same link-local address on two links is two hosts.
+		{"[fe80::1%eth0]:4000", "[fe80::1%eth1]:4000"},
+	}
+	for _, pair := range distinct {
+		if a, b := clientAddr(pair[0]), clientAddr(pair[1]); a == b {
+			t.Errorf("%s and %s share the bucket %q; want one each", pair[0], pair[1], a)
+		}
+	}
+	if a, b := clientAddr("[fd12:3456:789a:1::10]:4000"), clientAddr("[fd12:3456:789a:1::10]:5000"); a != b {
+		t.Errorf("one address keyed %q and %q; want one bucket", a, b)
+	}
+}
