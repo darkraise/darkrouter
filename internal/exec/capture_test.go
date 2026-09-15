@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -86,5 +87,27 @@ func TestCaptureTruncatesAtTheCapAndSkipsBinary(t *testing.T) {
 	_, _ = rw.Write([]byte{0, 1, 2, 3})
 	if got := c.response.text(); got != "" {
 		t.Errorf("audio response captured as %q; binary bodies are never held", got)
+	}
+}
+
+// With capture on, the writer every surface flushes through is the capture
+// wrapper. A client that stopped reading usually shows up only as a failed
+// flush, so the wrapper must not turn that failure into a silent one.
+func TestCaptureKeepsAFailedFlush(t *testing.T) {
+	gone := errors.New("client gone")
+	c := newBodyCapture(config.CaptureConfig{MaxBytes: 64})
+	r := httptest.NewRequest("POST", "/", nil)
+	cw := NewCommitWriter(c.arm(&failingWriter{ResponseRecorder: httptest.NewRecorder(), err: gone}, r))
+	cw.Flush()
+	if !errors.Is(cw.Err(), gone) {
+		t.Errorf("Err = %v, want the failed flush", cw.Err())
+	}
+
+	// A writer with no flush at all is not a client that went away.
+	bare := struct{ http.ResponseWriter }{httptest.NewRecorder()}
+	cw = NewCommitWriter(c.arm(bare, r))
+	cw.Flush()
+	if cw.Err() != nil {
+		t.Errorf("Err = %v over a writer that cannot flush, want none", cw.Err())
 	}
 }

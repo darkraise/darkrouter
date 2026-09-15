@@ -2,6 +2,7 @@ package exec
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -150,10 +151,17 @@ func (c *captureWriter) Write(p []byte) (int, error) {
 	return c.ResponseWriter.Write(p)
 }
 
-func (c *captureWriter) Flush() {
-	if f, ok := c.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+func (c *captureWriter) Flush() { _ = c.FlushError() }
+
+// FlushError keeps a failed flush visible to the commit writer, which is
+// often the only sign a client stopped reading. A writer that cannot flush at
+// all is not a failure, as it was not before capture wrapped it.
+func (c *captureWriter) FlushError() error {
+	err := http.NewResponseController(c.ResponseWriter).Flush()
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
 	}
+	return err
 }
 
 func (c *captureWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
