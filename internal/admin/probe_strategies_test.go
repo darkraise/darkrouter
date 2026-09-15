@@ -251,6 +251,90 @@ func TestSigV4ProbeKeepsAKeyOnClockSkew(t *testing.T) {
 	}
 }
 
+func TestSigV4ProbeKeepsAKeyOnAClockAhead(t *testing.T) {
+	// A host clock ahead of AWS is the mirror of an expired signature: the
+	// same error type, and the same good key.
+	aws, srv := newFakeAWS(t)
+	aws.status, aws.errType = http.StatusForbidden, "InvalidSignatureException"
+	aws.errBody = `{"message":"Signature not yet current: 20260915T001000Z is still later than 20260915T000500Z (20260915T000000Z + 5 min.)"}`
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+	got := probeProvider(t, s, cookie, token, id)
+	if got.OK {
+		t.Fatal("a refused signature must not report success")
+	}
+	if got.Rejected {
+		t.Errorf("a clock ahead is not a rejected credential: %s", got.Error)
+	}
+}
+
+func TestSigV4ProbeKeepsAKeyScopedToAnotherRegion(t *testing.T) {
+	// A signature scoped to one region and sent to another region's endpoint
+	// is the provider's region or base URL being wrong, not the key. The
+	// wordings are AWS's SigV4 troubleshooting templates.
+	for _, message := range []string{
+		"Credential should be scoped to a valid region.",
+		"Credential should be scoped to a valid Region, not 'us-east-2'.",
+		"Credential should be scoped to correct service: 'bedrock'.",
+	} {
+		t.Run(message, func(t *testing.T) {
+			aws, srv := newFakeAWS(t)
+			aws.status, aws.errType = http.StatusForbidden, "InvalidSignatureException"
+			aws.errBody = `{"message":"` + message + `"}`
+			s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+			id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+			got := probeProvider(t, s, cookie, token, id)
+			if got.OK {
+				t.Fatal("a refused signature must not report success")
+			}
+			if got.Rejected {
+				t.Errorf("a scope mismatch is not a rejected credential: %s", got.Error)
+			}
+			if got.Probe != "region" {
+				t.Errorf("probe = %q, want region", got.Probe)
+			}
+		})
+	}
+}
+
+func TestSigV4ProbeDoesNotRejectFromIncidentalText(t *testing.T) {
+	// An error type the probe does not know falls back on what AWS said, and
+	// a request id or a message can carry "401" or a signature type name
+	// without the key being refused.
+	cases := []struct {
+		name, errType, body string
+		status              int
+	}{
+		{"throttle with a request id", "ThrottlingException",
+			`{"message":"Rate exceeded for request 9f401c2e"}`, http.StatusTooManyRequests},
+		{"outage naming a signature", "",
+			`{"message":"InternalFailure while validating InvalidSignature cache"}`, http.StatusInternalServerError},
+		{"unavailable", "ServiceUnavailableException",
+			`{"message":"Service unavailable: upstream returned 401"}`, http.StatusServiceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			aws, srv := newFakeAWS(t)
+			aws.status, aws.errType, aws.errBody = tc.status, tc.errType, tc.body
+			s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+			id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+			got := probeProvider(t, s, cookie, token, id)
+			if got.OK {
+				t.Fatal("a failed listing must not report success")
+			}
+			if got.Rejected {
+				t.Errorf("rejected from free text: %s", got.Error)
+			}
+			if got.Probe != "reachability" {
+				t.Errorf("probe = %q, want reachability: %s", got.Probe, got.Error)
+			}
+		})
+	}
+}
+
 func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	// Signing for the wrong region is a 403 that reads as a bad key.
 	_, srv := newFakeAWS(t)

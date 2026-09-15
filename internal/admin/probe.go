@@ -350,10 +350,8 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 		Region: row.Region, Authorize: az,
 	})
 	if err != nil {
-		kind := classifyAWSProbe(err)
-		// AWS also answers a skewed host clock with InvalidSignatureException.
-		// That key is good; the clock is not.
-		if kind == "signature" && !strings.Contains(strings.ToLower(err.Error()), "signature expired") {
+		kind, rejected := classifyAWSProbe(err)
+		if rejected {
 			err = rejectedCredential{err}
 		}
 		return kind, 0, err
@@ -361,34 +359,51 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 	return "listing", len(models), nil
 }
 
-// classifyAWSProbe names what failed. A 403 is permission, not signature: the
-// signature validated and the policy did not allow the call, which is a
-// different fix from a wrong region or a revoked key.
+// classifyAWSProbe names what failed and whether AWS refused the key itself. A
+// 403 is permission, not signature: the signature validated and the policy did
+// not allow the call, which is a different fix from a wrong region or a revoked
+// key.
 //
 // The error type is read first where AWS sent one: an unrecognised key and a
 // bad signature both arrive as a 403, so the status alone would call them
-// permission failures.
-func classifyAWSProbe(err error) string {
+// permission failures. Past the type only the status counts. Message text is
+// free-form — a request id, a throttle or an outage can carry "401" — so it
+// never marks a key rejected on its own. The InvalidSignatureException
+// wordings matched below are the templates in the IAM user guide's SigV4
+// troubleshooting page.
+func classifyAWSProbe(err error) (kind string, rejected bool) {
 	var le *bedrock.ListError
-	if errors.As(err, &le) {
-		switch le.Type {
-		case "UnrecognizedClientException", "InvalidSignatureException":
-			return "signature"
-		case "AccessDeniedException":
-			return "permission"
+	if !errors.As(err, &le) {
+		text := strings.ToLower(err.Error())
+		if strings.Contains(text, "no such host") || strings.Contains(text, "region") {
+			return "region", false
 		}
+		return "reachability", false
 	}
-	text := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(text, "403"), strings.Contains(text, "accessdenied"):
-		return "permission"
-	case strings.Contains(text, "401"), strings.Contains(text, "unrecognizedclient"),
-		strings.Contains(text, "invalidsignature"):
-		return "signature"
-	case strings.Contains(text, "no such host"), strings.Contains(text, "region"):
-		return "region"
+	switch le.Type {
+	case "UnrecognizedClientException":
+		return "signature", true
+	case "InvalidSignatureException":
+		m := strings.ToLower(le.Message)
+		switch {
+		case strings.Contains(m, "credential should be scoped"):
+			// Scoped to a region or service the endpoint does not serve.
+			return "region", false
+		case strings.Contains(m, "signature expired"), strings.Contains(m, "signature not yet current"):
+			// The host clock is outside AWS's five-minute window, either way.
+			return "signature", false
+		}
+		return "signature", true
+	case "AccessDeniedException":
+		return "permission", false
 	}
-	return "reachability"
+	switch le.StatusCode {
+	case http.StatusUnauthorized:
+		return "signature", true
+	case http.StatusForbidden:
+		return "permission", false
+	}
+	return "reachability", false
 }
 
 // probeGCP exchanges a token and then generates a single token against one
