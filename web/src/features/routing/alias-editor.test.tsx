@@ -378,6 +378,40 @@ describe("saving", () => {
     ).toBe(false)
   })
 
+  it("refreshes what it cached after a write that did not take effect", async () => {
+    // The rows committed, so the stored table and its revision moved even
+    // though the router did not. Settings' validity banner reads the config
+    // key, and a revision left stale 409s the operator's next save.
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          valid: false,
+          error: "no provider named ghost",
+          serving: "the previous configuration is still serving",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidated = vi.spyOn(client, "invalidateQueries")
+    render(
+      <QueryClientProvider client={client}>
+        <Toaster />
+        <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
+      </QueryClientProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => {
+      expect(
+        screen.queryAllByRole("status").some((s) => /previous configuration is still serving/.test(s.textContent ?? "")),
+      ).toBe(true)
+    })
+    const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(keys).toEqual(expect.arrayContaining([
+      JSON.stringify(["aliases"]), JSON.stringify(["config"]), JSON.stringify(["models"]),
+    ]))
+  })
+
   it("refuses a stale save and refetches rather than overwrite another admin's edit", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(

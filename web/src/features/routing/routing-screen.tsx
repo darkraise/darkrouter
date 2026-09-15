@@ -300,7 +300,16 @@ export function AliasEditor({
         // committed but the router could not republish, and the previous
         // configuration is still what is serving. Thrown so the mutation
         // reports it as the failure it is instead of toasting "saved".
-        if (!res.valid) throw new Error(res.error ?? "the new aliases did not take effect")
+        if (!res.valid) {
+          // The rows did commit, so the stored table and its revision moved
+          // even though the router did not. Left cached, the revision 409s
+          // the next save and Settings keeps calling the config valid.
+          for (const key of [keys.aliases, keys.config, keys.models]) {
+            void queryClient.invalidateQueries({ queryKey: key })
+          }
+          const reason = res.error ?? "the new aliases did not take effect"
+          throw new Error(res.serving ? `${reason}; ${res.serving}` : reason)
+        }
         return res
       } catch (err) {
         // Another admin's edit landed first. The draft that was just
