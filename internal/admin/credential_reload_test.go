@@ -236,3 +236,35 @@ func TestPatchingACredentialInvalidatesItsCachedAuthorizer(t *testing.T) {
 		t.Errorf("forgotten credentials = %v, want [%s]", rec.forgot, keyID)
 	}
 }
+
+// The add dialog creates the provider row before its keys. Answering that
+// create as a failure leaves the row in place and the dialog believing it is
+// not, so its retry POSTs the provider again and is refused as a duplicate.
+func TestAProviderTheRouterDidNotLoadIsReportedAsCreated(t *testing.T) {
+	s, db := testServerFull(t)
+	cookie, token := login(t, s)
+	breakNextReload(t, s, cookie, token)
+	spy := withSpyTrigger(s)
+
+	w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"p","kind":"openaicompat","base_url":"http://p.invalid","auth_style":"none"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s; the row was stored, so it was created", w.Code, w.Body.String())
+	}
+	got := decodeRouting(t, w.Body.Bytes())
+	if got.ID != "p" {
+		t.Errorf("reply = %+v, want the stored provider's id", got)
+	}
+	if got.RoutingUpdated == nil || *got.RoutingUpdated {
+		t.Errorf("routing_updated = %v, want false", got.RoutingUpdated)
+	}
+	if !strings.Contains(got.Warning, "saved") {
+		t.Errorf("warning = %q; it must say the change was saved but not loaded", got.Warning)
+	}
+	if _, err := db.ProviderByID(context.Background(), "p"); err != nil {
+		t.Errorf("provider row: %v, want it stored", err)
+	}
+	if len(spy.swept) != 1 || spy.swept[0] != "p" {
+		t.Errorf("swept %v, want one sweep of the keyless provider", spy.swept)
+	}
+}
