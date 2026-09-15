@@ -105,6 +105,55 @@ func TestManyCoolingTriplesReadAsOneDegradedProvider(t *testing.T) {
 	}
 }
 
+// The Providers screen judges health by enabled credentials only, because the
+// router drops a disabled one. The overview must reach the same verdict.
+func TestAProviderWhoseCredentialsAreAllDisabledIsDegraded(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p1", "https://x/v1")
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p1/keys/"+keyID, `{"enabled":false}`); w.Code != http.StatusOK {
+		t.Fatalf("disable credential: %d %s", w.Code, w.Body.String())
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 || body.Providers[0].State != "degraded" {
+		t.Errorf("tiles = %+v, want one degraded provider", body.Providers)
+	}
+}
+
+func TestACooldownOnADisabledCredentialDoesNotDegradeTheProvider(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "p1", "https://x/v1")
+	w := do(t, s, cookie, token, "POST", "/api/providers/p1/keys",
+		`{"label":"spare","secret":"sk-seed-spare-5678"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("second credential: %d %s", w.Code, w.Body.String())
+	}
+	var spare struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &spare); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/p1/keys/"+spare.ID, `{"enabled":false}`); w.Code != http.StatusOK {
+		t.Fatalf("disable credential: %d %s", w.Code, w.Body.String())
+	}
+	for j := 0; j < 5; j++ {
+		s.deps.Breaker.Record(health.Key{ProviderID: "p1", KeyID: spare.ID, Model: "m"}, health.Signal{
+			Outcome: adapter.OutcomeRetryableProvider, StatusCode: 500,
+		})
+	}
+
+	body := getOverview(t, s, cookie, token)
+	if len(body.Providers) != 1 {
+		t.Fatalf("tiles = %+v", body.Providers)
+	}
+	if got := body.Providers[0]; got.State != "healthy" || got.Cooling != 0 {
+		t.Errorf("tile = %+v, want healthy with nothing cooling", got)
+	}
+}
+
 func TestTodaysSpendSaysPricingIsNotWired(t *testing.T) {
 	// CostMicros is nil on every row: nothing computes cost, and phase 5
 	// recorded why. A confident zero would read as "today was free".
