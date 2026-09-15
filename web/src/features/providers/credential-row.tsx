@@ -5,7 +5,7 @@ import {
   TableCell, TableRow,
 } from "darkraise-ui"
 import { PasswordToggle } from "../shell/password-toggle"
-import { api } from "../../lib/api"
+import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Credential } from "../../lib/api-types"
@@ -26,8 +26,9 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
 
   const patch = useApiMutation({
     mutationFn: (vars: { enabled?: boolean; secret?: string }) =>
-      api.patch(`/api/providers/${providerId}/keys/${credential.id}`, vars),
+      routingNotUpdated(api.patch(`/api/providers/${providerId}/keys/${credential.id}`, vars)),
     success: "Credential updated",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.health, keys.overview],
     onSuccess: () => {
       setDraftSecret("")

@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "darkraise-ui"
-import { POLL, api } from "../../lib/api"
+import { POLL, api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import {
   keys,
@@ -299,14 +299,17 @@ export function ProviderDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const toggle = useApiMutation({
-    mutationFn: (enabled: boolean) => api.patch(`/api/providers/${id}`, { enabled }),
+    mutationFn: (enabled: boolean) =>
+      routingNotUpdated(api.patch(`/api/providers/${id}`, { enabled })),
     success: "Provider updated",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.overview, keys.health, keys.discovery],
   })
   const allowUnsanctioned = useApiMutation({
     mutationFn: (allow: boolean) =>
-      api.patch(`/api/providers/${id}`, { allow_unsanctioned_free: allow }),
+      routingNotUpdated(api.patch(`/api/providers/${id}`, { allow_unsanctioned_free: allow })),
     success: "Provider updated",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.models],
   })
   // No row is not the same as no such provider: the list holds every provider

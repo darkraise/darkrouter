@@ -10,7 +10,7 @@ import {
   Input,
   Label,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Provider } from "../../lib/api-types"
@@ -104,8 +104,9 @@ export function ProviderSettingsDialog({
 
   const save = useApiMutation({
     mutationFn: (patch: Record<string, unknown>) =>
-      api.patch(`/api/providers/${provider.id}`, patch),
+      routingNotUpdated(api.patch(`/api/providers/${provider.id}`, patch)),
     success: "Provider settings saved",
+    warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.overview],
     onSuccess: () => onOpenChange(false),
   })

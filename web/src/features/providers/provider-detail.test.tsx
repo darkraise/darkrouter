@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import { ProviderDetail } from "./provider-detail"
 import type { Preset, Provider } from "../../lib/api-types"
 
@@ -335,6 +336,63 @@ describe("switching a provider back on", () => {
       expect(keys).toContain(JSON.stringify(["health", "providers"]))
       expect(keys).toContain(JSON.stringify(["health", "discovery"]))
     })
+  })
+})
+
+describe("a change saved but not yet routed", () => {
+  // The server answers 500 with routing_updated:false: the write committed,
+  // so the page must say it was saved rather than that it failed.
+  function patchesCommitButDoNotRoute() {
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      (init as RequestInit)?.method === "PATCH"
+        ? new Response(
+            JSON.stringify({ error: "the change was saved, but the gateway could not load it", routing_updated: false }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          )
+        : routes(url, init),
+    )
+  }
+
+  it.each([
+    ["the provider switch", { ...configured, enabled: false }, "Enable"],
+    [
+      "a credential switch",
+      { ...configured, credentials: [{ ...cred, enabled: false }] },
+      "Enable",
+    ],
+  ])("warns instead of failing for %s", async (_what, row, button) => {
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    stub([row], [preset])
+    patchesCommitButDoNotRoute()
+    await renderProvider("groq")
+
+    await userEvent.click(await screen.findByRole("button", { name: button }))
+
+    await waitFor(() =>
+      expect(warning).toHaveBeenCalledWith(expect.stringMatching(/saved, but the gateway could not load it/)),
+    )
+    expect(error).not.toHaveBeenCalled()
+    warning.mockRestore()
+    error.mockRestore()
+  })
+
+  it("warns instead of failing for the unsanctioned-tier opt-in", async () => {
+    const warning = vi.spyOn(toast, "warning")
+    const error = vi.spyOn(toast, "error")
+    stub([configured], [preset])
+    patchesCommitButDoNotRoute()
+    await renderProvider("groq")
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /use models the vendor hasn't sanctioned/i }),
+    )
+
+    await waitFor(() => expect(warning).toHaveBeenCalled())
+    expect(error).not.toHaveBeenCalled()
+    warning.mockRestore()
+    error.mockRestore()
   })
 })
 
