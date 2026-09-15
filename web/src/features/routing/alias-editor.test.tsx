@@ -82,6 +82,26 @@ describe("a chain at rest", () => {
     expect(screen.getByText(/routes nowhere/i)).toBeInTheDocument()
   })
 
+  it("keeps its actions in one group, apart from the targets", () => {
+    // A narrow row wraps the group as a unit. Loose buttons shared a line
+    // with a target list that had no width of its own, and painted over it.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor
+          aliases={{ chain: ["groq/a"] }}
+          knownProviders={["groq"]}
+          context={context}
+          onPreview={() => {}}
+        />
+      </QueryClientProvider>,
+    )
+    const group = screen.getByRole("button", { name: "Preview" }).parentElement
+    expect(screen.getByRole("button", { name: "Edit" }).parentElement).toBe(group)
+    expect(screen.getByRole("button", { name: "Remove" }).parentElement).toBe(group)
+    expect(group?.contains(screen.getByText("groq/a"))).toBe(false)
+  })
+
   it("asks before dropping a whole chain", () => {
     mount({ chain: ["groq/a"] })
     fireEvent.click(screen.getByRole("button", { name: "Remove" }))
