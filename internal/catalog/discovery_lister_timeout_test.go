@@ -112,9 +112,10 @@ func TestTheProbeTimeoutBoundsEachListerCallNotTheWholeListing(t *testing.T) {
 		Credentials: []provider.Credential{{ID: "k", Secret: "AKIA:secret", Enabled: true}},
 	}}}
 	d := NewDiscoverer(db, src, NewStore(db, src), &fakeHealth{}, DiscoveryOptions{
-		Timeout: 200 * time.Millisecond,
+		Timeout: 400 * time.Millisecond,
 		Auth:    fakeAuthResolver{header: "signed"},
-		Listers: map[string]KindLister{"bedrock": slowSignedLister{calls: 3, each: 120 * time.Millisecond}},
+		// Each call is a tenth of the timeout; together they are well past it.
+		Listers: map[string]KindLister{"bedrock": slowSignedLister{calls: 15, each: 40 * time.Millisecond}},
 	})
 	d.SweepOnce(context.Background())
 
