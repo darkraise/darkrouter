@@ -146,6 +146,40 @@ func TestAMovedBaseURLListsWhereItServes(t *testing.T) {
 	}
 }
 
+func TestARowCreatedBeforeAPresetBaseChangeKeepsItsListing(t *testing.T) {
+	// Rows copy the preset's base URL when they are created, and presets are
+	// regenerated. A row left on the vendor's previous path is still on the
+	// vendor, and several vendors do not list at base + /models.
+	presets, err := LoadPresets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ preset, regeneratedBase string }{
+		{preset: "command-code", regeneratedBase: "https://api.commandcode.ai/v1"},
+		{preset: "free-ai", regeneratedBase: "https://api.free.ai/v1"},
+	} {
+		t.Run(tc.preset, func(t *testing.T) {
+			pre, ok := presets[tc.preset]
+			if !ok || pre.ModelsURL == "" {
+				t.Fatalf("preset %q has no models_url to keep", tc.preset)
+			}
+			rowBase := pre.BaseURL
+			pre.BaseURL = tc.regeneratedBase
+			pr, err := ProbeFor(provider.Provider{ID: "p", Kind: pre.Kind, BaseURL: rowBase}, pre, "sk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := BuildListRequest(context.Background(), pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.URL.String() != pre.ModelsURL {
+				t.Errorf("listed %s, want the preset's %s", r.URL, pre.ModelsURL)
+			}
+		})
+	}
+}
+
 func TestBuildListRequestCustomAPIKeyHeader(t *testing.T) {
 	r, _ := BuildListRequest(context.Background(), Probe{
 		Kind: "openaicompat", BaseURL: "https://x/v1",
