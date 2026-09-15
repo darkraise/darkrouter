@@ -152,3 +152,66 @@ func TestEveryTimeoutCauseIsTheDarkrouterTimeout(t *testing.T) {
 		}
 	}
 }
+
+// The timer can fire in the instant the attempt moves it to another bound.
+// That firing is the old bound expiring, and it is what cancels the attempt,
+// so the cause it records must name the old bound rather than the new one.
+func TestAFiringUnderwayKeepsTheNameOfTheBoundThatFired(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		fired timeoutBound
+		rearm func(*AttemptCtx)
+		want  string
+	}{
+		{name: "moved to idle", fired: boundFirstByte, want: "first_byte",
+			rearm: func(ac *AttemptCtx) { ac.resetIdle() }},
+		{name: "moved to a new send", fired: boundIdle, want: "idle",
+			rearm: func(ac *AttemptCtx) { ac.resetSend() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Policy.Timeout.Idle = time.Hour
+			ac := &AttemptCtx{Cfg: cfg, bud: budget{deadline: time.Now().Add(10 * time.Hour), perTry: time.Hour}}
+			ac.bound.Store(int32(tc.fired))
+			ac.connected.Store(true)
+			ac.idleArmed = tc.fired == boundIdle
+
+			started, release := make(chan struct{}), make(chan struct{})
+			causes := make(chan error, 1)
+			ac.Timer = time.AfterFunc(0, func() {
+				close(started)
+				<-release
+				causes <- ac.firedCause()
+			})
+			defer ac.Timer.Stop()
+			<-started
+
+			tc.rearm(ac)
+			close(release)
+			if got := <-causes; got.Error() != "darkrouter: "+tc.want+" timeout exceeded" {
+				t.Errorf("cause = %q, want the %s bound that fired", got, tc.want)
+			}
+		})
+	}
+}
+
+// A timer held off during a write to the client is renamed when it is armed
+// again: before the first write idle may be capped by total, after it only
+// idle applies.
+func TestATimerHeldForAWriteTakesItsNewBound(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Policy.Timeout.Idle = time.Hour
+	ac := &AttemptCtx{Cfg: cfg, bud: budget{deadline: time.Now().Add(30 * time.Minute)}}
+	ac.Timer = time.AfterFunc(time.Hour, func() {})
+	defer ac.Timer.Stop()
+
+	ac.resetIdle()
+	if got := timeoutBound(ac.bound.Load()); got != boundTotal {
+		t.Fatalf("bound = %v before the first write, want total", got)
+	}
+	ac.beginWrite()
+	ac.endWrite()
+	if got := timeoutBound(ac.bound.Load()); got != boundIdle {
+		t.Errorf("bound = %v after a write, want idle", got)
+	}
+}

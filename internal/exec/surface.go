@@ -117,8 +117,10 @@ type AttemptCtx struct {
 	// secret is this attempt's credential, so a failed send's text can be
 	// cleared of it before anyone reads it.
 	secret string
-	// idleArmed records that idle has replaced the pre-commit deadline.
+	// idleArmed records that idle has replaced the pre-commit deadline, and
+	// timerHeld that a write to the client stopped the timer before it fired.
 	idleArmed bool
+	timerHeld bool
 	// bound is the timeoutBound the timer is enforcing, and connected records
 	// that the current send has a connection. Both are read by the timer's
 	// own goroutine when it fires.
@@ -192,8 +194,8 @@ func (ac *AttemptCtx) delivered(cw *CommitWriter) (adapter.Outcome, *ir.Error) {
 // first and blame the provider for the client's stall.
 func (ac *AttemptCtx) beginWrite() {
 	ac.committed = true
-	if ac.Timer != nil && ac.idleArmed {
-		ac.Timer.Stop()
+	if ac.Timer != nil && ac.idleArmed && ac.Timer.Stop() {
+		ac.timerHeld = true
 	}
 }
 
@@ -224,8 +226,7 @@ func (ac *AttemptCtx) resetIdle() {
 				d, b = left, boundTotal
 			}
 		}
-		ac.bound.Store(int32(b))
-		ac.Timer.Reset(d)
+		ac.rearm(d, b, false)
 	}
 }
 
@@ -238,20 +239,33 @@ func (ac *AttemptCtx) resetSend() {
 		return
 	}
 	ac.idleArmed = false
-	ac.Timer.Reset(time.Until(ac.sendDeadline(time.Now())))
+	d, b := ac.sendDeadline(time.Now())
+	ac.rearm(time.Until(d), b, true)
 }
 
-// sendDeadline is the bound on a send starting at now, and records which
-// setting it is.
-func (ac *AttemptCtx) sendDeadline(now time.Time) time.Time {
-	d := ac.bud.attemptDeadline(now)
-	b := boundFirstByte
-	if d.Equal(ac.bud.deadline) {
-		b = boundTotal
+// rearm moves the timer to bound b, d from now. The timer's name changes only
+// when Stop shows no firing has started: a firing that has is the old bound
+// expiring, it is what cancels the attempt, and it reads the name when it
+// runs. A send also starts without a connection.
+func (ac *AttemptCtx) rearm(d time.Duration, b timeoutBound, send bool) {
+	if ac.Timer.Stop() || ac.timerHeld {
+		if send {
+			ac.connected.Store(false)
+		}
+		ac.bound.Store(int32(b))
 	}
-	ac.connected.Store(false)
-	ac.bound.Store(int32(b))
-	return d
+	ac.timerHeld = false
+	ac.Timer.Reset(d)
+}
+
+// sendDeadline is the bound on a send starting at now, and which setting it
+// is.
+func (ac *AttemptCtx) sendDeadline(now time.Time) (time.Time, timeoutBound) {
+	d := ac.bud.attemptDeadline(now)
+	if d.Equal(ac.bud.deadline) {
+		return d, boundTotal
+	}
+	return d, boundFirstByte
 }
 
 // firedCause is the cause the timer cancels the attempt with.
