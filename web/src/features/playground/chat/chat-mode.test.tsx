@@ -297,6 +297,54 @@ describe("Chat mode", () => {
     await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
   })
 
+  it("holds an exchange sent before its thread's id arrived behind that thread's failed save", async () => {
+    // The second send starts while the create is still out, so it leaves
+    // without an id, and ends after the first exchange has one. Keyed apart,
+    // it was saved past the first exchange's held answer.
+    let releaseCreate = () => {}
+    const created = new Promise<void>((resolve) => {
+      releaseCreate = resolve
+    })
+    let releaseSecondStream = () => {}
+    const secondStream = new Promise<void>((resolve) => {
+      releaseSecondStream = resolve
+    })
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        await created
+        return { ...stored, id: "new1", title: "first" }
+      }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.role === "assistant" && body.content === "an answer") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    let streams = 0
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+    ) {
+      const second = streams++ === 1
+      onStart?.({ requestId: "01NEW" })
+      if (second) await secondStream
+      yield `data: ${JSON.stringify({ choices: [{ delta: { content: second ? "later" : "an answer" } }] })}\n\n`
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+    await send("second")
+    await waitFor(() => expect(streamMock).toHaveBeenCalledTimes(2))
+
+    releaseCreate()
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+    releaseSecondStream()
+
+    expect(await screen.findByText(/2 exchanges were not saved/i)).toBeInTheDocument()
+    expect(posts).not.toContain("user:second")
+  })
+
   it("retries an unsaved exchange on request", async () => {
     let failing = true
     const posts: string[] = []

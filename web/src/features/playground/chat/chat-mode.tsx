@@ -147,6 +147,11 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // mid-answer still creates its conversation after the next thread has
   // started, and that create is not the next thread's.
   const creating = useRef(new Map<number, Promise<PlaygroundConversation>>())
+  // What each selection's create resolved to. An exchange sent before the id
+  // arrived and finished after it would otherwise queue under the selection
+  // while its thread's earlier exchanges queue under the id, and could be
+  // saved past one of them that is held.
+  const createdIds = useRef(new Map<number, string>())
   // Changes whenever the operator chooses which conversation owns the
   // screen. A create may still finish after that choice; it should persist
   // the completed turn, but it must not move the screen back to the thread it
@@ -173,7 +178,8 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   const [unsaved, setUnsaved] = useState(0)
 
   function persistTurn(turn: CompletedTurn, owner: ExchangeOwner) {
-    backlog.current.push({ turn, owner, id: owner.id, userSeq: null, failed: false })
+    const id = owner.id || (createdIds.current.get(owner.selection) ?? "")
+    backlog.current.push({ turn, owner, id, userSeq: null, failed: false })
     void drain()
   }
 
@@ -247,6 +253,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
         }
         const made = await pending
         id = made.id
+        createdIds.current.set(owner.selection, id)
         for (const waiting of backlog.current) {
           if (waiting.id === "" && waiting.owner.selection === owner.selection) waiting.id = id
         }
