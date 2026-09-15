@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -264,7 +266,7 @@ func budgetFloor(model string) int {
 }
 
 // isPro reports a model that cannot turn thinking off: 2.5 Pro takes no zero
-// budget, and Gemini 3 Pro takes no minimal level.
+// budget.
 func isPro(model string) bool {
 	return strings.Contains(strings.ToLower(model), "-pro")
 }
@@ -274,6 +276,13 @@ func isPro(model string) bool {
 // it on others; the level is the control the generation documents.
 func isGemini3(model string) bool {
 	return strings.Contains(strings.ToLower(model), "gemini-3")
+}
+
+// nonThinking reports a generation from before thinking existed. It takes no
+// thinkingConfig, so a request to turn thinking off is already honored.
+func nonThinking(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "gemini-1.") || strings.Contains(m, "gemini-2.0-")
 }
 
 // thinkingLevel maps the IR effort vocabulary onto Gemini 3's levels.
@@ -289,6 +298,66 @@ func thinkingLevel(effort string) string {
 		return "high"
 	}
 	return ""
+}
+
+var levelOrder = []string{"minimal", "low", "medium", "high"}
+
+var gemini3Model = regexp.MustCompile(`gemini-(3(?:\.\d+)?)-([a-z-]+)`)
+
+// gemini3Levels is the set of thinking levels a Gemini 3 model accepts, in
+// levelOrder, per Google's thinking guides for the Gemini API and Vertex.
+// Every other level is a 400.
+//
+// minimal is granted only to the models documented with it: the two newest
+// Flash models dropped it, so an unrecognized one is assumed not to take it.
+// low, medium and high are what every other text model takes, except 3 Pro,
+// which has no medium.
+func gemini3Levels(model string) []string {
+	all := levelOrder
+	noMinimal := levelOrder[1:]
+	match := gemini3Model.FindStringSubmatch(strings.ToLower(model))
+	if match == nil {
+		return noMinimal
+	}
+	version, variant := match[1], match[2]
+	switch {
+	case strings.Contains(variant, "image") && strings.HasPrefix(variant, "pro"):
+		return []string{"high"}
+	case strings.Contains(variant, "image"):
+		return []string{"minimal", "high"}
+	case strings.HasPrefix(variant, "pro"):
+		if version == "3" {
+			return []string{"low", "high"}
+		}
+		return noMinimal
+	case strings.HasPrefix(variant, "flash-lite"):
+		if version == "3.1" || version == "3.5" {
+			return all
+		}
+	case strings.HasPrefix(variant, "flash"):
+		if version == "3" || version == "3.5" || version == "3.6" {
+			return all
+		}
+	}
+	return noMinimal
+}
+
+// nearestLevel picks the supported level closest to the one asked for,
+// rounding up on a tie: too much thinking costs tokens, too little silently
+// degrades the answer.
+func nearestLevel(level string, supported []string) string {
+	want := slices.Index(levelOrder, level)
+	best, bestDist := supported[0], len(levelOrder)
+	for _, s := range supported {
+		d := slices.Index(levelOrder, s) - want
+		if d < 0 {
+			d = -d
+		}
+		if d <= bestDist {
+			best, bestDist = s, d
+		}
+	}
+	return best
 }
 
 // effortBudget extends xlate.EffortBudget to the ends of the vocabulary it
@@ -309,17 +378,21 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 		return nil, nil
 	}
 	if r.Disabled {
-		if !isPro(model) {
-			return map[string]any{"thinkingBudget": 0}, nil
-		}
-		warns := []ir.Warning{{
+		cannotDisable := []ir.Warning{{
 			Field: "reasoning", Target: targetName,
 			Reason: "this model cannot turn thinking off; sent with the least thinking it accepts",
 		}}
-		if isGemini3(model) {
-			return map[string]any{"thinkingLevel": "low"}, warns
+		switch {
+		// No Gemini 3 model turns thinking fully off, and a zero budget is not
+		// its control; its lowest level is the documented nearest thing.
+		case isGemini3(model):
+			return map[string]any{"thinkingLevel": gemini3Levels(model)[0]}, cannotDisable
+		case nonThinking(model):
+			return nil, nil
+		case isPro(model):
+			return map[string]any{"thinkingBudget": budgetFloorPro}, cannotDisable
 		}
-		return map[string]any{"thinkingBudget": budgetFloorPro}, warns
+		return map[string]any{"thinkingBudget": 0}, nil
 	}
 	cap := budgetCap(model)
 	if isGemini3(model) {
@@ -328,15 +401,19 @@ func thinkingConfig(model string, r *ir.Reasoning) (map[string]any, []ir.Warning
 			effort = xlate.BudgetEffort(r.Budget)
 		}
 		if level := thinkingLevel(effort); level != "" {
-			if level == "minimal" && isPro(model) {
-				level = "low"
-			}
 			warns := []ir.Warning(nil)
 			if r.Effort == "" {
 				warns = append(warns, ir.Warning{
 					Field: "reasoning.budget", Target: targetName,
 					Reason: "Gemini 3 takes a thinking level, not a budget; converted to the nearest level",
 				})
+			}
+			if sent := nearestLevel(level, gemini3Levels(model)); sent != level {
+				warns = append(warns, ir.Warning{
+					Field: "reasoning.effort", Target: targetName,
+					Reason: "this model has no " + level + " thinking level; sent " + sent,
+				})
+				level = sent
 			}
 			return map[string]any{"thinkingLevel": level, "includeThoughts": true}, warns
 		}

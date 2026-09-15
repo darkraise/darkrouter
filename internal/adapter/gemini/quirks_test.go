@@ -130,6 +130,54 @@ func TestThinkingConfigDisabledOnAModelThatAlwaysThinks(t *testing.T) {
 	}
 }
 
+// Google's per-model thinking levels (Gemini API and Vertex thinking guides):
+// 3 Pro takes low and high; 3.1 Pro has no minimal; 3.7 and 3.8 Flash reject
+// minimal; the Flash image models take minimal and high, 3 Pro Image high
+// only. No Gemini 3 model turns thinking fully off, and thinkingLevel is an
+// error before Gemini 3, whose non-thinking generations take no thinking
+// config at all.
+func TestThinkingConfigFollowsEachModelsLevels(t *testing.T) {
+	cases := []struct {
+		model     string
+		reasoning ir.Reasoning
+		level     any
+		budget    any
+		warned    bool
+	}{
+		{"gemini-3-pro-preview", ir.Reasoning{Effort: "medium"}, "high", nil, true},
+		{"gemini-3-pro-preview", ir.Reasoning{Effort: "low"}, "low", nil, false},
+		{"gemini-3.1-pro-preview", ir.Reasoning{Effort: "medium"}, "medium", nil, false},
+		{"gemini-3.1-pro-preview", ir.Reasoning{Effort: "minimal"}, "low", nil, true},
+		{"gemini-3.8-flash", ir.Reasoning{Effort: "minimal"}, "low", nil, true},
+		{"gemini-3-flash-preview", ir.Reasoning{Effort: "minimal"}, "minimal", nil, false},
+		{"gemini-3.1-flash-lite-preview", ir.Reasoning{Effort: "minimal"}, "minimal", nil, false},
+		{"gemini-3.1-flash-image-preview", ir.Reasoning{Effort: "low"}, "minimal", nil, true},
+		{"gemini-3-pro-image-preview", ir.Reasoning{Effort: "low"}, "high", nil, true},
+
+		{"gemini-3-flash-preview", ir.Reasoning{Disabled: true}, "minimal", nil, true},
+		{"gemini-3.8-flash", ir.Reasoning{Disabled: true}, "low", nil, true},
+		{"gemini-3-pro-preview", ir.Reasoning{Disabled: true}, "low", nil, true},
+		{"gemini-2.5-flash", ir.Reasoning{Disabled: true}, nil, float64(0), false},
+		{"gemini-2.5-pro", ir.Reasoning{Disabled: true}, nil, float64(128), true},
+		{"gemini-1.5-pro", ir.Reasoning{Disabled: true}, nil, nil, false},
+		{"gemini-2.0-pro-exp-02-05", ir.Reasoning{Disabled: true}, nil, nil, false},
+	}
+	for _, c := range cases {
+		r := c.reasoning
+		body, warns := builtFor(t, c.model, &ir.Request{Reasoning: &r})
+		tc := thinking(body)
+		if tc["thinkingLevel"] != c.level || tc["thinkingBudget"] != c.budget {
+			t.Errorf("%s %+v: thinkingConfig = %v, want level %v budget %v", c.model, c.reasoning, tc, c.level, c.budget)
+		}
+		if c.level == nil && c.budget == nil && tc != nil {
+			t.Errorf("%s %+v: thinkingConfig = %v, want none", c.model, c.reasoning, tc)
+		}
+		if (len(warns) > 0) != c.warned {
+			t.Errorf("%s %+v: warnings = %v", c.model, c.reasoning, warns)
+		}
+	}
+}
+
 func TestThinkingConfigSendsALevelToGemini3(t *testing.T) {
 	body, warns := builtFor(t, "gemini-3-pro-preview", &ir.Request{Reasoning: &ir.Reasoning{Effort: "xhigh"}})
 	tc := thinking(body)
