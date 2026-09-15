@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -24,11 +25,26 @@ func EndpointFor(region string) string {
 	return "https://bedrock-runtime." + region + ".amazonaws.com"
 }
 
+// regionShape is one hostname label: us-east-1, us-gov-west-1. A dot, slash
+// or @ would send the signed request to another host.
+var regionShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
+
+// CheckRegion refuses a region that would not form the documented endpoint.
+func CheckRegion(region string) error {
+	if !regionShape.MatchString(region) {
+		return fmt.Errorf("bedrock region %q is not a region name such as us-east-1", region)
+	}
+	return nil
+}
+
 func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
 	base := strings.TrimRight(t.BaseURL, "/")
 	if base == "" {
 		if t.Region == "" {
 			return nil, nil, fmt.Errorf("bedrock target has neither a base url nor a region")
+		}
+		if err := CheckRegion(t.Region); err != nil {
+			return nil, nil, err
 		}
 		base = EndpointFor(t.Region)
 	}

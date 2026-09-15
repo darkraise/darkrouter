@@ -110,8 +110,8 @@ func publisherOf(t *adapter.Target) string {
 }
 
 func (a *Adapter) BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*http.Request, []ir.Warning, error) {
-	if t.Project == "" || t.Location == "" {
-		return nil, nil, fmt.Errorf("vertex target needs a project and a location")
+	if err := CheckEndpoint(t.Project, t.Location); err != nil {
+		return nil, nil, err
 	}
 	switch publisherOf(t) {
 	case PublisherGoogle:

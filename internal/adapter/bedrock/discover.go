@@ -67,6 +67,9 @@ func (l *Lister) List(ctx context.Context, p catalog.Probe) ([]catalog.Discovere
 		if p.Region == "" {
 			return nil, errors.New("bedrock discovery needs a region")
 		}
+		if err := CheckRegion(p.Region); err != nil {
+			return nil, err
+		}
 		base = ControlPlaneFor(p.Region)
 	}
 
