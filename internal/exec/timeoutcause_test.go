@@ -11,8 +11,70 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/config"
+	"github.com/darkraise/darkrouter/internal/provider"
 )
+
+// refreshingAuth reaches a token endpoint before it authorizes, through the
+// context it is handed, as an OAuth credential due for refresh does.
+type refreshingAuth struct{ tokenURL string }
+
+func (a refreshingAuth) For(ctx context.Context, _ auth.Target, _ auth.Credential) (auth.Authorizer, error) {
+	tr := &http.Transport{}
+	defer tr.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, "GET", a.tokenURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := (&http.Client{Transport: tr}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	_ = resp.Body.Close()
+	return func(context.Context, *http.Request) error { return nil }, nil
+}
+
+// hangingDial is a dial that never completes until the attempt gives up.
+func hangingDial(done <-chan struct{}) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, _, _ string) (net.Conn, error) {
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
+		return nil, errors.New("dial abandoned")
+	}
+}
+
+// A connection the credential made on its way to a token endpoint is not a
+// connection for the send. A send that then never connects is still waiting
+// to connect.
+func TestAConnectionMadeForTheCredentialIsNotTheSends(t *testing.T) {
+	token := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer token.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer up.Close()
+	done := make(chan struct{})
+	defer close(done)
+
+	fleet := []provider.Provider{{
+		ID: "groq", Models: []string{"m"}, AuthStyle: auth.StyleOAuth,
+		Credentials: []provider.Credential{{ID: "g1", Secret: "g1", Enabled: true}},
+	}}
+	logger := &captureLogger{}
+	e, _ := loopExecutor(t, up, fleet, logger, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 50 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 100 * time.Millisecond
+	})
+	e.deps.Auth = refreshingAuth{tokenURL: token.URL}
+	e.client.Transport.(*http.Transport).DialContext = hangingDial(done)
+	post(t, e, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`)
+
+	a := logger.only(t).Attempts
+	if len(a) == 0 || !strings.Contains(a[0].Error, "darkrouter: connect timeout exceeded") {
+		t.Errorf("attempts = %+v, want an error naming connect", a)
+	}
+}
 
 // stall holds a handler until the client leaves or the test's upstream closes,
 // whichever is first, so a timed-out request does not keep the server open.
