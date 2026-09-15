@@ -202,6 +202,14 @@ clears it while the stale value is still in force.
 Providers, aliases and policy are owned by the database and edited in the
 console.
 
+`server.shutdown_grace` applies on reload, but the container's
+`stop_grace_period` does not: both compose files set it to 30s, after which
+Docker sends SIGKILL. Shutdown needs a few seconds past the grace to close
+streams and flush the request log, so raising `shutdown_grace` above 25s adds a
+warning to `warnings`. Raise `stop_grace_period` in the compose file to at
+least the new grace plus 5s and recreate the container, or the extra grace is
+cut short by the kill.
+
 ## Exposure
 
 Both ports bind every interface, so the LAN reaches them directly. Neither
