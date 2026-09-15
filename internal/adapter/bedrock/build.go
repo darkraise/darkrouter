@@ -378,8 +378,12 @@ func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warnin
 		// A typed tool runs on its own provider's side. Rendering it as a
 		// toolSpec would have the model call a function nobody implements.
 		if _, typed := t.Extra["type"]; typed {
+			field := "tools[]." + t.Name
+			if t.Name == "" {
+				field = "tools[].type"
+			}
 			warns = append(warns, ir.Warning{
-				Field: "tools[]." + t.Name, Target: targetName,
+				Field: field, Target: targetName,
 				Reason: "provider-run tool has no Converse equivalent; dropped",
 			})
 			continue

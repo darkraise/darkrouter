@@ -242,9 +242,16 @@ type Tool struct {
 	Extra map[string]json.RawMessage `json:",omitempty"`
 }
 
-// BuiltIn reports whether the tool is a provider-side capability rather than
-// a function the client implements.
-func (t Tool) BuiltIn() bool { return t.Name == "" && len(t.Extra) > 0 }
+// BuiltIn reports whether the tool is another dialect's built-in, such as
+// Gemini's googleSearch, rather than a function the client implements.
+//
+// A typed tool is not one, even without a name: Anthropic's mcp_toolset is
+// nameless, and it is Anthropic's own tool, which its dialect renders whole
+// and every other target handles as a typed server tool.
+func (t Tool) BuiltIn() bool {
+	_, typed := t.Extra["type"]
+	return t.Name == "" && len(t.Extra) > 0 && !typed
+}
 
 type ToolChoice struct {
 	Mode string // "auto" | "none" | "any" | "tool"

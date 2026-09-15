@@ -656,6 +656,32 @@ func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
 	}
 }
 
+func TestNamelessTypedToolIsRenderedNotDropped(t *testing.T) {
+	_, body, warns := built(t, &ir.Request{
+		Messages: []ir.Message{userMsg("hi")},
+		Tools: []ir.Tool{{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}}},
+	})
+	tools, _ := body["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %v; an mcp_toolset is Anthropic's own tool", body["tools"])
+	}
+	got := tools[0].(map[string]any)
+	if got["type"] != "mcp_toolset" || got["mcp_server_name"] != "srv" {
+		t.Errorf("tool = %v", got)
+	}
+	for _, k := range []string{"name", "input_schema"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("tool = %v; a typed tool takes no %s", got, k)
+		}
+	}
+	for _, w := range warns {
+		if strings.HasPrefix(w.Field, "tools[]") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	}
+}
+
 func TestToolCacheControlCountsTowardTheBreakpointBudget(t *testing.T) {
 	cc := &ir.CacheControl{Type: "ephemeral"}
 	_, body, warns := built(t, &ir.Request{
