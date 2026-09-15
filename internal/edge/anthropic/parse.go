@@ -2,6 +2,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -291,5 +292,9 @@ func sourceToMedia(s *wireSource) *ir.Media {
 	if s == nil {
 		return nil
 	}
-	return &ir.Media{MIME: s.MediaType, Data: s.Data, URL: s.URL, FileID: s.FileID}
+	data := s.Data
+	if s.Type == "text" {
+		data = base64.StdEncoding.EncodeToString([]byte(s.Data))
+	}
+	return &ir.Media{MIME: s.MediaType, Data: data, URL: s.URL, FileID: s.FileID}
 }
