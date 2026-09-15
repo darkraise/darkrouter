@@ -119,7 +119,7 @@ func TestBuildRequestMapsToolChoiceModes(t *testing.T) {
 func TestBuildRequestFillsGenerationConfig(t *testing.T) {
 	temp, top := 0.7, 0.9
 	k, max := 40, 512
-	_, body, _ := built(t, &ir.Request{
+	body, _ := builtFor(t, "gemini-2.5-flash", &ir.Request{
 		Messages:       []ir.Message{userMsg("hi")},
 		Temperature:    &temp,
 		TopP:           &top,
