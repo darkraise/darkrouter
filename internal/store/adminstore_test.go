@@ -1178,9 +1178,9 @@ func TestRecentStatsCountsOnlyFailuresAsErrors(t *testing.T) {
 	w := NewLogWriter(db, LogOptions{})
 	now := time.Now()
 	var recs []*RequestRecord
-	for _, status := range []string{"success", "error", "cancelled", "cancelled"} {
+	for i, status := range []string{"success", "error", "cancelled", "cancelled"} {
 		recs = append(recs, &RequestRecord{
-			ID: "r-" + status + "-" + time.Now().Format("150405.000000000"), TS: now.Add(-time.Minute),
+			ID: fmt.Sprintf("r-%d-%s", i, status), TS: now.Add(-time.Minute),
 			Status: status,
 		})
 	}
