@@ -5,8 +5,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +124,102 @@ func TestRotateKeyRotatesAStoppedDatabase(t *testing.T) {
 		t.Fatalf("rotate-key left the database locked: %v", err)
 	}
 	_ = unlock()
+}
+
+// lockUnavailable makes every lock fail as a mount without lock support does.
+func lockUnavailable(t *testing.T) {
+	t.Helper()
+	prev := lockDatabase
+	lockDatabase = func(string) (func() error, error) {
+		return nil, fmt.Errorf("lock: %w", store.ErrLockUnavailable)
+	}
+	t.Cleanup(func() { lockDatabase = prev })
+}
+
+// Where the lock cannot be taken, rotate-key cannot tell whether a gateway is
+// running, and a rotation beside one corrupts credentials. It refuses unless
+// the operator says the gateway is stopped.
+func TestRotateKeyRefusesWhenTheDatabaseCannotBeLocked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.db")
+	credentialDB(t, path, "old-master")
+	lockUnavailable(t)
+
+	t.Setenv("DARKROUTER_MASTER_KEY", "old-master")
+	withStdin(t, "new-master\n")
+	err := runRotateKey([]string{"-db", path})
+	if !errors.Is(err, store.ErrLockUnavailable) || !strings.Contains(err.Error(), "-gateway-stopped") {
+		t.Fatalf("rotate-key with no lock available = %v, want a refusal naming -gateway-stopped", err)
+	}
+
+	ctx := context.Background()
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.OpenKeyring(ctx, db, "old-master"); err != nil {
+		t.Errorf("the refused rotation changed the key anyway: %v", err)
+	}
+}
+
+func TestRotateKeyRunsUnlockedOnceTheGatewayIsConfirmedStopped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.db")
+	credentialDB(t, path, "old-master")
+	lockUnavailable(t)
+
+	t.Setenv("DARKROUTER_MASTER_KEY", "old-master")
+	withStdin(t, "new-master\n")
+	if err := runRotateKey([]string{"-db", path, "-gateway-stopped"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := store.OpenKeyring(ctx, db, "new-master"); err != nil {
+		t.Errorf("the new key does not open the rotated database: %v", err)
+	}
+}
+
+// The flag stands in for a lock that cannot be taken, never for one another
+// process holds: that is proof the gateway is running.
+func TestGatewayStoppedDoesNotOverrideAHeldLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.db")
+	credentialDB(t, path, "old-master")
+	unlock, err := store.Lock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+
+	t.Setenv("DARKROUTER_MASTER_KEY", "old-master")
+	withStdin(t, "new-master\n")
+	if err := runRotateKey([]string{"-db", path, "-gateway-stopped"}); !errors.Is(err, store.ErrDatabaseInUse) {
+		t.Fatalf("rotate-key -gateway-stopped beside a held lock = %v, want ErrDatabaseInUse", err)
+	}
+}
+
+// Refusing to start on a mount without lock support would take the gateway
+// down for a check that cannot be made; rotate-key refuses on its own there.
+func TestTheGatewayStartsWhenTheDatabaseCannotBeLocked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "darkrouter.db")
+	lockUnavailable(t)
+
+	// No key, so a gateway that gets past the lock stops at the keyring.
+	t.Setenv("DARKROUTER_MASTER_KEY", "")
+	done := make(chan error, 1)
+	go func() { done <- runServer([]string{"-db", path}) }()
+	select {
+	case err := <-done:
+		if err == nil || errors.Is(err, store.ErrLockUnavailable) ||
+			!strings.Contains(err.Error(), "DARKROUTER_MASTER_KEY") {
+			t.Fatalf("runServer with no lock available = %v, want it to reach the keyring", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("runServer did not return")
+	}
 }
 
 // The gateway takes the same lock for its lifetime, which is what makes the
