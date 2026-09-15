@@ -396,6 +396,55 @@ func TestATransientFailureDoesNotDisable(t *testing.T) {
 	}
 }
 
+// A WAF or proxy in front of the token endpoint can answer 400 or 401 with a
+// page of its own. That is not the vendor refusing the credential.
+func TestARefusalStatusWithNoJSONBodyIsTransient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"400 html":  {http.StatusBadRequest, `<html><body>Request blocked</body></html>`},
+		"401 html":  {http.StatusUnauthorized, `<html><body>Unauthorized</body></html>`},
+		"401 empty": {http.StatusUnauthorized, ``},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, srv := newAuthServer(t)
+			a.status, a.errBody = tc.status, tc.body
+			tokens := newMemTokens()
+			az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+			err := az(context.Background(), blank(t))
+			if err == nil {
+				t.Fatal("a failed refresh must be an error")
+			}
+			if errors.Is(err, ErrNeedsReconnect) {
+				t.Fatalf("error = %v; a body that is not JSON is not a refusal", err)
+			}
+			if _, disabled := tokens.disabledReason("cred-1"); disabled {
+				t.Error("a non-JSON 400/401 disabled the credential")
+			}
+		})
+	}
+}
+
+// Anthropic's token endpoint refuses in its API error shape, where "error" is
+// an object rather than an OAuth code string. The body is a live response
+// from 2026-09-15 to a refresh naming an unknown client id.
+func TestAVendorShapedRefusalStillDisables(t *testing.T) {
+	a, srv := newAuthServer(t)
+	a.status = http.StatusBadRequest
+	a.errBody = `{"type":"error","error":{"type":"invalid_request_error","message":"Client with id 00000000-0000-0000-0000-000000000000 not found"},"request_id":"req_011Cf4SsVBLtajXiNZ21v1XB"}`
+	tokens := newMemTokens()
+	az := oauthAz(t, oauthManager(t, srv, tokens), expiring(t, -time.Minute))
+
+	if err := az(context.Background(), blank(t)); err == nil {
+		t.Fatal("a refused refresh must be an error")
+	}
+	if _, disabled := tokens.disabledReason("cred-1"); !disabled {
+		t.Error("a JSON 400 from the vendor must still disable the credential")
+	}
+}
+
 // A captive portal or a CDN error page can answer 200 with HTML. That says
 // nothing about the credential, so it must not end in a disable that only a
 // manual reconnection undoes.
