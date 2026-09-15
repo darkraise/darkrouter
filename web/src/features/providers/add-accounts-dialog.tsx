@@ -297,6 +297,10 @@ export function AddAccountsDialog({
   // What the last run could not store, and why. Held in the dialog as well as
   // toasted, because the form stays open for a retry and a toast does not.
   const [notAdded, setNotAdded] = useState<AddFailure[]>([])
+  // The provider row this visit created. The providers list does not show it
+  // until its refetch lands, and a retry sent before then must not POST it
+  // again: that 409s and abandons the keys being retried.
+  const [createdId, setCreatedId] = useState<string | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
 
   // The row the free-models box reads its setting from. A preset usually has
@@ -326,6 +330,7 @@ export function AddAccountsDialog({
     setEndpoint(emptyEndpoint)
     setProgress(null)
     setNotAdded([])
+    setCreatedId(null)
     setQ("")
   }
 
@@ -334,11 +339,15 @@ export function AddAccountsDialog({
   // may have appeared since the page loaded, and a second POST would 409
   // against it.
   const target = preset ?? selected
-  const plan = provider
+  const planned = provider
     ? { needsProvider: false, provider }
     : target
       ? planFor(target, existing)
       : null
+  const plan =
+    planned?.needsProvider && createdId !== null && createdId === target?.id
+      ? { needsProvider: false }
+      : planned
   // Asked only of a row about to be created: an existing one already holds
   // them, and its settings are where they change.
   const endpointFields = plan?.needsProvider ? endpointFieldsFor(chosen?.kind) : []
@@ -359,6 +368,7 @@ export function AddAccountsDialog({
           free_models_only: accounts.freeModelsOnly,
           ...Object.fromEntries(endpointFields.map((f) => [f, endpoint[f].trim()])),
         })
+        setCreatedId(chosen.id)
       } else if (freeOnlyChange(accounts, plan)) {
         // Against a provider that already exists the flag is a setting to be
         // written, not part of the POST that creates the row. Sent on its own
