@@ -410,9 +410,17 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return "permission", 0, rejectedCredential{
 			errors.New("vertex rejected this credential: " + resp.Status)}
+	}
+	// Not rejected: Google answers 403 to a key that authenticated but whose
+	// project has the Vertex AI API disabled, lacks the IAM role, or has not
+	// enabled the model. Discarding the key would not fix any of those.
+	if resp.StatusCode == http.StatusForbidden {
+		return "permission", 0, errors.New("vertex refused this call: " + resp.Status +
+			"; check that the Vertex AI API is enabled, the service account has an IAM role " +
+			"allowing it, and the model is enabled in the project")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "reachability", 0, errors.New("vertex returned " + resp.Status)
