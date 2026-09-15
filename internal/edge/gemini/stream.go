@@ -146,6 +146,23 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 		return nil
 	}
 
+	// The IR carries a thought's signature on a delta after its text, while
+	// Gemini requires the signature back on the exact part it came with. The
+	// latest thought part is held for one event so a signature that follows
+	// can rejoin it.
+	var (
+		held    map[string]any
+		heldIdx int
+	)
+	flushThought := func() error {
+		if held == nil {
+			return nil
+		}
+		p := held
+		held = nil
+		return partChunk([]any{p})
+	}
+
 	terminal := func(reason string) error {
 		return cw.send(map[string]any{
 			"candidates": []any{map[string]any{
@@ -171,6 +188,9 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 			if e.Type == ir.ErrContentFilter {
 				reason = "SAFETY"
 			}
+			if ferr := flushThought(); ferr != nil {
+				return ferr
+			}
 			if serr := cw.send(map[string]any{
 				"candidates": []any{map[string]any{
 					"content":      map[string]any{"role": "model", "parts": []any{}},
@@ -187,6 +207,18 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 				return serr
 			}
 			return cw.close()
+		}
+
+		if d := ev.Delta; held != nil && ev.Type == ir.EventContentDelta && d != nil &&
+			d.Type == ir.BlockThinking && d.Thinking == "" && d.Signature != "" && ev.Index == heldIdx {
+			held["thoughtSignature"] = d.Signature
+			if err := flushThought(); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := flushThought(); err != nil {
+			return err
 		}
 
 		switch ev.Type {
@@ -216,8 +248,10 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 				p := map[string]any{"text": ev.Delta.Thinking, "thought": true}
 				if ev.Delta.Signature != "" {
 					p["thoughtSignature"] = ev.Delta.Signature
+					sendErr = partChunk([]any{p})
+				} else {
+					held, heldIdx = p, ev.Index
 				}
-				sendErr = partChunk([]any{p})
 			case ir.BlockToolUse:
 				pc, ok := calls[ev.Index]
 				if !ok {
@@ -267,6 +301,9 @@ func writeStream(w http.ResponseWriter, events iter.Seq2[ir.StreamEvent, error],
 	// Terminate once the sequence ends, whether or not a message_stop arrived:
 	// without it the array form is never closed and the client sees truncated
 	// JSON.
+	if err := flushThought(); err != nil {
+		return err
+	}
 	if err := flushAllCalls(); err != nil {
 		return err
 	}
