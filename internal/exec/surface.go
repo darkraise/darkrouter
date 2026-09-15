@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -118,6 +119,11 @@ type AttemptCtx struct {
 	secret string
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
+	// bound is the timeoutBound the timer is enforcing, and connected records
+	// that the current send has a connection. Both are read by the timer's
+	// own goroutine when it fires.
+	bound     atomic.Int32
+	connected atomic.Bool
 	// bud is the request's timeout budget, and committed records that a write
 	// to the client has begun, after which total no longer applies. A zero
 	// budget means no total bound.
@@ -202,9 +208,13 @@ func (ac *AttemptCtx) resetIdle() {
 	}
 	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
 		ac.idleArmed = true
+		b := boundIdle
 		if !ac.committed && !ac.bud.deadline.IsZero() {
-			d = min(d, time.Until(ac.bud.deadline))
+			if left := time.Until(ac.bud.deadline); left < d {
+				d, b = left, boundTotal
+			}
 		}
+		ac.bound.Store(int32(b))
 		ac.Timer.Reset(d)
 	}
 }
@@ -218,7 +228,29 @@ func (ac *AttemptCtx) resetSend() {
 		return
 	}
 	ac.idleArmed = false
-	ac.Timer.Reset(time.Until(ac.bud.attemptDeadline(time.Now())))
+	ac.Timer.Reset(time.Until(ac.sendDeadline(time.Now())))
+}
+
+// sendDeadline is the bound on a send starting at now, and records which
+// setting it is.
+func (ac *AttemptCtx) sendDeadline(now time.Time) time.Time {
+	d := ac.bud.attemptDeadline(now)
+	b := boundFirstByte
+	if d.Equal(ac.bud.deadline) {
+		b = boundTotal
+	}
+	ac.connected.Store(false)
+	ac.bound.Store(int32(b))
+	return d
+}
+
+// firedCause is the cause the timer cancels the attempt with.
+func (ac *AttemptCtx) firedCause() error {
+	b := timeoutBound(ac.bound.Load())
+	if b == boundFirstByte && !ac.connected.Load() {
+		b = boundConnect
+	}
+	return timeoutCause(b)
 }
 
 // idleBody renews the idle bound on every read that returns bytes, so idle
