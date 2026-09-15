@@ -13,6 +13,7 @@ import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ProvidersScreen } from "./providers-screen"
+import { keys } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 
 const stubRouterAdapter: RouterAdapter = {
@@ -150,6 +151,54 @@ describe("a provider list that did not load", () => {
 
     expect(await screen.findByText(/breaker unavailable/i)).toBeInTheDocument()
     expect(await screen.findByRole("link", { name: "Groq" })).toBeInTheDocument()
+  })
+})
+
+describe("a poll that failed with readings already on screen", () => {
+  const failing = (paths: string[]) => {
+    const fetchMock = stub([groq])
+    const routes = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (url, init) =>
+      paths.includes(String(url))
+        ? new Response(JSON.stringify({ error: `${String(url)} is down` }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          })
+        : routes(url, init),
+    )
+  }
+  const seeded = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  it("names the catalogue when it is the list that did not load", async () => {
+    failing(["/api/providers", "/api/presets"])
+    const client = seeded()
+    client.setQueryData(keys.providers, { providers: [groq] })
+    await renderScreen(client)
+
+    expect(await screen.findByText("The provider catalogue did not load")).toBeInTheDocument()
+    expect(screen.getByText("/api/presets is down")).toBeInTheDocument()
+    expect(screen.queryByText("The providers did not load")).not.toBeInTheDocument()
+  })
+
+  it("notes stale credential health rather than calling it unloaded", async () => {
+    failing(["/api/health/providers"])
+    const client = seeded()
+    client.setQueryData(keys.health, [])
+    await renderScreen(client)
+
+    expect(await screen.findByText(/last refresh failed/i)).toBeInTheDocument()
+    expect(screen.queryByText("Credential health did not load")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Groq" })).toBeInTheDocument()
+  })
+
+  it("notes a stale provider list above the rows", async () => {
+    failing(["/api/providers"])
+    const client = seeded()
+    client.setQueryData(keys.providers, { providers: [groq] })
+    await renderScreen(client)
+
+    expect(await screen.findByText(/last refresh failed/i)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Groq" })).toBeInTheDocument()
   })
 })
 
