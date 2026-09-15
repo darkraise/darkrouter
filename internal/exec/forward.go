@@ -185,10 +185,13 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				// context still gets the error event: at shutdown the server
 				// cancels it while the client is connected and reading.
 				out, ierr := ac.failedAfterCommit(cause)
-				if terminated && failed == nil && out == adapter.OutcomeClientCancelled {
-					// The client closed once it had the whole response, before
-					// the provider's connection finished closing. That is a
-					// response delivered, not one abandoned.
+				if terminated && failed == nil {
+					// The whole response had already gone out: either the
+					// client closed before the provider's connection finished
+					// closing, or the provider dropped the connection after
+					// its terminal event. Neither is a failure of the response,
+					// and an error event after the end would reach a client
+					// that has finished reading.
 					if tail := sp.flush(); len(tail) > 0 {
 						_, _ = cw.Write(tail)
 					}

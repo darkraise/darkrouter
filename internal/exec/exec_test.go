@@ -836,6 +836,39 @@ func TestAClientClosingAfterTheTerminalEventIsASuccess(t *testing.T) {
 	}
 }
 
+// A provider that drops its connection after the terminal event has still
+// delivered the whole response. Blaming it would cool a healthy key, and an
+// error event written after [DONE] reaches a client that has already finished.
+func TestAProviderClosingAfterTheTerminalEventIsASuccess(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+			"data: [DONE]\n\n"))
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	defer up.Close()
+
+	logger := &captureLogger{}
+	e := newExecutorFor(t, "openaicompat", up.URL, Deps{Log: logger})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"target-model","stream":true,"messages":[{"role":"user","content":"ping"}]}`))
+	e.Handle(rec, r, openaiedge.New())
+
+	body := rec.Body.String()
+	if strings.Count(body, "[DONE]") != 1 || strings.Contains(body, "upstream read failed") {
+		t.Errorf("body = %q, want it to end at the provider's [DONE] with nothing after", body)
+	}
+	got := logger.only(t)
+	if n := len(got.Attempts); n != 1 || got.Attempts[0].Error != "" {
+		t.Fatalf("attempts = %+v, want one attempt with no error", got.Attempts)
+	}
+	if got.Status != "success" || got.ErrorCode != "" {
+		t.Errorf("record = status %q error %q, want success with no error code", got.Status, got.ErrorCode)
+	}
+}
+
 func TestHandleSurvivesMalformedSSE(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
