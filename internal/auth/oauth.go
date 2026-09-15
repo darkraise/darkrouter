@@ -136,7 +136,13 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 	decodeErr := json.Unmarshal(raw, &w)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if terminal(resp.StatusCode, w.Error) {
+		// Whether the body is a JSON object at all, not whether it fits
+		// wireToken: Anthropic refuses with "error" as an object, which fails
+		// the decode above and is still the vendor speaking. A page that is
+		// not JSON came from something in the way.
+		var obj map[string]json.RawMessage
+		fromVendor := json.Unmarshal(raw, &obj) == nil
+		if terminal(resp.StatusCode, w.Error, fromVendor) {
 			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
 		}
 		return Token{}, fmt.Errorf("token endpoint returned %s: %s", resp.Status, describe(w))
@@ -146,7 +152,7 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 		// the way — a captive portal, a CDN, a truncated read — rather than
 		// the provider refusing this credential. Only an explicit refusal
 		// code is evidence enough to disable an account.
-		if decodeErr == nil && terminal(0, w.Error) {
+		if decodeErr == nil && terminal(0, w.Error, true) {
 			return Token{}, fmt.Errorf("%w: %s", ErrNeedsReconnect, describe(w))
 		}
 		return Token{}, fmt.Errorf("token endpoint returned %s with no usable token", resp.Status)
@@ -171,14 +177,16 @@ func postToken(ctx context.Context, c *http.Client, tokenURL string, form url.Va
 // this wrong is bad in both directions: a transient 500 treated as terminal
 // turns a five-minute outage into a manual reconnection, and a terminal refusal
 // treated as transient hammers the endpoint until the account locks.
-func terminal(status int, code string) bool {
+func terminal(status int, code string, jsonBody bool) bool {
 	switch code {
 	case "invalid_grant", "invalid_client", "unauthorized_client", "invalid_scope":
 		return true
 	}
-	// A bare 400 or 401 with no recognizable code is still a refusal of this
-	// credential rather than an outage.
-	return status == http.StatusBadRequest || status == http.StatusUnauthorized
+	// A 400 or 401 with no recognizable code is still a refusal of this
+	// credential rather than an outage, provided the vendor sent it. One whose
+	// body is not JSON is a WAF or proxy page, which says nothing about the
+	// credential.
+	return jsonBody && (status == http.StatusBadRequest || status == http.StatusUnauthorized)
 }
 
 // describe renders the provider's own words without any token material: the
