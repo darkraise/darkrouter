@@ -270,9 +270,12 @@ while it is held. A second gateway started on the same `data/` is refused the
 same way.
 
 Some network mounts (NFS or CIFS without lock support) cannot take the lock at
-all. The gateway still starts there and logs "running without the database
-lock", but nothing can then tell whether it is running, so `rotate-key` refuses
-unless you add `-gateway-stopped` to confirm you stopped it. That flag never
+all, and neither can a binary built for a non-Unix platform such as Windows,
+which has no lock to take on any filesystem. The gateway still starts there and
+logs "running without the database lock", but nothing can then tell whether it
+is running, so `rotate-key` refuses unless you add `-gateway-stopped` to
+confirm you stopped it. On a non-Unix build that means every rotation needs the
+flag, and a second gateway on the same `data/` is not refused. The flag never
 overrides a lock another process actually holds.
 
 ```bash
