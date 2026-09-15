@@ -498,4 +498,20 @@ describe("the requests sparkline", () => {
     await waitFor(() => expect(screen.getByText("9")).toBeInTheDocument())
     expect(screen.queryByText("no requests in this window")).toBeNull()
   })
+
+  it("says it did not load rather than showing a zero", async () => {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url).startsWith("/api/usage")
+          ? new Response(JSON.stringify({ error: "database is locked" }), { status: 500 })
+          : routes(url, init),
+    )
+    await renderProvider("groq")
+
+    const card = (await screen.findByText("requests · 30d")).parentElement!
+    await waitFor(() => expect(within(card).getByText("did not load")).toBeInTheDocument())
+    expect(within(card).queryByText("0")).toBeNull()
+  })
 })
