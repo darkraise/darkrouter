@@ -514,6 +514,37 @@ describe("the conversation", () => {
     expect(playgroundBodies()[1]?.messages).toEqual([{ role: "user", content: "and again" }])
   })
 
+  it("still sends the prompt a reasoning-only reply answered", async () => {
+    // The reply had no text to send back, but the prompt was answered. It is
+    // folded into the next one rather than sent as a second user turn in a
+    // row, which a provider holding to strict alternation refuses.
+    let first = true
+    stubRoutes(() => {
+      if (!first) return new Response(sse(OK_FRAME))
+      first = false
+      return new Response(
+        sse('data: {"choices":[{"delta":{"reasoning_content":"thinking it over"}}]}\n\n', "data: [DONE]\n\n"),
+      )
+    })
+    mount(<TestDrawer row={row} open onOpenChange={() => {}} />)
+    await userEvent.type(await screen.findByLabelText("Model"), "llama-3.3")
+    await userEvent.clear(screen.getByLabelText("Test message"))
+    await userEvent.type(screen.getByLabelText("Test message"), "remember the number 7")
+    await userEvent.click(screen.getByRole("button", { name: /send/i }))
+    await screen.findByText(/only reasoning arrived/i)
+
+    await userEvent.type(
+      await screen.findByLabelText("Test message", {}, { timeout: 3000 }),
+      "which number?",
+    )
+    await userEvent.click(await screen.findByRole("button", { name: /send/i }, { timeout: 3000 }))
+
+    await waitFor(() => expect(playgroundBodies()).toHaveLength(2))
+    expect(playgroundBodies()[1]?.messages).toEqual([
+      { role: "user", content: "remember the number 7\n\nwhich number?" },
+    ])
+  })
+
   it("does not send the empty turn a failed setup left behind", async () => {
     stubRoutes()
     const routes = vi.mocked(globalThis.fetch).getMockImplementation()!

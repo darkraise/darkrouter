@@ -69,12 +69,25 @@ export type Turn = {
  * sent on, the error text reads to the model as its own previous reply. A
  * stopped reply is left out the same way: it ends where the operator cut it,
  * not where the model did.
+ *
+ * A reply that carried only reasoning did answer its prompt, so the prompt
+ * stays; there is just no text to send back. The prompt after it is folded
+ * into the same user turn, because two user turns in a row are refused by a
+ * provider that holds to strict alternation.
  */
 export function conversationHistory(turns: Turn[]): Turn[] {
   const out: Turn[] = []
   for (const turn of turns) {
-    if (turn.role === "assistant" && (turn.failed || turn.stopped || turn.content === "")) {
-      if (out[out.length - 1]?.role === "user") out.pop()
+    const prev = out[out.length - 1]
+    if (turn.role === "assistant") {
+      const reasoningOnly = turn.content === "" && !!turn.reasoning && !turn.failed && !turn.stopped
+      if (reasoningOnly) continue
+      if (turn.failed || turn.stopped || turn.content === "") {
+        if (prev?.role === "user") out.pop()
+        continue
+      }
+    } else if (prev?.role === "user") {
+      out[out.length - 1] = { ...prev, content: `${prev.content}\n\n${turn.content}` }
       continue
     }
     out.push(turn)
@@ -358,7 +371,7 @@ function TestSession({ row }: { row: ProviderRow | null }) {
     // History goes with the request: a second question that could not refer to
     // the first would not be a conversation.
     const asked: Turn = { role: "user", content: prompt }
-    const history = [...conversationHistory(messages), asked]
+    const history = conversationHistory([...messages, asked])
     setMessages([...messages, asked, { role: "assistant", content: "", model }])
 
     const started = performance.now()
