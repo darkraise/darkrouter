@@ -469,3 +469,33 @@ describe("the unsanctioned-tier opt-in", () => {
     })
   })
 })
+
+describe("the requests sparkline", () => {
+  function withUsage(days: { day: string; key: string; requests: number }[]) {
+    stub([configured], [preset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    ;vi.mocked(globalThis.fetch).mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) =>
+        String(url).startsWith("/api/usage")
+          ? new Response(
+              JSON.stringify({ days, priced: false, first_day: "2026-09-01", last_day: "2026-09-03" }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            )
+          : routes(url, init),
+    )
+  }
+
+  it("explains a flat line when no day in the window carried traffic", async () => {
+    withUsage([{ day: "2026-09-02", key: "other", requests: 9 }])
+    await renderProvider("groq")
+    expect(await screen.findByText("no requests in this window")).toBeInTheDocument()
+  })
+
+  it("says nothing extra once a day has traffic", async () => {
+    withUsage([{ day: "2026-09-02", key: "groq", requests: 9 }])
+    await renderProvider("groq")
+    expect(await screen.findByText("requests · 30d")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("9")).toBeInTheDocument())
+    expect(screen.queryByText("no requests in this window")).toBeNull()
+  })
+})

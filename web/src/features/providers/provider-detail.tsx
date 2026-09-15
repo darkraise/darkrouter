@@ -447,7 +447,9 @@ export function ProviderDetail() {
         <Stat
           caption="requests · 30d"
           value={requests.toLocaleString()}
-          note={series.length < 2 ? "no daily series yet" : undefined}
+          note={
+            usage.data && !series.some((n) => n > 0) ? "no requests in this window" : undefined
+          }
         >
           <Sparkline points={series} />
         </Stat>
