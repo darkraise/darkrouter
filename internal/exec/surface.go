@@ -118,11 +118,14 @@ type AttemptCtx struct {
 	secret string
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
-	// deadline is where policy.timeout.total runs out for the request, and
-	// committed that a write to the client has begun, after which it no
-	// longer applies. Zero means no total bound.
-	deadline  time.Time
+	// bud is the request's timeout budget, and committed records that a write
+	// to the client has begun, after which total no longer applies. A zero
+	// budget means no total bound.
+	bud       budget
 	committed bool
+	// sent is when the attempt's first request went out, so a surface that
+	// sends more than one can record the attempt's latency across all of them.
+	sent time.Time
 	// healthDone guards the one breaker signal an attempt may emit. The first
 	// caller wins: a surface reporting a pre-commit fault, or the loop
 	// reporting a failure after commit, beats the loop's deferred record of
@@ -199,11 +202,23 @@ func (ac *AttemptCtx) resetIdle() {
 	}
 	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
 		ac.idleArmed = true
-		if !ac.committed && !ac.deadline.IsZero() {
-			d = min(d, time.Until(ac.deadline))
+		if !ac.committed && !ac.bud.deadline.IsZero() {
+			d = min(d, time.Until(ac.bud.deadline))
 		}
 		ac.Timer.Reset(d)
 	}
+}
+
+// resetSend bounds a further request the attempt sends as the loop bounded
+// its first: connect+first_byte, never past total. Idle is disarmed until
+// that request's headers arrive, since it bounds a gap inside a body and can
+// be far shorter than a provider takes to start answering.
+func (ac *AttemptCtx) resetSend() {
+	if ac.Timer == nil {
+		return
+	}
+	ac.idleArmed = false
+	ac.Timer.Reset(time.Until(ac.bud.attemptDeadline(time.Now())))
 }
 
 // idleBody renews the idle bound on every read that returns bytes, so idle

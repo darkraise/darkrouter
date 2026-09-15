@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
+	"github.com/darkraise/darkrouter/internal/config"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider/providertest"
@@ -57,11 +59,11 @@ func letterUpstream(calls *[][]string, failCall int) http.HandlerFunc {
 	}
 }
 
-func batchingExecutor(t *testing.T, url string, size int) (*Executor, *captureLogger) {
+func batchingExecutor(t *testing.T, url string, size int, tune func(*config.Config)) (*Executor, *captureLogger) {
 	t.Helper()
 	rec := &captureLogger{}
 	src := providertest.NewSource(providertest.Keyed("p", "probe", url, "sk", "e5"))
-	e := executorFor(t, nil, src, map[string]adapter.Adapter{
+	e := executorFor(t, tune, src, map[string]adapter.Adapter{
 		"probe": batchingAdapter{Adapter: openaicompat.New(), size: size},
 	}, Deps{Log: rec, Catalog: catalogWith("p", "e5", ir.SurfaceEmbedding)})
 	return e, rec
@@ -74,7 +76,7 @@ func TestEmbeddingsAreSplitToTheAdaptersBatchLimit(t *testing.T) {
 	up := httptest.NewServer(letterUpstream(&calls, 0))
 	defer up.Close()
 
-	e, rec := batchingExecutor(t, up.URL, 2)
+	e, rec := batchingExecutor(t, up.URL, 2, nil)
 	w := httptest.NewRecorder()
 	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
 		strings.NewReader(`{"model":"e5","input":["a","b","c","d","e"]}`)), openaiedge.New())
@@ -121,7 +123,7 @@ func TestAFailedEmbeddingSubBatchFailsTheAttempt(t *testing.T) {
 	up := httptest.NewServer(letterUpstream(&calls, 2))
 	defer up.Close()
 
-	e, rec := batchingExecutor(t, up.URL, 2)
+	e, rec := batchingExecutor(t, up.URL, 2, nil)
 	w := httptest.NewRecorder()
 	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
 		strings.NewReader(`{"model":"e5","input":["a","b","c","d","e"]}`)), openaiedge.New())
@@ -135,5 +137,79 @@ func TestAFailedEmbeddingSubBatchFailsTheAttempt(t *testing.T) {
 	got := rec.only(t)
 	if got.Status == "success" || len(got.Attempts) != 1 || got.Attempts[0].Outcome != "retryable_provider" {
 		t.Errorf("record = status %q attempts %+v", got.Status, got.Attempts)
+	}
+}
+
+// delayed holds every response back for d before its headers go out.
+func delayed(d time.Duration, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(d)
+		next(w, r)
+	}
+}
+
+func embedFive(e *Executor) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	e.HandleEmbeddings(w, httptest.NewRequest("POST", "/v1/embeddings",
+		strings.NewReader(`{"model":"e5","input":["a","b","c","d","e"]}`)), openaiedge.New())
+	return w
+}
+
+// A later sub-batch is a send like the first one, so its wait for headers is
+// bounded by first_byte. idle bounds a gap inside a body and can be far
+// shorter than a provider takes to start answering.
+func TestAnEmbeddingSubBatchWaitsFirstByteForItsHeaders(t *testing.T) {
+	var calls [][]string
+	up := httptest.NewServer(delayed(300*time.Millisecond, letterUpstream(&calls, 0)))
+	defer up.Close()
+
+	e, _ := batchingExecutor(t, up.URL, 2, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 2 * time.Second
+		c.Policy.Timeout.Total = 10 * time.Second
+		c.Policy.Timeout.Idle = 100 * time.Millisecond
+	})
+	if w := embedFive(e); w.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s; a sub-batch was cut at idle while inside first_byte",
+			w.Code, w.Body.String())
+	}
+}
+
+// total bounds the attempt, not each sub-batch: sub-batches that each answer
+// inside first_byte must still not run the request past total between them.
+func TestEmbeddingSubBatchesShareTheAttemptsTotal(t *testing.T) {
+	var calls [][]string
+	up := httptest.NewServer(delayed(250*time.Millisecond, letterUpstream(&calls, 0)))
+	defer up.Close()
+
+	e, _ := batchingExecutor(t, up.URL, 1, func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 400 * time.Millisecond
+		c.Policy.Timeout.Total = 700 * time.Millisecond
+		c.Policy.Timeout.Idle = 2 * time.Second
+	})
+	start := time.Now()
+	w := embedFive(e)
+	if took := time.Since(start); w.Code == http.StatusOK || took > 1100*time.Millisecond {
+		t.Fatalf("status = %d after %v; five 250ms sub-batches must be cut at the 700ms total",
+			w.Code, took)
+	}
+}
+
+// The attempt row's latency covers every sub-batch the attempt sent, not only
+// the first, or a split request reads as fast as its first slice.
+func TestEmbeddingAttemptLatencyCoversEverySubBatch(t *testing.T) {
+	var calls [][]string
+	up := httptest.NewServer(delayed(80*time.Millisecond, letterUpstream(&calls, 0)))
+	defer up.Close()
+
+	e, rec := batchingExecutor(t, up.URL, 2, nil)
+	if w := embedFive(e); w.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+	}
+	got := rec.only(t)
+	if len(got.Attempts) != 1 || got.Attempts[0].LatencyMs < 3*80 {
+		t.Errorf("attempts = %+v; want one attempt whose latency spans all three sub-batches",
+			got.Attempts)
 	}
 }
