@@ -138,7 +138,7 @@ func (o *embedOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteEmbedding(cw, out)
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
 
 // parse reads sub-batch i's response.

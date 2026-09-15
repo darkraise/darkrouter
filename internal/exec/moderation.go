@@ -59,7 +59,7 @@ func (o *moderationOp) Respond(cw *CommitWriter, resp *http.Response, ac *Attemp
 
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteModeration(cw, out)
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
 
 func (o *moderationOp) WriteError(w http.ResponseWriter, e *ir.Error) error {

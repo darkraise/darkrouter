@@ -62,7 +62,7 @@ func (o *imageOp) Respond(cw *CommitWriter, resp *http.Response, ac *AttemptCtx)
 
 	ac.Exec.writeDiagnostics(cw, ac.Rec.ID, ac.Cand, ac.Seq)
 	_ = o.d.WriteImage(cw, out)
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
 
 func (o *imageOp) WriteError(w http.ResponseWriter, e *ir.Error) error {

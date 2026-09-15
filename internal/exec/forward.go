@@ -377,5 +377,5 @@ func (e *Executor) forwardUnary(cw *CommitWriter, resp *http.Response, ac *Attem
 			return ac.failedAfterCommit(err)
 		}
 	}
-	return adapter.OutcomeSuccess, nil
+	return ac.delivered(cw)
 }
