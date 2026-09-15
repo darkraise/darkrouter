@@ -11,6 +11,24 @@
   box-shadow: -1px 0 0 hsl(var(--border));
 }
 
+/* Pinned only while the box is wider than the name and actions columns
+   together (330px and 208px measured). Narrower than that, a pinned actions
+   column lands on the provider name itself -- at a phone width it covered
+   all but "groq · op" -- so it scrolls with the row instead, and the name
+   is what the row opens on. A container query rather than a media query:
+   the sidebar takes a different share of the same viewport open and shut. */
+.providers-table {
+  container-type: inline-size;
+}
+
+@container (max-width: 36rem) {
+  .providers-table .dr-data-table-frame th:last-child,
+  .providers-table .dr-data-table-frame td:last-child {
+    right: auto;
+    box-shadow: none;
+  }
+}
+
 /* The row's hover wash is translucent, and a sticky cell needs an opaque
    ground to cover what scrolls under it, so the wash is laid over the card
    colour here rather than replacing it. */
