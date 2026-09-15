@@ -30,7 +30,9 @@ func blockStartBody(d *ir.Delta) map[string]any {
 	case ir.BlockThinking:
 		return map[string]any{"type": "thinking", "thinking": "", "signature": ""}
 	case ir.BlockRedactedThinking:
-		return map[string]any{"type": "redacted_thinking", "data": ""}
+		// Bedrock's payload arrives in the delta that opens the block, and
+		// the start is the only place Anthropic's wire can carry it.
+		return map[string]any{"type": "redacted_thinking", "data": d.Thinking}
 	case ir.BlockToolUse:
 		return map[string]any{
 			"type": "tool_use", "id": d.ToolID, "name": d.ToolName, "input": map[string]any{},
