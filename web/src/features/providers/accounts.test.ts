@@ -157,7 +157,8 @@ describe("addCredentials when the provider refuses a secret that cannot be downl
     expect(result.disabled).toEqual([])
     expect(result.added).toBe(1)
     expect(result.failed.map((f) => f.label)).toEqual(["work"])
-    expect(result.failed[0].error).toContain("database is locked")
+    expect(result.failed[0]?.error).toContain("disabling it failed")
+    expect(result.failed[0]?.error).toContain("database is locked")
   })
 })
 
