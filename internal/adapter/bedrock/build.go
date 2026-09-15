@@ -459,7 +459,7 @@ func toolConfig(req *ir.Request, shape claudeShape, marks *cacheMarks) (map[stri
 			})
 			continue
 		}
-		schema := t.Schema
+		schema := xlate.JSONSchema(t.Schema, t.SchemaDialect)
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object"}`)
 		}

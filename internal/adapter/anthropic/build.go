@@ -203,7 +203,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if rf := req.ResponseFormat; rf != nil {
 		switch rf.Type {
 		case "json_schema":
-			outputConfig["format"] = map[string]any{"type": "json_schema", "schema": rf.Schema}
+			outputConfig["format"] = map[string]any{
+				"type": "json_schema", "schema": xlate.JSONSchema(rf.Schema, rf.SchemaDialect),
+			}
 		case "json_object":
 			// Anthropic has no schema-free JSON mode, and a bare object schema
 			// is refused: every object must list its properties and set
@@ -438,7 +440,7 @@ func renderTools(tools []ir.Tool, cb *cacheBudget) ([]any, []ir.Warning) {
 		}
 		m := map[string]any{}
 		if _, typed := t.Extra["type"]; !typed {
-			schema := t.Schema
+			schema := xlate.JSONSchema(t.Schema, t.SchemaDialect)
 			// A tool with no schema still needs one: Anthropic rejects a
 			// null input_schema outright.
 			if len(schema) == 0 {
