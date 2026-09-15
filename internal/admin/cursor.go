@@ -42,9 +42,11 @@ type RequestFilters struct {
 func (f RequestFilters) Hash() string {
 	h := sha256.New()
 	for _, s := range []string{f.Provider, f.Model, f.Status, f.Alias, f.Surface, f.ErrorCode, f.Source, f.AttemptedProvider} {
+		// Length-prefixed rather than separated: values come from query
+		// parameters and may contain any byte a separator could be, so only
+		// a length keeps {Provider:"ab"} and {Provider:"a", Model:"b"} apart.
+		fmt.Fprintf(h, "%d:", len(s))
 		h.Write([]byte(s))
-		// A separator, so {Provider:"ab"} and {Provider:"a", Model:"b"} differ.
-		h.Write([]byte{0})
 	}
 	fmt.Fprintf(h, "%d\x00%d", f.SinceMs, f.UntilMs)
 	// Eight bytes is plenty: this is a mismatch detector, not a MAC. A client
