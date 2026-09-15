@@ -54,4 +54,36 @@ describe("the drawer's log tab", () => {
     expect(params.get("attempted_provider")).toBe("groq")
     expect(params.has("provider")).toBe(false)
   })
+
+  it("shows a cancelled run as cancelled rather than as a failure", async () => {
+    const row = (id: string, status: string, error_code?: string) => ({
+      id, ts_ms: Date.now(), dialect: "openai", surface: "chat", model: "llama", status,
+      source: "console", tokens_in: 0, tokens_out: 0, cache_read_tokens: 0, cost_micros: null,
+      ttft_ms: null, total_ms: 120, attempts: 1, ...(error_code ? { error_code } : {}),
+    })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            requests: [row("r1", "cancelled", "client_cancelled"), row("r2", "error", "upstream_5xx")],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <TestLogTab providerId="groq" />
+      </QueryClientProvider>,
+    )
+
+    const cancelled = await screen.findByText("cancelled")
+    expect(screen.queryByText("client_cancelled")).not.toBeInTheDocument()
+    // jsdom resolves no Tailwind colour, so the tone is read from the class.
+    expect(cancelled.className).toContain("--muted-foreground")
+    expect(cancelled.className).not.toContain("--destructive")
+    expect(screen.getByText("upstream_5xx").className).toContain("--destructive")
+  })
 })
