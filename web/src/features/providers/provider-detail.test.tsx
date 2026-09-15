@@ -265,6 +265,30 @@ describe("adding a keyless provider", () => {
     })
   })
 
+  it("warns when the provider was stored but the gateway did not load it", async () => {
+    stub([], [keylessPreset])
+    const routes = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation(async (url, init) =>
+      String(url) === "/api/providers" && init?.method === "POST"
+        ? new Response(
+            JSON.stringify({ id: "opencode", routing_updated: false, warning: "still routing with the previous settings" }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          )
+        : routes(url, init),
+    )
+    const success = vi.spyOn(toast, "success")
+    const warning = vi.spyOn(toast, "warning")
+    await renderProvider("opencode")
+    await userEvent.click(await screen.findByRole("button", { name: /add opencode free/i }))
+
+    await waitFor(() =>
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("still routing with the previous settings")),
+    )
+    expect(success).not.toHaveBeenCalled()
+    success.mockRestore()
+    warning.mockRestore()
+  })
+
   it("defaults to importing everything", async () => {
     stub([], [keylessPreset])
     await renderProvider("opencode")

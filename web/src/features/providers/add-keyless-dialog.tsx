@@ -9,7 +9,7 @@ import {
   DialogTitle,
   Label,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, createdButNotRouted } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Preset } from "../../lib/api-types"
@@ -54,6 +54,7 @@ export function AddKeylessDialog({
         free_models_only: freeOnly,
       }),
     success: preset ? `${preset.name} added` : "Provider added",
+    warning: (reply) => createdButNotRouted(reply),
     invalidates: [keys.providers, keys.health, keys.overview, keys.models],
     onSuccess: () => {
       if (!preset) return
