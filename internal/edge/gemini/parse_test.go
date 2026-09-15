@@ -166,6 +166,17 @@ func TestParseRequestRecordsWhichSchemaFormTheClientUsed(t *testing.T) {
 	}
 }
 
+func TestParseRequestReadsSnakeCaseParametersJSONSchema(t *testing.T) {
+	req := parsed(t, "m:generateContent", "", `{"contents":[],"tools":[{"function_declarations":[
+		{"name":"b","parameters_json_schema":{"type":"object","additionalProperties":false}}]}]}`)
+	if len(req.Tools) != 1 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	if b := req.Tools[0]; string(b.Schema) != `{"type":"object","additionalProperties":false}` || b.SchemaDialect != "" {
+		t.Errorf("tools[0] = %+v; parameters_json_schema is the declaration's schema", b)
+	}
+}
+
 func TestParseRequestModeAnyWithoutNamesIsAny(t *testing.T) {
 	req := parsed(t, "m:generateContent", "", `{"contents":[],"toolConfig":{"functionCallingConfig":{"mode":"ANY"}}}`)
 	if req.ToolChoice == nil || req.ToolChoice.Mode != "any" {

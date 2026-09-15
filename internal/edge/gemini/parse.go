@@ -102,6 +102,9 @@ type wireFunctionDeclaration struct {
 	Description          string          `json:"description"`
 	Parameters           json.RawMessage `json:"parameters"`
 	ParametersJSONSchema json.RawMessage `json:"parametersJsonSchema"`
+	// Proto JSON parsers accept a field's original snake_case name too, and
+	// function_declarations is already read that way.
+	ParametersJSONSchemaSnake json.RawMessage `json:"parameters_json_schema"`
 }
 
 func present(raw json.RawMessage) bool {
@@ -258,6 +261,8 @@ func parseToolEntry(entry map[string]json.RawMessage) ([]ir.Tool, error) {
 				switch {
 				case present(d.ParametersJSONSchema):
 					tool.Schema = d.ParametersJSONSchema
+				case present(d.ParametersJSONSchemaSnake):
+					tool.Schema = d.ParametersJSONSchemaSnake
 				case present(d.Parameters):
 					tool.Schema, tool.SchemaDialect = d.Parameters, ir.SchemaOpenAPI
 				}
