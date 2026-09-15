@@ -12,8 +12,9 @@ import {
   ListboxItem,
   Progress,
   Switch,
+  toast,
 } from "darkraise-ui"
-import { api } from "../../lib/api"
+import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
@@ -84,14 +85,17 @@ export function planFor(
  *
  * A provider that is about to be created carries the flag in its POST, and one
  * whose setting the operator left alone needs no write at all — so this is
- * true only for a change to a provider that already exists.
+ * true only for a change to a provider that already exists. A row this visit
+ * created is compared against what its create sent (`freeModelsOnly`), since
+ * the provider list may not hold it yet.
  */
 export function freeOnlyChange(
   draft: AccountDraft,
-  plan: { needsProvider: boolean; provider?: Provider } | null,
+  plan: { needsProvider: boolean; provider?: Provider; freeModelsOnly?: boolean } | null,
 ): boolean {
-  if (!plan || plan.needsProvider || !plan.provider) return false
-  return draft.freeModelsOnly !== plan.provider.free_models_only
+  if (!plan || plan.needsProvider) return false
+  const stored = plan.provider?.free_models_only ?? plan.freeModelsOnly
+  return stored !== undefined && draft.freeModelsOnly !== stored
 }
 
 /** What a fresh visit starts from. The free-models box is a provider setting,
@@ -297,10 +301,11 @@ export function AddAccountsDialog({
   // What the last run could not store, and why. Held in the dialog as well as
   // toasted, because the form stays open for a retry and a toast does not.
   const [notAdded, setNotAdded] = useState<AddFailure[]>([])
-  // The provider row this visit created. The providers list does not show it
-  // until its refetch lands, and a retry sent before then must not POST it
-  // again: that 409s and abandons the keys being retried.
-  const [createdId, setCreatedId] = useState<string | null>(null)
+  // The provider row this visit created, and the free-models setting it now
+  // holds. The providers list does not show it until its refetch lands, and a
+  // retry sent before then must not POST it again: that 409s and abandons the
+  // keys being retried.
+  const [created, setCreated] = useState<{ id: string; freeModelsOnly: boolean } | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
 
   // The row the free-models box reads its setting from. A preset usually has
@@ -330,7 +335,7 @@ export function AddAccountsDialog({
     setEndpoint(emptyEndpoint)
     setProgress(null)
     setNotAdded([])
-    setCreatedId(null)
+    setCreated(null)
     setQ("")
   }
 
@@ -345,8 +350,8 @@ export function AddAccountsDialog({
       ? planFor(target, existing)
       : null
   const plan =
-    planned?.needsProvider && createdId !== null && createdId === target?.id
-      ? { needsProvider: false }
+    planned?.needsProvider && created !== null && created.id === target?.id
+      ? { needsProvider: false, freeModelsOnly: created.freeModelsOnly }
       : planned
   // Asked only of a row about to be created: an existing one already holds
   // them, and its settings are where they change.
@@ -368,15 +373,21 @@ export function AddAccountsDialog({
           free_models_only: accounts.freeModelsOnly,
           ...Object.fromEntries(endpointFields.map((f) => [f, endpoint[f].trim()])),
         })
-        setCreatedId(chosen.id)
+        setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
       } else if (freeOnlyChange(accounts, plan)) {
         // Against a provider that already exists the flag is a setting to be
         // written, not part of the POST that creates the row. Sent on its own
         // so the box means the same thing here as it does on the provider's
         // settings, rather than being a control that looks applied and is not.
-        await api.patch(`/api/providers/${chosen.id}`, {
-          free_models_only: accounts.freeModelsOnly,
-        })
+        const notRouted = await routingNotUpdated(
+          api.patch(`/api/providers/${chosen.id}`, { free_models_only: accounts.freeModelsOnly }),
+        )
+        // Committed either way, so the keys still go in: stopping here would
+        // abandon them over a change that happened.
+        if (notRouted) toast.warning(notRouted)
+        if (created?.id === chosen.id) {
+          setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
+        }
       }
       return addCredentials(chosen.id, accounts, needsAccount(chosen.base_url), setProgress)
     },
