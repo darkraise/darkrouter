@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -412,8 +413,9 @@ func vertexProbeServerWithToken(t *testing.T, tokenStatus int, tokenBody string,
 	}
 	doc, _ := json.Marshal(map[string]string{
 		"type": "service_account", "project_id": "proj", "client_email": "sa@proj.iam.gserviceaccount.com",
-		"private_key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
-		"token_uri":   "https://oauth2.googleapis.com/token",
+		"private_key":    string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"private_key_id": gcpCanaryKeyID,
+		"token_uri":      "https://oauth2.googleapis.com/token",
 	})
 	body, _ := json.Marshal(map[string]string{"label": "sa", "secret": string(doc)})
 	if w := do(t, s, cookie, token, "POST", "/api/providers/vx/keys", string(body)); w.Code != http.StatusCreated {
@@ -484,6 +486,78 @@ func TestGCPProbeKeepsAKeyOnClockSkew(t *testing.T) {
 	}
 	if got.Rejected {
 		t.Errorf("a skewed clock is not a rejected credential: %s", got.Error)
+	}
+}
+
+const gcpCanaryKeyID = "0f1e2d3c4b5a69788796a5b4c3d2e1f0canary"
+
+func TestAProbeDoesNotShowAPartOfAStructuredSecret(t *testing.T) {
+	// A sigv4 or service-account secret is stored as one JSON document, and
+	// an upstream that echoes a credential echoes one field of it. Redacting
+	// the document as a whole matches nothing.
+	t.Run("sigv4", func(t *testing.T) {
+		const secretKey, session = "CANARY-SECRET-ACCESS-KEY", "CANARY-SESSION-TOKEN-value"
+		aws, srv := newFakeAWS(t)
+		aws.status, aws.errType = http.StatusForbidden, "InvalidSignatureException"
+		aws.errBody = `{"message":"The request signature we calculated does not match. Secret: ` +
+			secretKey + `, token: ` + session + `"}`
+		s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+		if w := do(t, s, cookie, token, "POST", "/api/providers",
+			`{"id":"bed","name":"bed","kind":"bedrock","base_url":"`+srv.URL+`","auth_style":"sigv4","region":"us-east-1"}`); w.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", w.Code, w.Body.String())
+		}
+		doc, _ := json.Marshal(map[string]string{
+			"access_key_id": "AKIDEXAMPLE", "secret_access_key": secretKey, "session_token": session,
+		})
+		body, _ := json.Marshal(map[string]string{"label": "primary", "secret": string(doc)})
+		if w := do(t, s, cookie, token, "POST", "/api/providers/bed/keys", string(body)); w.Code != http.StatusCreated {
+			t.Fatalf("key: %d %s", w.Code, w.Body.String())
+		}
+
+		got := probeProvider(t, s, cookie, token, "bed")
+		if got.OK || got.Error == "" {
+			t.Fatalf("ok = %v, error = %q; want the refusal reported", got.OK, got.Error)
+		}
+		for _, part := range []string{secretKey, session} {
+			if strings.Contains(got.Error, part) {
+				t.Errorf("error %q carries %q", got.Error, part)
+			}
+		}
+	})
+
+	t.Run("gcp-sa", func(t *testing.T) {
+		s, cookie, token := vertexProbeServerWithToken(t, http.StatusBadRequest,
+			`{"error":"invalid_grant","error_description":"No key `+gcpCanaryKeyID+` for this account."}`,
+			http.StatusOK)
+
+		got := probeProvider(t, s, cookie, token, "vx")
+		if got.OK || got.Error == "" {
+			t.Fatalf("ok = %v, error = %q; want the refusal reported", got.OK, got.Error)
+		}
+		if strings.Contains(got.Error, gcpCanaryKeyID) {
+			t.Errorf("error %q carries the private key id", got.Error)
+		}
+	})
+}
+
+func TestProbeSecretsNamesEachSecretField(t *testing.T) {
+	const pemKey = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n"
+	doc, _ := json.Marshal(map[string]string{
+		"type": "service_account", "client_email": "sa@proj.iam.gserviceaccount.com",
+		"private_key": pemKey, "private_key_id": gcpCanaryKeyID,
+	})
+	got := probeSecrets(auth.StyleGCPSA, string(doc))
+	for _, want := range []string{string(doc), pemKey, gcpCanaryKeyID} {
+		if !slices.Contains(got, want) {
+			t.Errorf("probeSecrets(gcp-sa) = %q, missing %q", got, want)
+		}
+	}
+	if slices.Contains(got, "sa@proj.iam.gserviceaccount.com") {
+		t.Error("the client email is an identifier, not a secret")
+	}
+
+	if got := probeSecrets(auth.StyleBearer, "sk-plain-key"); !slices.Equal(got, []string{"sk-plain-key"}) {
+		t.Errorf("probeSecrets(bearer) = %q, want the key alone", got)
 	}
 }
 

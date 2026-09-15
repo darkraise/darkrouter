@@ -109,7 +109,7 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		// deciding whether to discard the key does not discard a good one.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "probe": kind, "latency_ms": latency,
-			"error":    redact.Error(perr, cred.Secret).Error(),
+			"error":    redact.Error(perr, probeSecrets(style, cred.Secret)...).Error(),
 			"rejected": errors.As(perr, new(rejectedCredential)),
 		})
 		return
@@ -125,6 +125,32 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "probe": kind, "latency_ms": latency, "model_count": count,
 	})
+}
+
+// probeSecrets is what to redact from a probe's error for a credential of this
+// style. A sigv4 or service-account secret is stored as one JSON document, and
+// an upstream that echoes a credential echoes one field of it, which redacting
+// the document as a whole never matches. Identifiers — the access key id, the
+// client email — are left in: they name the key without granting anything, and
+// the operator needs them to tell which key failed.
+func probeSecrets(style, secret string) []string {
+	out := []string{secret}
+	switch style {
+	case auth.StyleSigV4:
+		var c auth.AWSCredentials
+		if json.Unmarshal([]byte(secret), &c) == nil {
+			out = append(out, c.SecretAccessKey, c.SessionToken)
+		}
+	case auth.StyleGCPSA:
+		var c struct {
+			PrivateKey   string `json:"private_key"`
+			PrivateKeyID string `json:"private_key_id"`
+		}
+		if json.Unmarshal([]byte(secret), &c) == nil {
+			out = append(out, c.PrivateKey, c.PrivateKeyID)
+		}
+	}
+	return out
 }
 
 // rejectedCredential marks a probe failure in which the provider answered and
