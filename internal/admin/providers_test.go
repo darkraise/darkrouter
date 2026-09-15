@@ -152,6 +152,29 @@ func TestAnAuggieProviderCanBePatched(t *testing.T) {
 	}
 }
 
+// A Vertex row written before project and location were required has no
+// location, and nothing can set one. Turning it off or reordering it does not
+// touch its endpoint, so the endpoint rule it predates must not refuse that.
+func TestALegacyVertexProviderCanBePatchedOutsideItsEndpoint(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		BaseURL: "https://us-central1-aiplatform.googleapis.com", AuthStyle: "gcp-sa",
+		Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"enabled":false}`, `{"priority":4}`, `{"name":"Old Vertex"}`} {
+		if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx", body); w.Code != http.StatusOK {
+			t.Errorf("patch %s: %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx", `{"base_url":"nope"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a patch to the endpoint itself is still checked: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAnEndpointThatCannotBeReachedIsRejected(t *testing.T) {
 	cases := map[string]string{
 		"bedrock with no region":  `{"id":"b","preset":"bedrock"}`,
