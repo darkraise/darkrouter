@@ -34,7 +34,8 @@ export function bucketRequests(rows: RequestTableRow[], count = 40): Bucket[] {
     const bucket = out[i]
     if (!bucket) continue
     bucket.total++
-    if (r.status !== "success") bucket.failed++
+    // A client that hung up is not a failure of anything the operator runs.
+    if (r.status !== "success" && r.status !== "cancelled") bucket.failed++
   }
   return out
 }

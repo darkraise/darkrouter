@@ -33,7 +33,7 @@ const FIELDS = [
   "range",
 ] as const
 
-const STATUS_OPTIONS = ["success", "error"]
+const STATUS_OPTIONS = ["success", "error", "cancelled"]
 
 const TIME_WINDOWS = [
   { value: "1h", label: "1h", ms: 60 * 60 * 1000 },
