@@ -43,8 +43,8 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	// before it, and RunRollup catches up at startup, before retention's
 	// first prune. Not the day before it, which a prune in the hour after
 	// that run can have cut into. None of that holds when rollups kept
-	// failing while retention ran on, so the reach-back also stops at the
-	// first day no prune has reached.
+	// failing while retention ran on, so the reach-back skips the previous
+	// run's day once a prune has reached into it.
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
@@ -68,18 +68,16 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 		if lastDay := time.Date(lu.Year(), lu.Month(), lu.Day(), 0, 0, 0, 0, time.UTC); lastDay.Before(from) {
 			from = lastDay
 			// Rollups that keep failing while the gateway stays up leave the
-			// last run's day behind retention. A day a prune has cut into can
-			// no longer be rebuilt whole, so what usage_daily already holds for
-			// it is the better record.
+			// last run's day behind retention. Once a prune has cut into it,
+			// it can no longer be rebuilt whole, so what usage_daily already
+			// holds for it is the better record. Only that day: the days after
+			// it were never rolled up, so whatever survives beats no row.
 			fence, ferr := firstUnprunedDay(ctx, tx)
 			if ferr != nil {
 				return fmt.Errorf("rollup: %w", ferr)
 			}
-			if fence.After(from) {
-				from = fence
-			}
-			if from.After(yesterday) {
-				from = yesterday
+			if fence.After(lastDay) {
+				from = lastDay.AddDate(0, 0, 1)
 			}
 		}
 	}

@@ -426,6 +426,42 @@ func TestRollupCatchUpLeavesADayRetentionCutIntoAlone(t *testing.T) {
 	}
 }
 
+// Only the last run's day has a total in usage_daily worth protecting. A day
+// after it was never rolled up, so rebuilding it from the requests retention
+// left behind is better than leaving it with no row at all.
+func TestRollupCatchUpRebuildsAPrunedDayItNeverRolledUp(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+
+	insertRequest(t, db, "rolled", time.Date(2026, 8, 20, 22, 0, 0, 0, time.UTC), "groq", "m", 3, 4, nil)
+	if err := db.Rollup(ctx, time.Date(2026, 8, 20, 23, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	insertRequest(t, db, "early", time.Date(2026, 8, 22, 1, 0, 0, 0, time.UTC), "groq", "m", 10, 20, nil)
+	insertRequest(t, db, "late", time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC), "groq", "m", 5, 7, nil)
+
+	// Cutoff 2026-08-22 12:00: "early" goes, "late" stays.
+	if _, err := db.Prune(ctx, time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
+		48*time.Hour, 72*time.Hour, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Rollup(ctx, time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests, in int64
+	if err := db.Read.QueryRowContext(ctx,
+		`SELECT coalesce(sum(requests),0), coalesce(sum(tokens_in),0) FROM usage_daily WHERE day = '2026-08-22'`).
+		Scan(&requests, &in); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || in != 5 {
+		t.Errorf("2026-08-22 = %d requests, %d tokens in; want the surviving 1 and 5", requests, in)
+	}
+}
+
 // The catch-up has to happen at startup: the first interval is most of an
 // hour, and retention's first prune could remove the rows it owes by then.
 func TestRunRollupRunsOnceAtStartup(t *testing.T) {
