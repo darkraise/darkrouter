@@ -285,6 +285,15 @@ docker compose -f compose.prod.yml up -d darkrouter
 
 The entrypoint is the gateway itself, which is why the override is needed.
 `rotate-key` reads the current key from `DARKROUTER_MASTER_KEY` and the new one
-from stdin, hence `-i`. The lock file stays in `data/` after either process
+from stdin, hence `-i`.
+
+`docker run --env-file` passes every value verbatim, quotes included, the same
+way `compose.prod.yml`'s `format: raw` does, so a `.env` written for that file
+works unchanged. A `.env` read by `compose.yml` is different: Compose
+interpolates it there and strips surrounding quotes, so the gateway runs on
+`abc` from `DARKROUTER_MASTER_KEY="abc"` while `--env-file` hands `rotate-key`
+the value with its quotes and it fails as the wrong key. Remove the quotes
+from that line first, or pass the key with `-e DARKROUTER_MASTER_KEY` from a
+shell where it is set. The lock file stays in `data/` after either process
 exits; it is not a sign that anything is still running, and it must not be
 deleted while the gateway is up.
