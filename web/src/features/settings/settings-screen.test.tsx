@@ -95,6 +95,14 @@ describe("settingsPatch", () => {
     expect(settingsPatch({ "log.retention": "720h0m0s" }, new Set(), cfg)).toEqual({})
   })
 
+  it("sends nothing for a value typed in another spelling of what is stored", () => {
+    // The gateway reports "10m0s" for a stored "10m"; retyping it is not a
+    // change, and sending it would report the key as written.
+    expect(
+      settingsPatch({ "policy.timeout.total": "10m", "capture.bodies": "0" }, new Set(), cfg),
+    ).toEqual({})
+  })
+
   it("sends only the keys the draft changed", () => {
     // The screen used to write three policy keys on every save whatever the
     // operator touched, which reported them all as stored until the next
@@ -461,11 +469,10 @@ describe("the settings form", () => {
     await waitFor(() => expect(saves).toEqual([{ reset: ["catalog.sync_timeout"] }]))
   })
 
-  it("clears the Save bar after a save the answer reads back unchanged", async () => {
-    // /api/config reports the typed config, so a saved "10m" reads back as
-    // "10m0s" and the refetch is byte-identical. Query shares that response
-    // structurally, so the reference never changes and a draft waiting on a
-    // changed reference would sit dirty over a value that is stored.
+  it("offers no Save for a value retyped in the spelling the answer reads back", async () => {
+    // /api/config reports the typed config, so a stored "72h" reads back as
+    // "72h0m0s". Typing that spelling is not a change, and a Save bar over it
+    // would sit dirty over a value that is already stored.
     stubSettingsFetch({})
     const user = userEvent.setup()
     mount(<SettingsScreen />)
@@ -473,11 +480,9 @@ describe("the settings form", () => {
     const box = await screen.findByLabelText("Keep request records for")
     await user.clear(box)
     await user.type(box, "72h0m0s")
-    await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument(),
-    )
+    expect(box).toHaveValue("72h0m0s")
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
   })
 
   it("names a restart-only key the save accepted but cannot apply", async () => {
