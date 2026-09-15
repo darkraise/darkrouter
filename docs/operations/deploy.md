@@ -261,6 +261,12 @@ runs, and `rotate-key` exits with "stop the gateway before rotating the key"
 while it is held. A second gateway started on the same `data/` is refused the
 same way.
 
+Some network mounts (NFS or CIFS without lock support) cannot take the lock at
+all. The gateway still starts there and logs "running without the database
+lock", but nothing can then tell whether it is running, so `rotate-key` refuses
+unless you add `-gateway-stopped` to confirm you stopped it. That flag never
+overrides a lock another process actually holds.
+
 ```bash
 docker compose -f compose.prod.yml stop darkrouter
 docker run --rm -i -v ./data:/data --env-file .env \
