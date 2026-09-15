@@ -213,6 +213,55 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 	}
 }
 
+func TestAGeminiKeyRefusalMarksTheCredentialRejected(t *testing.T) {
+	// Gemini answers an unknown API key with a 400, not a 401: the refusal is
+	// in the ErrorInfo reason. Any other 400 says nothing about the key.
+	cases := []struct {
+		name     string
+		body     string
+		rejected bool
+	}{
+		{name: "API_KEY_INVALID", rejected: true, body: `{"error":{"code":400,
+			"message":"API Key not found. Please pass a valid API key.","status":"INVALID_ARGUMENT",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID",
+			"domain":"googleapis.com","metadata":{"service":"generativelanguage.googleapis.com"}},
+			{"@type":"type.googleapis.com/google.rpc.LocalizedMessage","locale":"en-US",
+			"message":"API Key not found. Please pass a valid API key."}]}}`},
+		{name: "other 400", body: `{"error":{"code":400,
+			"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer upstream.Close()
+
+			s, _ := testServerFull(t)
+			cookie, token := login(t, s)
+			if w := do(t, s, cookie, token, "POST", "/api/providers",
+				`{"id":"g","name":"g","kind":"gemini","auth_style":"query-param","base_url":"`+
+					upstream.URL+`/v1beta"}`); w.Code != http.StatusCreated {
+				t.Fatalf("create: %d %s", w.Code, w.Body.String())
+			}
+			if w := do(t, s, cookie, token, "POST", "/api/providers/g/keys",
+				`{"label":"k","secret":"AIza-canary"}`); w.Code != http.StatusCreated {
+				t.Fatalf("key: %d %s", w.Code, w.Body.String())
+			}
+
+			got := probeProvider(t, s, cookie, token, "g")
+			if got.OK {
+				t.Fatal("a 400 must not report success")
+			}
+			if got.Rejected != tc.rejected {
+				t.Errorf("rejected = %v, want %v: %s", got.Rejected, tc.rejected, got.Error)
+			}
+		})
+	}
+}
+
 func TestASuccessfulProbeClearsTheCredentialCooldown(t *testing.T) {
 	// The whole reason the probe exists. A credential-level cooldown lives
 	// under a key with an EMPTY model, so clearing only the triples would

@@ -51,9 +51,11 @@ func probeProvider(t *testing.T, s *Server, cookie *http.Cookie, token, id strin
 // fakeAWS serves the two control-plane listings and records the Authorization
 // header it saw.
 type fakeAWS struct {
-	mu     sync.Mutex
-	status int
-	authz  string
+	mu      sync.Mutex
+	status  int
+	errType string
+	errBody string
+	authz   string
 }
 
 func newFakeAWS(t *testing.T) (*fakeAWS, *httptest.Server) {
@@ -62,10 +64,14 @@ func newFakeAWS(t *testing.T) (*fakeAWS, *httptest.Server) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.authz = r.Header.Get("Authorization")
-		status := f.status
+		status, errType, errBody := f.status, f.errType, f.errBody
 		f.mu.Unlock()
 		if status != 0 && status != http.StatusOK {
+			if errType != "" {
+				w.Header().Set("X-Amzn-Errortype", errType)
+			}
 			w.WriteHeader(status)
+			_, _ = w.Write([]byte(errBody))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -188,6 +194,63 @@ func TestSigV4ProbeMarksARefusedSignatureRejected(t *testing.T) {
 	}
 }
 
+func TestSigV4ProbeMarksAnUnknownKeyRejected(t *testing.T) {
+	// Bedrock documents UnrecognizedClientException as a 403, and a wrong
+	// secret arrives as InvalidSignatureException on a 403 too. The status
+	// alone reads as a policy problem; the error type says the key is refused.
+	for _, errType := range []string{
+		"UnrecognizedClientException:http://internal.amazon.com/coral/com.amazon.coral.service/",
+		"InvalidSignatureException",
+	} {
+		t.Run(errType, func(t *testing.T) {
+			aws, srv := newFakeAWS(t)
+			aws.status, aws.errType = http.StatusForbidden, errType
+			aws.errBody = `{"message":"The security token included in the request is invalid."}`
+			s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+			id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+			got := probeProvider(t, s, cookie, token, id)
+			if got.OK || got.Probe != "signature" {
+				t.Fatalf("ok = %v, probe = %q, want a signature failure: %s", got.OK, got.Probe, got.Error)
+			}
+			if !got.Rejected {
+				t.Errorf("an unrecognised key is a rejected credential: %s", got.Error)
+			}
+		})
+	}
+}
+
+func TestSigV4ProbeKeepsAKeyOnAccessDenied(t *testing.T) {
+	aws, srv := newFakeAWS(t)
+	aws.status, aws.errType = http.StatusForbidden, "AccessDeniedException"
+	aws.errBody = `{"message":"User is not authorized to perform bedrock:ListFoundationModels"}`
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+	got := probeProvider(t, s, cookie, token, id)
+	if got.Probe != "permission" || got.Rejected {
+		t.Errorf("probe = %q, rejected = %v; a missing permission keeps the key", got.Probe, got.Rejected)
+	}
+}
+
+func TestSigV4ProbeKeepsAKeyOnClockSkew(t *testing.T) {
+	// AWS reports a skewed clock as InvalidSignatureException too. The host's
+	// clock is wrong, not the key.
+	aws, srv := newFakeAWS(t)
+	aws.status, aws.errType = http.StatusForbidden, "InvalidSignatureException"
+	aws.errBody = `{"message":"Signature expired: 20260101T000000Z is now earlier than 20260915T000000Z (20260914T235500Z - 5 min.)"}`
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+	got := probeProvider(t, s, cookie, token, id)
+	if got.OK {
+		t.Fatal("a refused signature must not report success")
+	}
+	if got.Rejected {
+		t.Errorf("a skewed clock is not a rejected credential: %s", got.Error)
+	}
+}
+
 func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	// Signing for the wrong region is a 403 that reads as a bad key.
 	_, srv := newFakeAWS(t)
@@ -214,10 +277,21 @@ func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 // generation with status.
 func vertexProbeServer(t *testing.T, status int) (*Server, *http.Cookie, string) {
 	t.Helper()
+	return vertexProbeServerWithToken(t, http.StatusOK,
+		`{"access_token":"at","token_type":"Bearer","expires_in":3600}`, status)
+}
+
+// vertexProbeServerWithToken is vertexProbeServer with the token exchange
+// answering tokenStatus and tokenBody.
+func vertexProbeServerWithToken(t *testing.T, tokenStatus int, tokenBody string, status int) (
+	*Server, *http.Cookie, string) {
+
+	t.Helper()
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"at","token_type":"Bearer","expires_in":3600}`))
+			w.WriteHeader(tokenStatus)
+			_, _ = w.Write([]byte(tokenBody))
 			return
 		}
 		w.WriteHeader(status)
@@ -295,6 +369,37 @@ func TestGCPProbeMarksAnUnauthenticatedKeyRejected(t *testing.T) {
 	}
 	if !got.Rejected {
 		t.Errorf("a refused credential is rejected: %s", got.Error)
+	}
+}
+
+func TestGCPProbeMarksARefusedKeySignatureRejected(t *testing.T) {
+	// Google documents "Invalid JWT Signature." as a key not associated with
+	// the service account, or one deleted, disabled or expired.
+	s, cookie, token := vertexProbeServerWithToken(t, http.StatusBadRequest,
+		`{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`, http.StatusOK)
+
+	got := probeProvider(t, s, cookie, token, "vx")
+	if got.OK || got.Probe != "expiry" {
+		t.Fatalf("ok = %v, probe = %q; want a failed token exchange: %s", got.OK, got.Probe, got.Error)
+	}
+	if !got.Rejected {
+		t.Errorf("a refused key signature is a rejected credential: %s", got.Error)
+	}
+}
+
+func TestGCPProbeKeepsAKeyOnClockSkew(t *testing.T) {
+	// The same invalid_grant names a host clock outside Google's window. The
+	// key is fine.
+	s, cookie, token := vertexProbeServerWithToken(t, http.StatusBadRequest,
+		`{"error":"invalid_grant","error_description":"Invalid JWT: Token must be a short-lived token (60 minutes) and in a reasonable timeframe. Check your iat and exp values in the JWT claim."}`,
+		http.StatusOK)
+
+	got := probeProvider(t, s, cookie, token, "vx")
+	if got.OK {
+		t.Fatal("a refused exchange must not report success")
+	}
+	if got.Rejected {
+		t.Errorf("a skewed clock is not a rejected credential: %s", got.Error)
 	}
 }
 
