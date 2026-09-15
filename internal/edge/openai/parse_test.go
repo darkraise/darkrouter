@@ -266,6 +266,15 @@ func TestParseRequestSplitsADataURIImage(t *testing.T) {
 	}
 }
 
+func TestParseRequestTakesABareFileDataMIMEFromItsFilename(t *testing.T) {
+	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
+		{"type":"file","file":{"filename":"a.pdf","file_data":"JVBERi0="}}]}]}`)
+	m := req.Messages[0].Content[0].Media
+	if m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
+		t.Errorf("media = %+v; bare base64 must take its MIME type from the filename", m)
+	}
+}
+
 func TestParseRequestKeepsAPublicImageURL(t *testing.T) {
 	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
 		{"type":"image_url","image_url":{"url":"https://x.example/a.png"}}]}]}`)

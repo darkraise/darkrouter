@@ -387,7 +387,7 @@ func responsesContent(raw json.RawMessage) ([]ir.ContentBlock, error) {
 		case "input_file", "file":
 			// A file part carries file_url or inline file_data, not image_url.
 			// Reading only the latter would drop the document silently.
-			mime, data := splitDataURI(p.FileData)
+			mime, data := fileMedia(p.FileData, p.Filename)
 			m := &ir.Media{FileID: p.FileID, URL: p.FileURL, MIME: mime, Data: data}
 			out = append(out, ir.ContentBlock{Type: ir.BlockDocument, Media: m})
 		default:
@@ -416,7 +416,7 @@ func responsesImageBlock(imageURL, fileID string) (ir.ContentBlock, error) {
 		if !found {
 			return ir.ContentBlock{}, errors.New("malformed data URL in an image part")
 		}
-		mime, _, _ := strings.Cut(meta, ";")
+		mime, payload := dataURIParts(meta, payload)
 		return ir.ContentBlock{
 			Type: ir.BlockImage, Media: &ir.Media{MIME: mime, Data: payload},
 		}, nil

@@ -307,7 +307,7 @@ func parseContent(raw json.RawMessage) ([]ir.ContentBlock, []ir.Warning, error) 
 			if p.File == nil {
 				continue
 			}
-			mime, data := splitDataURI(p.File.FileData)
+			mime, data := fileMedia(p.File.FileData, p.File.Filename)
 			out = append(out, ir.ContentBlock{Type: ir.BlockDocument, Media: &ir.Media{
 				MIME: mime, Data: data, FileID: p.File.FileID,
 			}})
@@ -443,18 +443,4 @@ func parseStop(raw json.RawMessage) []string {
 		return many
 	}
 	return nil
-}
-
-// splitDataURI pulls the MIME type and payload out of a data URI. A value that
-// is not one is returned as opaque data, since some clients send bare base64.
-func splitDataURI(s string) (mime, data string) {
-	if !strings.HasPrefix(s, "data:") {
-		return "", s
-	}
-	rest := strings.TrimPrefix(s, "data:")
-	head, payload, found := strings.Cut(rest, ",")
-	if !found {
-		return "", s
-	}
-	return strings.TrimSuffix(head, ";base64"), payload
 }

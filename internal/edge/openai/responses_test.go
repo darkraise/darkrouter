@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -468,6 +469,42 @@ func TestParseResponsesSplitsAnInlineFileDataURI(t *testing.T) {
 	m := req.Messages[0].Content[0].Media
 	if m == nil || m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
 		t.Errorf("media = %+v; the data URI prefix must not stay inside the base64 payload", m)
+	}
+}
+
+func TestParseResponsesEncodesAPercentEncodedFileDataURI(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"a.txt","file_data":"data:text/plain;charset=utf-8,a%20b%2Cc%zz"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "text/plain" || m.Data != base64.StdEncoding.EncodeToString([]byte("a b,c%zz")) {
+		t.Errorf("media = %+v; a data URI without ;base64 is percent-encoded text, and the IR carries base64", m)
+	}
+}
+
+func TestParseResponsesTakesABareFileDataMIMEFromItsFilename(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_file","filename":"report.PDF","file_data":"JVBERi0="}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "application/pdf" || m.Data != "JVBERi0=" {
+		t.Errorf("media = %+v; bare base64 must take its MIME type from the filename", m)
+	}
+}
+
+func TestParseResponsesEncodesAPercentEncodedImageURL(t *testing.T) {
+	req, err := parseResponses(t, `{"model":"m","input":[{"role":"user","content":[
+	  {"type":"input_image","image_url":"data:image/svg+xml,%3Csvg%2F%3E"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := req.Messages[0].Content[0].Media
+	if m == nil || m.MIME != "image/svg+xml" || m.Data != base64.StdEncoding.EncodeToString([]byte("<svg/>")) {
+		t.Errorf("media = %+v", m)
 	}
 }
 
