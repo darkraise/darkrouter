@@ -178,6 +178,24 @@ func TestParseRequestCarriesTypedServerTools(t *testing.T) {
 	}
 }
 
+func TestParseRequestTreatsACustomTypedToolAsAClientFunction(t *testing.T) {
+	req := parsed(t, `{"model":"claude-x","max_tokens":10,"messages":[],"tools":[
+		{"type":"custom","name":"f","description":"d","input_schema":{"type":"object"},"cache_control":{"type":"ephemeral"}}]}`, nil)
+	if len(req.Tools) != 1 {
+		t.Fatalf("tools = %+v", req.Tools)
+	}
+	tool := req.Tools[0]
+	if tool.Name != "f" || tool.Description != "d" || string(tool.Schema) != `{"type":"object"}` {
+		t.Errorf("tool = %+v", tool)
+	}
+	if _, ok := tool.Extra["type"]; ok {
+		t.Errorf("tool extra = %v; type custom is an ordinary function, not a provider-run tool", tool.Extra)
+	}
+	if string(tool.Extra["cache_control"]) != `{"type":"ephemeral"}` {
+		t.Errorf("tool extra = %v; cache_control must be kept", tool.Extra)
+	}
+}
+
 // The adapters that are not Anthropic strip this edge's transport state by
 // its key prefix, so a key that misses the prefix is forwarded to an upstream
 // that has no idea what it is.
