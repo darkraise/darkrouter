@@ -288,6 +288,55 @@ func TestForwardStreamStillEndsWithAnErrorEventWhenTheRequestIsCancelled(t *test
 	}
 }
 
+// failsOn is a client whose connection breaks on the write carrying marker.
+type failsOn struct {
+	*httptest.ResponseRecorder
+	marker string
+	broken bool
+}
+
+func (f *failsOn) Write(p []byte) (int, error) {
+	if f.broken || strings.Contains(string(p), f.marker) {
+		f.broken = true
+		return 0, errors.New("broken pipe")
+	}
+	return f.ResponseRecorder.Write(p)
+}
+
+// The provider's error event came first. A client that went away while it or
+// a later event was being written must not hide that failure from the breaker.
+func TestForwardStreamReportsTheProvidersErrorOverAFailedClientWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, marker string
+		maxLine            int
+	}{
+		{name: "on the error event", body: "data: c-first\n\ndata: e-overloaded\n\n", marker: "e-overloaded"},
+		{name: "on an unterminated tail", body: "data: c-first\n\ndata: e-overloaded\n\ndata: x-tail",
+			marker: "x-tail"},
+		{name: "on the raw copy after an overflow", marker: "xxxx", maxLine: 24,
+			body: "data: c-first\n\ndata: e-overloaded\n\ndata: " + strings.Repeat("x", 40)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ac := forwardFixture(t)
+			if tc.maxLine > 0 {
+				ac.Cfg.Server.SSE.MaxLineBytes = tc.maxLine
+			}
+			body := tc.body
+			cw := NewCommitWriter(&failsOn{ResponseRecorder: httptest.NewRecorder(), marker: tc.marker})
+			out, ierr := ac.Exec.forwardStream(cw, streamResponse(body), ac, fakeForwarder{}, noStreamError{}, false)
+			if cw.Err() == nil {
+				t.Fatal("the client write never failed; the fixture is not exercising anything")
+			}
+			if out != adapter.OutcomeRetryableProvider {
+				t.Errorf("outcome = %v, want %v", out, adapter.OutcomeRetryableProvider)
+			}
+			if ierr == nil || !strings.Contains(ierr.Message, "e-overloaded") {
+				t.Errorf("error = %v, want the provider's error event", ierr)
+			}
+		})
+	}
+}
+
 func TestForwardStreamEndsWithOneErrorEventWhenTheProviderSentOne(t *testing.T) {
 	// A provider can announce its failure in an error event and then drop the
 	// connection, as a local CLI does. The client has its error already; a
