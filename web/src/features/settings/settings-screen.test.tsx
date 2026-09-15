@@ -699,6 +699,24 @@ describe("the settings form", () => {
       expect(await screen.findByText(/^Changed elsewhere to 1 day /)).toBeInTheDocument()
       expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
     })
+
+    it("does not flag a row that was changed to the value typed here", async () => {
+      // The gateway reports the typed config, so the "96h" stored elsewhere
+      // comes back spelled "96h0m0s".
+      stubSettingsFetch({
+        config: changedElsewhere({ "log.retention": "96h0m0s", "policy.retry.max_attempts": "5" }),
+      })
+      const user = userEvent.setup()
+      const { client } = mount(<SettingsScreen />)
+
+      const box = await screen.findByLabelText("Keep request records for")
+      await user.clear(box)
+      await user.type(box, "96h")
+      await act(() => client.refetchQueries({ queryKey: ["config"] }))
+
+      await waitFor(() => expect(screen.getByLabelText("Attempts per request")).toHaveValue("5"))
+      expect(screen.queryByText(/^Changed elsewhere/)).not.toBeInTheDocument()
+    })
   })
 
   it("holds the typed value until the refetch that replaces it has landed", async () => {
