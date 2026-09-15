@@ -615,10 +615,15 @@ export function ProvidersScreen() {
 
   const listFailure =
     providers.isError && !providers.data
-      ? providers.error
+      ? { what: "The providers", error: providers.error }
       : presets.isError && !presets.data
-        ? presets.error
+        ? { what: "The provider catalogue", error: presets.error }
         : null
+  const healthFailed = health.isError && !health.data
+  const discoveryFailed = discovery.isError && !discovery.data
+  const staleReadings = [providers, presets, health, discovery].some(
+    (q) => q.isError && q.data !== undefined,
+  )
 
   return (
     <>
@@ -790,7 +795,7 @@ export function ProvidersScreen() {
       {/* A reading that did not arrive is said to be missing. Left to the
           fallbacks, a failed health poll reads as nothing cooling and a failed
           discovery poll as nothing ever discovered. */}
-      {health.isError && (
+      {healthFailed && (
         <LoadError
           what="Credential health"
           error={health.error}
@@ -798,7 +803,7 @@ export function ProvidersScreen() {
           className="mb-4"
         />
       )}
-      {discovery.isError && (
+      {discoveryFailed && (
         <LoadError
           what="The discovery readings"
           error={discovery.error}
@@ -807,13 +812,21 @@ export function ProvidersScreen() {
         />
       )}
 
+      {/* A failed poll with readings already on screen is a staleness note,
+          not an alarm: what is below is real, just older than it looks. */}
+      {!listFailure && staleReadings && (
+        <p className="mb-2 text-sm text-[hsl(var(--warning))]">
+          last refresh failed — readings may be stale
+        </p>
+      )}
+
       {listFailure ? (
         // Not the table. Without the provider rows every preset merges in as
         // unconfigured, which is a claim about providers that may be carrying
         // traffic.
         <LoadError
-          what={providers.isError ? "The providers" : "The provider catalogue"}
-          error={listFailure}
+          what={listFailure.what}
+          error={listFailure.error}
           onRetry={() => {
             void providers.refetch()
             void presets.refetch()
