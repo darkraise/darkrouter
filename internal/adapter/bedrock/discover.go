@@ -164,13 +164,62 @@ func (l *Lister) get(ctx context.Context, p catalog.Probe, url string, into any)
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s returned %s", url, resp.Status)
+		return newListError(url, resp)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(body, into)
+}
+
+// ListError is a control-plane refusal. Type is the AWS error type, which is
+// what separates a key AWS does not recognise from a policy that denies it:
+// both arrive as a 403.
+type ListError struct {
+	URL        string
+	Status     string
+	StatusCode int
+	Type       string
+	Message    string
+}
+
+func (e *ListError) Error() string {
+	msg := fmt.Sprintf("%s returned %s", e.URL, e.Status)
+	if e.Type != "" {
+		msg += ": " + e.Type
+	}
+	if e.Message != "" {
+		msg += ": " + e.Message
+	}
+	return msg
+}
+
+func newListError(url string, resp *http.Response) *ListError {
+	e := &ListError{URL: url, Status: resp.Status, StatusCode: resp.StatusCode}
+	var body struct {
+		Type     string `json:"__type"`
+		Message  string `json:"message"`
+		MessageU string `json:"Message"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body)
+	// restJson1 names the type in X-Amzn-Errortype, optionally followed by
+	// ":" and a namespace URI; __type may carry a "namespace#" prefix.
+	e.Type = resp.Header.Get("X-Amzn-Errortype")
+	if e.Type == "" {
+		e.Type = body.Type
+	}
+	if i := strings.Index(e.Type, ":"); i >= 0 {
+		e.Type = e.Type[:i]
+	}
+	if i := strings.LastIndex(e.Type, "#"); i >= 0 {
+		e.Type = e.Type[i+1:]
+	}
+	e.Message = body.Message
+	if e.Message == "" {
+		e.Message = body.MessageU
+	}
+	return e
 }
 
 // modelIDFromARN takes the identifier off the end of a foundation-model ARN.

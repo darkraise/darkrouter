@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/bedrock"
@@ -279,11 +282,19 @@ func (s *Server) listPage(ctx context.Context, pr catalog.Probe, cursor string) 
 			errors.New("the provider rejected this credential: " + resp.Status)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		// Google refuses an unknown or expired API key with a 400, naming the
+		// refusal only in the ErrorInfo reason.
+		if googleAPIKeyInvalid(raw) {
+			return nil, "", rejectedCredential{errors.New(
+				"the provider rejected this credential: " + resp.Status + ": " +
+					upstreamMessage(bytes.NewReader(raw)))}
+		}
 		// The status alone is a poor answer when the provider said something
 		// specific: "Bad Gateway" for a local CLI that is merely logged out
 		// sends the operator looking for a network problem, when the reply
 		// already said to run auggie login.
-		if why := upstreamMessage(resp.Body); why != "" {
+		if why := upstreamMessage(bytes.NewReader(raw)); why != "" {
 			return nil, "", errors.New(resp.Status + ": " + why)
 		}
 		return nil, "", errors.New("the provider returned " + resp.Status)
@@ -315,6 +326,28 @@ func upstreamMessage(r io.Reader) string {
 	return msg
 }
 
+// googleAPIKeyInvalid reports whether body is a Google error whose ErrorInfo
+// reason is API_KEY_INVALID.
+func googleAPIKeyInvalid(body []byte) bool {
+	var e struct {
+		Error struct {
+			Details []struct {
+				Type   string `json:"@type"`
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return false
+	}
+	for _, d := range e.Error.Details {
+		if d.Type == "type.googleapis.com/google.rpc.ErrorInfo" && d.Reason == "API_KEY_INVALID" {
+			return true
+		}
+	}
+	return false
+}
+
 // authTargetFor is the provider half of a strategy resolution.
 func authTargetFor(row store.ProviderRow, style string) auth.Target {
 	return auth.Target{
@@ -344,7 +377,9 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 	})
 	if err != nil {
 		kind := classifyAWSProbe(err)
-		if kind == "signature" {
+		// AWS also answers a skewed host clock with InvalidSignatureException.
+		// That key is good; the clock is not.
+		if kind == "signature" && !strings.Contains(strings.ToLower(err.Error()), "signature expired") {
 			err = rejectedCredential{err}
 		}
 		return kind, 0, err
@@ -355,7 +390,20 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 // classifyAWSProbe names what failed. A 403 is permission, not signature: the
 // signature validated and the policy did not allow the call, which is a
 // different fix from a wrong region or a revoked key.
+//
+// The error type is read first where AWS sent one: an unrecognised key and a
+// bad signature both arrive as a 403, so the status alone would call them
+// permission failures.
 func classifyAWSProbe(err error) string {
+	var le *bedrock.ListError
+	if errors.As(err, &le) {
+		switch le.Type {
+		case "UnrecognizedClientException", "InvalidSignatureException":
+			return "signature"
+		case "AccessDeniedException":
+			return "permission"
+		}
+	}
 	text := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(text, "403"), strings.Contains(text, "accessdenied"):
@@ -402,6 +450,13 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 	}
 	if err := az(ctx, req); err != nil {
 		// The token exchange failed, not the endpoint. Different fix.
+		//
+		// Only one invalid_grant is the key itself: Google documents "Invalid
+		// JWT Signature." as a key not associated with the account, or deleted,
+		// disabled or expired. The same code also names a skewed host clock.
+		if gcpKeySignatureRefused(err) {
+			err = rejectedCredential{err}
+		}
 		return "expiry", 0, err
 	}
 	resp, err := s.httpClient().Do(req)
@@ -428,6 +483,26 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 		return "reachability", 0, errors.New("vertex returned " + resp.Status)
 	}
 	return "completion", 1, nil
+}
+
+func gcpKeySignatureRefused(err error) bool {
+	var re *oauth2.RetrieveError
+	if !errors.As(err, &re) {
+		return false
+	}
+	code, desc := re.ErrorCode, re.ErrorDescription
+	// The JWT flow returns the body without parsing RFC 6749's fields.
+	if code == "" {
+		var body struct {
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		if json.Unmarshal(re.Body, &body) != nil {
+			return false
+		}
+		code, desc = body.Error, body.Description
+	}
+	return code == "invalid_grant" && strings.HasPrefix(desc, "Invalid JWT Signature")
 }
 
 // oneTokenProbe is the cheapest generation that still exercises the endpoint.
