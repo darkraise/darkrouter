@@ -812,7 +812,9 @@ func TestCachePointsKeepTheirTTLTheBudgetAndValidPlacements(t *testing.T) {
 		return out
 	}
 
+	const hourModel = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 	req := simple()
+	req.Model = hourModel
 	req.System = []ir.ContentBlock{{Type: ir.BlockText, Text: "preamble", CacheControl: hour}}
 	req.Messages = []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
 		{Type: ir.BlockText, Text: "a", CacheControl: plain},
@@ -839,6 +841,7 @@ func TestCachePointsKeepTheirTTLTheBudgetAndValidPlacements(t *testing.T) {
 	}
 
 	req = simple()
+	req.Model = hourModel
 	req.Messages = append(req.Messages,
 		ir.Message{Role: ir.RoleAssistant, Content: []ir.ContentBlock{{
 			Type: ir.BlockToolUse, ToolUse: &ir.ToolUse{ID: "c1", Name: "f"},
@@ -866,5 +869,71 @@ func TestCachePointsKeepTheirTTLTheBudgetAndValidPlacements(t *testing.T) {
 	}
 	if outer := points(content); len(outer) != 1 || outer[0]["ttl"] != "1h" {
 		t.Errorf("content cachePoints = %#v, want one closing the tool result with ttl 1h", outer)
+	}
+}
+
+// AWS lists the one-hour TTL for some Claude models only; the rest, and every
+// other publisher, take the five-minute default and nothing else. A one-hour
+// entry must also precede every five-minute one.
+func TestCachePointTTLFollowsTheModelAndTheOrderingRule(t *testing.T) {
+	hour := &ir.CacheControl{Type: "ephemeral", TTL: "1h"}
+	five := &ir.CacheControl{Type: "ephemeral", TTL: "5m"}
+	ttls := func(body map[string]any) []any {
+		var out []any
+		collect := func(blocks []any) {
+			for _, b := range blocks {
+				if cp, ok := b.(map[string]any)["cachePoint"].(map[string]any); ok {
+					out = append(out, cp["ttl"])
+				}
+			}
+		}
+		if sys, ok := body["system"].([]any); ok {
+			collect(sys)
+		}
+		for _, m := range body["messages"].([]any) {
+			collect(m.(map[string]any)["content"].([]any))
+		}
+		return out
+	}
+	request := func(model string, sys, msg *ir.CacheControl) *ir.Request {
+		return &ir.Request{
+			Model:  model,
+			System: []ir.ContentBlock{{Type: ir.BlockText, Text: "preamble", CacheControl: sys}},
+			Messages: []ir.Message{{Role: ir.RoleUser, Content: []ir.ContentBlock{
+				{Type: ir.BlockText, Text: "context", CacheControl: msg},
+			}}},
+		}
+	}
+	for _, c := range []struct {
+		name     string
+		model    string
+		sys, msg *ir.CacheControl
+		want     []any
+		warned   bool
+	}{
+		{"hour then five on a 1h model", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", hour, five, []any{"1h", nil}, false},
+		{"hour on an opus 4.6 profile", "global.anthropic.claude-opus-4-6-v1", hour, hour, []any{"1h", "1h"}, false},
+		{"hour on a 5m-only model", "anthropic.claude-3-7-sonnet-20250219-v1:0", hour, five, []any{nil, nil}, true},
+		{"hour on nova", "us.amazon.nova-pro-v1:0", hour, nil, []any{nil}, true},
+		{"five on nova", "us.amazon.nova-pro-v1:0", five, five, []any{nil, nil}, false},
+		{"hour on an application inference profile", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc", hour, nil, []any{nil}, true},
+		{"hour after five", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", five, hour, []any{nil, nil}, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			body, _, warns := build(t, anthropicTarget(c.model), request(c.model, c.sys, c.msg))
+			got := ttls(body)
+			if len(got) != len(c.want) {
+				t.Fatalf("ttls = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Errorf("ttls = %v, want %v", got, c.want)
+					break
+				}
+			}
+			if hasWarning(warns, "cache_control") != c.warned {
+				t.Errorf("warnings = %+v", warns)
+			}
+		})
 	}
 }
