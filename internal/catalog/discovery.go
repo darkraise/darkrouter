@@ -457,7 +457,12 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		return models, err
 	}
 	return ListPages(ctx, d.client, pr, func(resp *http.Response) error {
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		refused := resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden
+		if !refused && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			refused = GoogleAPIKeyInvalid(raw)
+		}
+		if refused {
 			// A rejected key on a probe is the same evidence as a rejected key on
 			// a request, so it cools the credential across every model it serves.
 			d.health.Record(

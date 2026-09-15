@@ -250,7 +250,7 @@ func classifyProbeListing(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	// Google refuses an unknown or expired API key with a 400, naming the
 	// refusal only in the ErrorInfo reason.
-	if googleAPIKeyInvalid(raw) {
+	if catalog.GoogleAPIKeyInvalid(raw) {
 		return rejectedCredential{errors.New(
 			"the provider rejected this credential: " + resp.Status + ": " +
 				upstreamMessage(bytes.NewReader(raw)))}
@@ -296,28 +296,6 @@ func upstreamMessage(r io.Reader) string {
 		msg = msg[:300] + "…"
 	}
 	return msg
-}
-
-// googleAPIKeyInvalid reports whether body is a Google error whose ErrorInfo
-// reason is API_KEY_INVALID.
-func googleAPIKeyInvalid(body []byte) bool {
-	var e struct {
-		Error struct {
-			Details []struct {
-				Type   string `json:"@type"`
-				Reason string `json:"reason"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &e) != nil {
-		return false
-	}
-	for _, d := range e.Error.Details {
-		if d.Type == "type.googleapis.com/google.rpc.ErrorInfo" && d.Reason == "API_KEY_INVALID" {
-			return true
-		}
-	}
-	return false
 }
 
 // authTargetFor is the provider half of a strategy resolution.

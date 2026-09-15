@@ -168,6 +168,57 @@ func TestSweepCoolsTheCredentialOnA401(t *testing.T) {
 	}
 }
 
+func TestSweepCoolsAGeminiKeyRefusedWithA400(t *testing.T) {
+	// Gemini refuses an unknown or expired key with a 400 naming
+	// API_KEY_INVALID, which is the same evidence as another provider's 401.
+	// A 400 without that reason says nothing about the key.
+	cases := []struct {
+		name string
+		body string
+		cool bool
+	}{
+		{name: "API_KEY_INVALID", cool: true, body: `{"error":{"code":400,
+			"message":"API Key not found. Please pass a valid API key.","status":"INVALID_ARGUMENT",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID",
+			"domain":"googleapis.com","metadata":{"service":"generativelanguage.googleapis.com"}}]}}`},
+		{name: "other 400", body: `{"error":{"code":400,
+			"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			db := discoveryDB(t, "g")
+			src := &staticSource{ps: []provider.Provider{{
+				ID: "g", Kind: "gemini", BaseURL: srv.URL + "/v1beta",
+				Credentials: []provider.Credential{{ID: "k1", Secret: "AIza", Enabled: true}},
+			}}}
+			h := &fakeHealth{}
+			NewDiscoverer(db, src, NewStore(db, src), h, DiscoveryOptions{}).SweepOnce(context.Background())
+
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if !tc.cool {
+				if len(h.signals) != 0 {
+					t.Fatalf("recorded %+v; a 400 without the reason must not cool the key", h.signals)
+				}
+				return
+			}
+			if len(h.signals) != 1 {
+				t.Fatalf("recorded %d signals, want 1", len(h.signals))
+			}
+			if h.signals[0].Outcome != adapter.OutcomeRetryableCredential || h.keys[0].KeyID != "k1" {
+				t.Errorf("signal = %+v on %+v", h.signals[0], h.keys[0])
+			}
+		})
+	}
+}
+
 func TestSweepSkipsCoolingCredentialsAndPicksLRU(t *testing.T) {
 	var seen atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
