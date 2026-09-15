@@ -29,7 +29,13 @@ export function useRowHeight(ref: RefObject<HTMLElement | null>): number {
     // row height for whatever density and font size are in force.
     const rows = el.querySelectorAll<HTMLElement>("tbody tr:not(.dr-data-table-virtual-pad)")
     let tallest = 0
-    for (const row of rows) tallest = Math.max(tallest, row.getBoundingClientRect().height)
+    for (const row of rows) {
+      // DataTable's "no results" row is several data rows tall. Measured while
+      // a table waits for its data or a filter matches nothing, it would pin
+      // every row that follows at its height, and a floor cannot come down.
+      if (row.querySelector(".dr-data-table-empty")) continue
+      tallest = Math.max(tallest, row.getBoundingClientRect().height)
+    }
     if (tallest > 0) {
       const next = Math.max(Math.ceil(tallest), MIN_ROW_HEIGHT)
       setRowHeight((prev) => (prev !== next ? next : prev))

@@ -26,6 +26,25 @@ function Table({ rows }: { rows: number }) {
   )
 }
 
+function EmptyTable() {
+  const ref = useRef<HTMLDivElement>(null)
+  const rowHeight = useRowHeight(ref)
+  return (
+    <div ref={ref}>
+      <output>{rowHeight}</output>
+      <table>
+        <tbody>
+          <tr data-testid="empty">
+            <td>
+              <div className="dr-data-table-empty">No results</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function stubHeights(byTestId: Record<string, number>) {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
     this: HTMLElement,
@@ -42,6 +61,16 @@ describe("useRowHeight", () => {
     stubHeights({ row: 48.6, pad: 900 })
     render(<Table rows={3} />)
     expect(screen.getByRole("status")).toHaveTextContent("49")
+  })
+
+  it("does not measure the empty-state row", () => {
+    // It is far taller than a data row, and the pin is a floor: measured once
+    // before the data arrived, it held every row after it at its height.
+    stubHeights({ empty: 186 })
+    render(
+      <EmptyTable />,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent(String(MIN_ROW_HEIGHT))
   })
 
   it("holds the floor when nothing can be measured", () => {
