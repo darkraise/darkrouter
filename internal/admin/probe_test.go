@@ -166,14 +166,19 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 	// The console deletes a just-added key the probe marks rejected. A rate
 	// limit, an outage or an unreachable host says nothing about the key, and
 	// deleting on those loses a secret the operator may not have elsewhere.
+	//
+	// Nor does a bare 403: OpenAI answers one for an unsupported country and
+	// Anthropic for a key lacking a permission, both of which a new key would
+	// meet again. Their bad-key answer is a 401.
 	cases := []struct {
 		name     string
 		status   int
 		down     bool
 		rejected bool
+		probe    string
 	}{
 		{name: "401", status: http.StatusUnauthorized, rejected: true},
-		{name: "403", status: http.StatusForbidden, rejected: true},
+		{name: "403", status: http.StatusForbidden, probe: "permission"},
 		{name: "429", status: http.StatusTooManyRequests},
 		{name: "503", status: http.StatusServiceUnavailable},
 		{name: "unreachable", down: true},
@@ -197,8 +202,9 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 			}
 			var body struct {
-				OK       bool `json:"ok"`
-				Rejected bool `json:"rejected"`
+				OK       bool   `json:"ok"`
+				Rejected bool   `json:"rejected"`
+				Probe    string `json:"probe"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
@@ -209,6 +215,9 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 			if body.Rejected != tc.rejected {
 				t.Errorf("rejected = %v, want %v: %s", body.Rejected, tc.rejected, w.Body.String())
 			}
+			if tc.probe != "" && body.Probe != tc.probe {
+				t.Errorf("probe = %q, want %q: %s", body.Probe, tc.probe, w.Body.String())
+			}
 		})
 	}
 }
@@ -216,8 +225,13 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 func TestAGeminiKeyRefusalMarksTheCredentialRejected(t *testing.T) {
 	// Gemini answers an unknown API key with a 400, not a 401: the refusal is
 	// in the ErrorInfo reason. Any other 400 says nothing about the key.
+	//
+	// Its 403s are a disabled API or a key restriction, fixed in the Cloud
+	// project rather than by a new key. A key reported as leaked is a 403 too,
+	// and Google has flagged working keys that way on one endpoint only.
 	cases := []struct {
 		name     string
+		status   int
 		body     string
 		rejected bool
 	}{
@@ -229,12 +243,37 @@ func TestAGeminiKeyRefusalMarksTheCredentialRejected(t *testing.T) {
 			"message":"API Key not found. Please pass a valid API key."}]}}`},
 		{name: "other 400", body: `{"error":{"code":400,
 			"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}`},
+		{name: "SERVICE_DISABLED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Generative Language API has not been used in project 123 before or it is disabled.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"SERVICE_DISABLED","domain":"googleapis.com",
+			"metadata":{"service":"generativelanguage.googleapis.com","consumer":"projects/123"}}]}}`},
+		{name: "API_KEY_SERVICE_BLOCKED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.ModelService.ListModels are blocked.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_SERVICE_BLOCKED","domain":"googleapis.com",
+			"metadata":{"service":"generativelanguage.googleapis.com"}}]}}`},
+		{name: "API_KEY_IP_ADDRESS_BLOCKED", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"The provided API key has an IP address restriction.","status":"PERMISSION_DENIED",
+			"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_IP_ADDRESS_BLOCKED","domain":"googleapis.com"}]}}`},
+		{name: "reported as leaked", status: http.StatusForbidden, body: `{"error":{"code":403,
+			"message":"Your API key was reported as leaked. Please use another API key.",
+			"status":"PERMISSION_DENIED"}}`},
+		{name: "API_KEY_INVALID on a 403", status: http.StatusForbidden, rejected: true,
+			body: `{"error":{"code":403,"message":"API key expired. Please renew the API key.",
+			"status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",
+			"reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
+				status := tc.status
+				if status == 0 {
+					status = http.StatusBadRequest
+				}
+				w.WriteHeader(status)
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer upstream.Close()
@@ -253,10 +292,13 @@ func TestAGeminiKeyRefusalMarksTheCredentialRejected(t *testing.T) {
 
 			got := probeProvider(t, s, cookie, token, "g")
 			if got.OK {
-				t.Fatal("a 400 must not report success")
+				t.Fatal("a refusal must not report success")
 			}
 			if got.Rejected != tc.rejected {
 				t.Errorf("rejected = %v, want %v: %s", got.Rejected, tc.rejected, got.Error)
+			}
+			if tc.status == http.StatusForbidden && !tc.rejected && got.Probe != "permission" {
+				t.Errorf("probe = %q, want permission: %s", got.Probe, got.Error)
 			}
 		})
 	}
