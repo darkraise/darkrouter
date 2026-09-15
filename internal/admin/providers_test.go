@@ -153,7 +153,7 @@ func TestAnAuggieProviderCanBePatched(t *testing.T) {
 }
 
 // A Vertex row written before project and location were required has no
-// location, and nothing can set one. Turning it off or reordering it does not
+// location. Turning it off or reordering it does not
 // touch its endpoint, so the endpoint rule it predates must not refuse that.
 func TestALegacyVertexProviderCanBePatchedOutsideItsEndpoint(t *testing.T) {
 	s, _ := testServerFull(t)
@@ -172,6 +172,59 @@ func TestALegacyVertexProviderCanBePatchedOutsideItsEndpoint(t *testing.T) {
 	}
 	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx", `{"base_url":"nope"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("a patch to the endpoint itself is still checked: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestALegacyVertexProviderCanBeGivenALocation(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		BaseURL: "https://us-central1-aiplatform.googleapis.com", AuthStyle: "gcp-sa",
+		Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"us-central1"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a location without a project is still no endpoint: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"project":"proj","location":"us-central1"}`); w.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Project != "proj" || row.Location != "us-central1" {
+		t.Errorf("project, location = %q, %q", row.Project, row.Location)
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"us-central1"}`); w.Code != http.StatusOK {
+		t.Errorf("restating the location: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestASetLocationCannotBeMoved(t *testing.T) {
+	// Moving a location moves every catalogued model to another host, which
+	// is a new provider rather than an edit to this one.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"vx","preset":"vertex","project":"proj","location":"us-central1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "PATCH", "/api/providers/vx",
+		`{"location":"europe-west4"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	row, err := s.deps.DB.ProviderByID(context.Background(), "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != "us-central1" {
+		t.Errorf("location = %q; a refused patch moved it", row.Location)
 	}
 }
 

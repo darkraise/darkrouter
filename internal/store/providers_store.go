@@ -23,8 +23,9 @@ type ProviderRow struct {
 	Enabled   bool
 	Region    string
 	Project   string
-	// Location is Vertex's regional endpoint. It is set at creation and not
-	// patchable: changing it moves every catalogued model to a different host.
+	// Location is Vertex's regional endpoint. Once set it does not change:
+	// moving it moves every catalogued model to a different host. A patch may
+	// only fill one a row was created without.
 	Location string
 	// FreeModelsOnly narrows what a discovery sweep imports for this provider
 	// to the models it can show are free. It is a filter on the catalogue, not
@@ -47,6 +48,7 @@ type ProviderPatch struct {
 	Enabled  *bool   `json:"enabled"`
 	Region   *string `json:"region"`
 	Project  *string `json:"project"`
+	Location *string `json:"location"`
 	// FreeModelsOnly is patchable so an operator can change their mind without
 	// deleting a provider they cannot recreate: the set is defined in code.
 	FreeModelsOnly *bool `json:"free_models_only"`
@@ -120,6 +122,9 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 	}
 	if patch.Project != nil {
 		sets, args = append(sets, "project = ?"), append(args, *patch.Project)
+	}
+	if patch.Location != nil {
+		sets, args = append(sets, "location = ?"), append(args, *patch.Location)
 	}
 	if patch.FreeModelsOnly != nil {
 		sets = append(sets, "free_models_only = ?")

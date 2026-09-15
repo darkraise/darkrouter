@@ -54,6 +54,16 @@ describe("settingsPatch", () => {
     })
   })
 
+  it("sends location only once it has been touched", () => {
+    // A Vertex row created before location was required has none, and this
+    // is the only way to give it one.
+    const p = provider()
+    expect(settingsPatch(draft(p), p)).not.toHaveProperty("location")
+    expect(settingsPatch(draft(p, { location: "us-central1" }), p)).toEqual({
+      location: "us-central1",
+    })
+  })
+
   it("carries an intentional clear", () => {
     // Once an operator has focused a field, an empty string is a deliberate
     // clear rather than an unset value, and has to travel as one.

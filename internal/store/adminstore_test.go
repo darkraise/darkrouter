@@ -215,6 +215,27 @@ func TestUpdateTouchesOnlyWhatThePatchNames(t *testing.T) {
 	}
 }
 
+func TestAPatchCanSetALocation(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, ProviderRow{
+		ID: "vx", Name: "V", Kind: "vertex", BaseURL: "https://x", AuthStyle: "gcp-sa",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	loc := "us-central1"
+	if err := db.UpdateProvider(ctx, "vx", ProviderPatch{Location: &loc}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := db.ProviderByID(ctx, "vx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Location != loc {
+		t.Errorf("location = %q, want %q", row.Location, loc)
+	}
+}
+
 func TestAnEmptyPatchIsAnError(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
