@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -253,6 +255,53 @@ func TestASetLocationCannotBeMoved(t *testing.T) {
 	}
 	if row.Location != "us-central1" {
 		t.Errorf("location = %q; a refused patch moved it", row.Location)
+	}
+}
+
+func TestConcurrentLocationFillsCannotMoveIt(t *testing.T) {
+	// Both patches can read the row before either writes, so the handler's own
+	// check passes twice. The loser must be refused, not silently win.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	for i := 0; i < 30; i++ {
+		id := "vx" + strconv.Itoa(i)
+		if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+			ID: id, Name: "Vertex", Preset: "vertex", Kind: "vertex",
+			AuthStyle: "gcp-sa", Project: "proj", Priority: 1, Enabled: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		locations := []string{"us-central1", "europe-west4"}
+		codes := make([]int, len(locations))
+		var start, done sync.WaitGroup
+		start.Add(1)
+		for j, loc := range locations {
+			done.Add(1)
+			go func() {
+				defer done.Done()
+				start.Wait()
+				codes[j] = do(t, s, cookie, token, "PATCH", "/api/providers/"+id,
+					`{"location":"`+loc+`"}`).Code
+			}()
+		}
+		start.Done()
+		done.Wait()
+
+		row, err := s.deps.DB.ProviderByID(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j, loc := range locations {
+			switch codes[j] {
+			case http.StatusOK:
+				if row.Location != loc {
+					t.Fatalf("%s: the patch to %s answered 200, but the location is %q", id, loc, row.Location)
+				}
+			case http.StatusBadRequest:
+			default:
+				t.Fatalf("%s: the patch to %s answered %d, want 200 or 400", id, loc, codes[j])
+			}
+		}
 	}
 }
 

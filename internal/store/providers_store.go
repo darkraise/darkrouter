@@ -139,10 +139,18 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 		// UI sent a form it did not fill in.
 		return fmt.Errorf("update provider %q: the patch names no fields", id)
 	}
+	where := `id = ?`
 	args = append(args, id)
+	if patch.Location != nil {
+		// A location is filled once. Checked in the write rather than by the
+		// caller alone: two patches can both read an empty location, and the
+		// second would otherwise move the first one's.
+		where += ` AND (location = '' OR location = ?)`
+		args = append(args, *patch.Location)
+	}
 
 	res, err := d.Write.ExecContext(ctx,
-		`UPDATE providers SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+		`UPDATE providers SET `+strings.Join(sets, ", ")+` WHERE `+where, args...)
 	if err != nil {
 		return fmt.Errorf("update provider %q: %w", id, err)
 	}
@@ -151,7 +159,13 @@ func (d *DB) UpdateProvider(ctx context.Context, id string, patch ProviderPatch)
 		return fmt.Errorf("update provider %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("update provider %q: %w", id, ErrNotFound)
+		if patch.Location == nil {
+			return fmt.Errorf("update provider %q: %w", id, ErrNotFound)
+		}
+		if _, err := d.ProviderByID(ctx, id); err != nil {
+			return fmt.Errorf("update provider %q: %w", id, err)
+		}
+		return fmt.Errorf("update provider %q: %w", id, ErrLocationSet)
 	}
 	return nil
 }
