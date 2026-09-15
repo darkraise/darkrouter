@@ -57,6 +57,15 @@ describe("snippetFor", () => {
       )
     })
 
+    it("quotes a tilde, which an export expands after : or =", () => {
+      expect(snippetFor("claude-code", "https://h/a:~/b", "dr_tok").split("\n")[0]).toBe(
+        "export ANTHROPIC_BASE_URL='https://h/a:~/b'",
+      )
+      expect(snippetFor("codex", "http://x", "~tok").split("\n")[1]).toBe(
+        "export OPENAI_API_KEY='~tok'",
+      )
+    })
+
     it("quotes the placeholder token, which a shell reads as a redirect", () => {
       expect(snippetFor("claude-code", "http://x", "")).toContain(
         "export ANTHROPIC_AUTH_TOKEN='<your-token>'",

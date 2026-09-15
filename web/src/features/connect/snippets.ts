@@ -35,7 +35,7 @@ export function baseUrlFor(
 // other value is single-quoted, the one shell form in which no character but
 // the quote itself is special.
 function shellWord(value: string): string {
-  if (/^[A-Za-z0-9_.:/@%+=,~-]+$/.test(value)) return value
+  if (/^[A-Za-z0-9_.:/@%+=,-]+$/.test(value)) return value
   return `'${value.replace(/'/g, "'\\''")}'`
 }
 
