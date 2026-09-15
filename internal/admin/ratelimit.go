@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"math"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -105,10 +106,21 @@ func (l *loginLimiter) acquire() (release func(), ok bool) {
 // port, so one client's connections share a bucket. The forwarded header is
 // deliberately not consulted; a client that can set it could choose its own
 // bucket.
+//
+// IPv6 is keyed by its /64: that is the smallest allocation a client is handed,
+// so per address a single sender would hold 2^64 buckets.
 func clientAddr(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		return remoteAddr
 	}
-	return host
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	addr = addr.WithZone("")
+	if addr.Is6() && !addr.Is4In6() {
+		return netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return addr.String()
 }
