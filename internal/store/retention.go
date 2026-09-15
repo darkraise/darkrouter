@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/config"
@@ -36,6 +37,17 @@ func (d *DB) Prune(ctx context.Context, now time.Time,
 	total := 0
 
 	logCutoff := now.Add(-logRetention).UnixMilli()
+	// Recorded before any row goes, so a prune that fails halfway still
+	// fences the rollup off from the days it may have cut into. Kept at its
+	// maximum: lengthening log.retention does not bring deleted rows back.
+	if _, err := d.Write.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = CASE
+		   WHEN CAST(excluded.value AS INTEGER) > CAST(settings.value AS INTEGER)
+		   THEN excluded.value ELSE settings.value END`,
+		settingPruneCutoff, strconv.FormatInt(logCutoff, 10)); err != nil {
+		return total, fmt.Errorf("record prune cutoff: %w", err)
+	}
 	for {
 		n, err := d.pruneRequestBatch(ctx, logCutoff, batch)
 		if err != nil {
