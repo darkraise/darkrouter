@@ -85,3 +85,32 @@ func TestAnUnparseablePolicyRowDoesNotFailStartup(t *testing.T) {
 		t.Errorf("connect = %v, want the compiled default", got)
 	}
 }
+
+// The shipped compose files give the process 30s between SIGTERM and SIGKILL.
+// The gateway cannot see that setting, so a shutdown_grace that would run into
+// it is flagged where an operator looks, rather than discovered as a request
+// log that never flushed.
+func TestAShutdownGraceLongerThanTheStopPeriodWarns(t *testing.T) {
+	for _, tc := range []struct {
+		grace string
+		warns bool
+	}{{"10s", false}, {"25s", false}, {"26s", true}, {"60s", true}} {
+		t.Run(tc.grace, func(t *testing.T) {
+			d := migrated(t)
+			if err := putSetting(context.Background(), d.Write, "server.shutdown_grace", tc.grace); err != nil {
+				t.Fatal(err)
+			}
+			s := startupStore(t, d)
+			warned := false
+			for _, w := range s.Current().Warnings {
+				if strings.Contains(w, "server.shutdown_grace") && strings.Contains(w, "stop_grace_period") {
+					warned = true
+				}
+			}
+			if warned != tc.warns {
+				t.Errorf("shutdown_grace %s: warned = %v, want %v; warnings %v",
+					tc.grace, warned, tc.warns, s.Current().Warnings)
+			}
+		})
+	}
+}
