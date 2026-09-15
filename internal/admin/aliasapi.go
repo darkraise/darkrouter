@@ -50,10 +50,28 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 	patch := config.Patch{Aliases: aliases}
 	// Optional: a caller that never read the ETag gets today's behaviour
 	// rather than a refusal it has no way to satisfy.
-	if match := strings.Trim(r.Header.Get("If-Match"), `"`); match != "" {
+	if match, ok := aliasesIfMatch(r.Header.Get("If-Match")); ok {
 		patch.AliasesRevision = &match
 	}
 	s.commitConfig(w, r, patch)
+}
+
+// aliasesIfMatch reads the revision an If-Match header pins, and whether it
+// pins one at all.
+//
+// A weak validator is accepted as its strong form. A compressing reverse proxy
+// rewrites the ETag it forwards to W/"...", the browser echoes that back, and
+// refusing it would 409 every save made through the proxy. Weak comparison is
+// sound here because the revision fingerprints the table itself, not a byte
+// encoding of it. "*" only asks that the resource exist, which the alias table
+// always does, so it pins nothing.
+func aliasesIfMatch(header string) (string, bool) {
+	match := strings.TrimSpace(header)
+	if match == "" || match == "*" {
+		return "", false
+	}
+	match = strings.TrimPrefix(match, "W/")
+	return strings.Trim(match, `"`), true
 }
 
 func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {

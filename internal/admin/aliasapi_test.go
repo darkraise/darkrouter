@@ -94,6 +94,39 @@ func TestPutAliasesRejectsAStaleIfMatch(t *testing.T) {
 	}
 }
 
+// A compressing reverse proxy weakens the ETag it forwards, and the browser
+// echoes the weakened form back. Refusing it would 409 every save made through
+// such a proxy, forever, with no reload able to fix it.
+func TestPutAliasesAcceptsAWeakIfMatch(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	etag := do(t, s, cookie, token, "GET", "/api/aliases", "").Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("GET /api/aliases did not set an ETag")
+	}
+	if w := putIfMatch(t, s, cookie, token, "W/"+etag, `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("PUT with a weak If-Match = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// Still a pin, not a bypass: the weak form of a stale ETag is stale too.
+	if w := putIfMatch(t, s, cookie, token, "W/"+etag, `{"fast":["groq/b"]}`); w.Code != 409 {
+		t.Fatalf("PUT with a stale weak If-Match = %d, want 409: %s", w.Code, w.Body.String())
+	}
+}
+
+// If-Match: * asks only that the resource exist, which the alias table always
+// does, so it pins nothing.
+func TestPutAliasesTreatsAStarIfMatchAsNoPin(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+	if w := putIfMatch(t, s, cookie, token, "*", `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("PUT with If-Match: * = %d, want 200: %s", w.Code, w.Body.String())
+	}
+}
+
 // A save carrying no If-Match at all -- a caller that never read the ETag --
 // keeps working exactly as before: the check is opt-in, not a new
 // requirement every caller of this endpoint must satisfy.
