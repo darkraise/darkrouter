@@ -317,6 +317,55 @@ describe("Chat mode", () => {
     expect(posts).toEqual(["user:first", "assistant:an answer", "assistant:an answer"])
   })
 
+  it("saves another conversation's exchanges while one conversation's save keeps failing", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { title?: string; role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") {
+        return { ...stored, id: body.title === "stuck" ? "stuck1" : "next1", title: body.title }
+      }
+      posts.push(`${path}:${body.role}:${body.content}`)
+      if (path.includes("stuck1")) throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("stuck")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await chooseModel("gpt")
+    await send("next")
+    await waitFor(() =>
+      expect(posts).toContain("/api/playground/conversations/next1/messages:assistant:an answer"),
+    )
+    expect(posts.filter((p) => p.includes("next1"))).toEqual([
+      "/api/playground/conversations/next1/messages:user:next",
+      "/api/playground/conversations/next1/messages:assistant:an answer",
+    ])
+    expect(await screen.findByText(/1 exchange was not saved/i)).toBeInTheDocument()
+  })
+
+  it("discards an exchange whose save keeps failing so the next one can be saved", async () => {
+    const posts: string[] = []
+    postMock.mockImplementation(async (path: string, body: { role?: string; content?: string }) => {
+      if (path === "/api/playground/conversations") return { ...stored, id: "new1", title: "first" }
+      posts.push(`${body.role}:${body.content}`)
+      if (body.content === "first") throw new ApiError(503, "store is busy")
+      return { seq: posts.length - 1 }
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    await screen.findByText(/1 exchange was not saved/i)
+
+    await userEvent.click(screen.getByRole("button", { name: "Discard" }))
+    await waitFor(() => expect(screen.queryByText(/was not saved/i)).toBeNull())
+
+    await send("second")
+    await waitFor(() => expect(posts).toHaveLength(3))
+    expect(posts).toEqual(["user:first", "user:second", "assistant:an answer"])
+    expect(screen.queryByText(/was not saved/i)).toBeNull()
+  })
+
   it.each([408, 429])("holds an exchange refused with %i for another try", async (status) => {
     let failing = true
     const posts: string[] = []
