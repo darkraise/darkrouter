@@ -275,6 +275,23 @@ func TestParseRequestTakesABareFileDataMIMEFromItsFilename(t *testing.T) {
 	}
 }
 
+// The release image has no /etc/mime.types, which leaves mime.TypeByExtension
+// with only Go's built-in table, and that has no entry for .md.
+func TestParseRequestNamesTextDocumentTypesWithoutASystemMIMETable(t *testing.T) {
+	for filename, want := range map[string]string{
+		"notes.txt":   "text/plain",
+		"README.md":   "text/markdown",
+		"rows.CSV":    "text/csv",
+		"report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	} {
+		req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
+			{"type":"file","file":{"filename":"`+filename+`","file_data":"YQ=="}}]}]}`)
+		if m := req.Messages[0].Content[0].Media; m.MIME != want {
+			t.Errorf("%s: MIME = %q, want %q", filename, m.MIME, want)
+		}
+	}
+}
+
 func TestParseRequestKeepsAPublicImageURL(t *testing.T) {
 	req := parsed(t, `{"model":"m","messages":[{"role":"user","content":[
 		{"type":"image_url","image_url":{"url":"https://x.example/a.png"}}]}]}`)
