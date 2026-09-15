@@ -30,6 +30,14 @@ export function detailRows(r: RequestRow): { label: string; value: string; mono?
   ]
 }
 
+/** A cancelled run was stopped by whoever sent it, so it is neither served nor
+ *  failed, and wears the same neutral tone RequestStatus gives it. */
+function outcomeOf(r: RequestRow): { word: string; tone: string } {
+  if (r.status === "success") return { word: "ok", tone: "text-[hsl(var(--success))]" }
+  if (r.status === "cancelled") return { word: "cancelled", tone: "text-[hsl(var(--muted-foreground))]" }
+  return { word: r.error_code ?? "error", tone: "text-[hsl(var(--destructive))]" }
+}
+
 /**
  * This provider's requests, from the log the gateway already keeps.
  *
@@ -105,18 +113,12 @@ export function TestLogTab({ providerId }: { providerId: string }) {
         className="min-h-0 flex-1 divide-y overflow-y-auto"
       >
         {rows.map((r) => {
-          const failed = r.status !== "success"
+          const outcome = outcomeOf(r)
           return (
             <AccordionItem key={r.id} value={r.id}>
               <AccordionTrigger className="gap-3 px-4 py-2 hover:bg-[hsl(var(--muted))]">
-                <span
-                  className={
-                    failed
-                      ? "w-16 shrink-0 text-left font-mono text-[hsl(var(--destructive))]"
-                      : "w-16 shrink-0 text-left font-mono text-[hsl(var(--success))]"
-                  }
-                >
-                  {failed ? r.error_code ?? "error" : "ok"}
+                <span className={`w-16 shrink-0 text-left font-mono ${outcome.tone}`}>
+                  {outcome.word}
                 </span>
                 <span className="w-20 shrink-0 text-left font-mono text-[hsl(var(--legend))]">
                   {relativeTime(r.ts_ms)}
