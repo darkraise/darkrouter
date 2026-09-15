@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkraise/darkrouter/internal/adapter/bedrock"
+	"github.com/darkraise/darkrouter/internal/adapter/vertex"
 	"github.com/darkraise/darkrouter/internal/auth"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/localcli"
@@ -40,8 +42,18 @@ var authStyles = []string{
 // base_url is an endpoint for them once those are set; Vertex needs its
 // project and location in the request path whatever the host.
 func checkEndpoint(row store.ProviderRow) error {
-	if row.Kind == "vertex" && (row.Project == "" || row.Location == "") {
-		return fmt.Errorf("a vertex provider needs a project and a location")
+	if row.Kind == "vertex" {
+		if row.Project == "" || row.Location == "" {
+			return fmt.Errorf("a vertex provider needs a project and a location")
+		}
+		if err := vertex.CheckEndpoint(row.Project, row.Location); err != nil {
+			return err
+		}
+	}
+	if row.Kind == "bedrock" && row.Region != "" {
+		if err := bedrock.CheckRegion(row.Region); err != nil {
+			return err
+		}
 	}
 	if row.BaseURL == "" {
 		switch row.Kind {

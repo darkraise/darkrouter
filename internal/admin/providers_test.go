@@ -175,6 +175,34 @@ func TestALegacyVertexProviderCanBePatchedOutsideItsEndpoint(t *testing.T) {
 	}
 }
 
+func TestAPatchCannotPointAnEndpointAtAnotherHost(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if err := s.deps.DB.CreateProvider(context.Background(), store.ProviderRow{
+		ID: "vx", Name: "Vertex", Preset: "vertex", Kind: "vertex",
+		AuthStyle: "gcp-sa", Project: "proj", Priority: 1, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"id":"vy","preset":"vertex","project":"proj","location":"us-central1"}`,
+		`{"id":"b","preset":"bedrock","region":"us-east-1"}`,
+	} {
+		if w := do(t, s, cookie, token, "POST", "/api/providers", body); w.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", w.Code, w.Body.String())
+		}
+	}
+	for _, tc := range []struct{ id, body string }{
+		{"vx", `{"location":"evil.example/"}`},
+		{"vy", `{"project":"proj#"}`},
+		{"b", `{"region":"evil.example/"}`},
+	} {
+		if w := do(t, s, cookie, token, "PATCH", "/api/providers/"+tc.id, tc.body); w.Code != http.StatusBadRequest {
+			t.Errorf("patch %s %s: status = %d, want 400: %s", tc.id, tc.body, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestALegacyVertexProviderCanBeGivenALocation(t *testing.T) {
 	s, _ := testServerFull(t)
 	cookie, token := login(t, s)
@@ -237,6 +265,13 @@ func TestAnEndpointThatCannotBeReachedIsRejected(t *testing.T) {
 		"an unserved scheme":      `{"id":"c","kind":"openaicompat","base_url":"ftp://x/v1"}`,
 		"a broken templated host": `{"id":"c","kind":"openaicompat","base_url":"https://{account_id} x.example"}`,
 		"an unknown placeholder":  `{"id":"c","kind":"openaicompat","base_url":"https://{tenant}.example"}`,
+		// Vertex builds its host from the location and Bedrock from the
+		// region, so either could send a credential to another host.
+		"a vertex location naming a host": `{"id":"v","preset":"vertex","project":"p","location":"evil.example/"}`,
+		"a vertex location with userinfo": `{"id":"v","preset":"vertex","project":"p","location":"x@evil.example"}`,
+		"a vertex project with a slash":   `{"id":"v","preset":"vertex","project":"p/../q","location":"us-central1"}`,
+		"a bedrock region naming a host":  `{"id":"b","preset":"bedrock","region":"evil.example/"}`,
+		"a bedrock region with a dot":     `{"id":"b","preset":"bedrock","region":"us-east-1.evil.example"}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
