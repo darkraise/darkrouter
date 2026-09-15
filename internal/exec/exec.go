@@ -502,7 +502,9 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 		GotConn: func(httptrace.GotConnInfo) { ac.connected.Store(true) },
 	})
 	ac.bud = bud
-	timer := time.AfterFunc(time.Until(ac.sendDeadline(time.Now())), func() {
+	deadline, bound := ac.sendDeadline(time.Now())
+	ac.bound.Store(int32(bound))
+	timer := time.AfterFunc(time.Until(deadline), func() {
 		cancel(ac.firedCause())
 	})
 	defer timer.Stop()
