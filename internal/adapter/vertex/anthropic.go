@@ -74,10 +74,54 @@ func buildAnthropic(ctx context.Context, t *adapter.Target, req *ir.Request) (*h
 	//
 	// anthropic-beta, unlike the version, stays a header on Vertex; Anthropic's
 	// Vertex client sends it unchanged.
-	if beta := hr.Header.Get("anthropic-beta"); beta != "" {
+	beta, bw := vertexBetas(hr.Header.Get("anthropic-beta"))
+	warns = append(warns, bw...)
+	if beta != "" {
 		out.Header.Set("anthropic-beta", beta)
 	}
 	return out, warns, nil
+}
+
+// vertexAnthropicBetas are the anthropic-beta values Vertex is known to
+// accept. Vertex rejects the whole request with "Unexpected value(s) ... for
+// the anthropic-beta header" when any value is one it does not know, and
+// clients such as Claude Code send first-party-only betas (oauth-2025-04-20,
+// prompt-caching-scope-2026-01-05) by default. An allowlist rather than a
+// blocklist, because a beta Anthropic ships tomorrow is first-party-only
+// until Vertex says otherwise; losing an opt-in degrades a request, sending
+// one fails it.
+var vertexAnthropicBetas = map[string]bool{
+	"compact-2026-01-12":              true,
+	"computer-use-2025-01-24":         true,
+	"computer-use-2025-11-24":         true,
+	"context-1m-2025-08-07":           true,
+	"context-management-2025-06-27":   true,
+	"interleaved-thinking-2025-05-14": true,
+	"tool-search-tool-2025-10-19":     true,
+	"web-search-2025-03-05":           true,
+}
+
+// vertexBetas filters a comma-separated anthropic-beta value down to what
+// Vertex accepts, naming each value it drops.
+func vertexBetas(header string) (string, []ir.Warning) {
+	var (
+		kept  []string
+		warns []ir.Warning
+	)
+	for _, v := range strings.Split(header, ",") {
+		v = strings.TrimSpace(v)
+		switch {
+		case v == "":
+		case vertexAnthropicBetas[v]:
+			kept = append(kept, v)
+		default:
+			warns = append(warns, ir.Warning{
+				Field: "anthropic-beta", Target: "vertex",
+				Reason: "Vertex does not accept the beta " + v + "; dropped",
+			})
+		}
+	}
+	return strings.Join(kept, ","), warns
 }
 
 // parseResponse dispatches on the publisher.
