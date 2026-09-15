@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -116,11 +117,16 @@ func ProbeFor(p provider.Provider, preset Preset, apiKey string) (Probe, error) 
 	if base == "" {
 		return Probe{}, fmt.Errorf("provider %q has no base url", p.ID)
 	}
-	// The preset's listing endpoint belongs to the base it ships with. A row
+	// The preset's listing endpoint belongs to the vendor it ships with. A row
 	// pointed at another installation lists from that installation, or the
-	// credential goes to the original vendor and imports its inventory.
+	// credential goes to the original vendor and imports its inventory. The
+	// host decides rather than the whole base: rows copy the preset's base when
+	// they are created and presets are regenerated, so a row still on the
+	// vendor can sit on a path the preset has since moved off, and many
+	// vendors do not list at base + /models.
 	modelsURL := preset.ModelsURL
-	if strings.TrimRight(base, "/") != strings.TrimRight(preset.BaseURL, "/") {
+	if strings.TrimRight(base, "/") != strings.TrimRight(preset.BaseURL, "/") &&
+		!sameHost(base, preset.ModelsURL) {
 		modelsURL = ""
 	}
 	return Probe{
@@ -133,6 +139,18 @@ func ProbeFor(p provider.Provider, preset Preset, apiKey string) (Probe, error) 
 		AuthHeader:     preset.Auth.Header,
 		AuthQueryParam: preset.Auth.QueryParam,
 	}, nil
+}
+
+func sameHost(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil || ua.Host == "" {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Host, ub.Host)
 }
 
 // BuildListRequest renders the listing request for one probe.
