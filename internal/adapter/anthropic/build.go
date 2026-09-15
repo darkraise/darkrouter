@@ -38,6 +38,34 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	outputConfig := map[string]any{}
 	traits := traitsOf(t.Info)
 
+	// Tools and the choice among them are settled before thinking, because
+	// manual thinking depends on the choice actually sent, not the one asked
+	// for. Their warnings keep their place further down.
+	var tools []any
+	var toolWarns []ir.Warning
+	if len(req.Tools) > 0 {
+		tools, toolWarns = renderTools(req.Tools, cb)
+	}
+	toolChoice := req.ToolChoice
+	switch {
+	// With no tools declared there is nothing to choose, and a forced mode
+	// would name a tool the request does not carry.
+	case len(tools) == 0:
+		if forcedChoice(toolChoice) {
+			toolWarns = append(toolWarns, ir.Warning{
+				Field: "tool_choice", Target: targetName,
+				Reason: "no tool was left to declare; the forced tool choice was dropped",
+			})
+		}
+		toolChoice = nil
+	case traits.noForcedToolChoice && forcedChoice(toolChoice):
+		toolWarns = append(toolWarns, ir.Warning{
+			Field: "tool_choice", Target: targetName,
+			Reason: "this model rejects a forced tool choice; downgraded to auto",
+		})
+		toolChoice = &ir.ToolChoice{Mode: "auto"}
+	}
+
 	// Thinking splits by model generation, and the two modes are mutually
 	// exclusive per generation: type "enabled" is a 400 on Claude 4.7 and
 	// later, and type "adaptive" is a 400 on Claude 4.5 and earlier. Getting
@@ -88,7 +116,7 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 		// Forced tool use is incompatible with manual thinking, though not with
 		// adaptive. The forced tool is the client's explicit instruction and an
 		// agentic loop depends on it; the reasoning depth is the softer ask.
-		case req.ToolChoice != nil && (req.ToolChoice.Mode == "any" || req.ToolChoice.Mode == "tool"):
+		case forcedChoice(toolChoice):
 			warns = append(warns, ir.Warning{
 				Field: "reasoning", Target: targetName,
 				Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
@@ -163,23 +191,12 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if req.Stream {
 		body["stream"] = true
 	}
-	if len(req.Tools) > 0 {
-		tools, w := renderTools(req.Tools, cb)
-		warns = append(warns, w...)
-		if len(tools) > 0 {
-			body["tools"] = tools
+	warns = append(warns, toolWarns...)
+	if len(tools) > 0 {
+		body["tools"] = tools
+		if tc := renderToolChoice(toolChoice, req.ParallelToolCalls); tc != nil {
+			body["tool_choice"] = tc
 		}
-	}
-	toolChoice := req.ToolChoice
-	if toolChoice != nil && traits.noForcedToolChoice && (toolChoice.Mode == "any" || toolChoice.Mode == "tool") {
-		warns = append(warns, ir.Warning{
-			Field: "tool_choice", Target: targetName,
-			Reason: "this model rejects a forced tool choice; downgraded to auto",
-		})
-		toolChoice = &ir.ToolChoice{Mode: "auto"}
-	}
-	if tc := renderToolChoice(toolChoice, req.ParallelToolCalls); tc != nil {
-		body["tool_choice"] = tc
 	}
 	// Structured output is generally available: no beta header, and the schema
 	// lives under output_config.format.
@@ -460,6 +477,10 @@ func builtInDropped(t ir.Tool) []ir.Warning {
 		})
 	}
 	return warns
+}
+
+func forcedChoice(tc *ir.ToolChoice) bool {
+	return tc != nil && (tc.Mode == "any" || tc.Mode == "tool")
 }
 
 // renderToolChoice maps the IR's four modes. disable_parallel_tool_use lives

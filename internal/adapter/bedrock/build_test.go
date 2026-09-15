@@ -722,6 +722,40 @@ func TestClaudeRequestShapeRestrictionsHoldOnBedrock(t *testing.T) {
 		}
 	})
 
+	t.Run("manual thinking survives a forced choice among no rendered tools", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		req.Tools = []ir.Tool{{Extra: map[string]json.RawMessage{"googleSearch": json.RawMessage(`{}`)}}}
+		req.ToolChoice = &ir.ToolChoice{Mode: "any"}
+		body, _, warns := build(t, catalogTarget(t, "us.anthropic.claude-sonnet-4-5-20250929-v1:0"), req)
+		if tc, sent := body["toolConfig"]; sent {
+			t.Errorf("toolConfig = %#v with every tool dropped", tc)
+		}
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" {
+			t.Errorf("additionalModelRequestFields = %#v; nothing is forced without a tool", extra)
+		}
+		if hasWarning(warns, "reasoning") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
+	t.Run("manual thinking survives a forced choice the model downgraded", func(t *testing.T) {
+		req := simple()
+		req.Reasoning = &ir.Reasoning{Budget: 2048}
+		withTool(req, "any")
+		tgt := anthropicTarget("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+		tgt.Info = adapter.ModelInfo{ManualBudget: true, FreeSampling: true, TraitsKnown: true, NoForcedToolChoice: true}
+		body, _, warns := build(t, tgt, req)
+		extra, _ := body["additionalModelRequestFields"].(map[string]any)
+		if th, _ := extra["thinking"].(map[string]any); th["type"] != "enabled" {
+			t.Errorf("additionalModelRequestFields = %#v; the choice sent was auto", extra)
+		}
+		if hasWarning(warns, "reasoning") || !hasWarning(warns, "tool_choice") {
+			t.Errorf("warnings = %+v", warns)
+		}
+	})
+
 	t.Run("prefill", func(t *testing.T) {
 		for _, c := range []struct {
 			model     string

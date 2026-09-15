@@ -56,7 +56,11 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	// is on, are refused here exactly as on the direct API. Thinking is
 	// settled first because the other rules depend on it.
 	shape := claudeShapeOf(t)
-	extra, extraWarns := additionalFields(t, req)
+	// Tools come before thinking, which depends on the tool choice actually
+	// sent: none when every tool was dropped, auto when the model refused a
+	// forced one.
+	tc, toolWarns := toolConfig(req, shape)
+	extra, extraWarns := additionalFields(t, req, sendsForcedChoice(tc))
 	thinking := shape.thinkingAlwaysOn || thinkingEnabled(extra)
 
 	msgs := xlate.NonSystemMessages(req.Messages)
@@ -85,11 +89,9 @@ func BuildRequest(ctx context.Context, t *adapter.Target, req *ir.Request) (*htt
 	if len(extra) > 0 {
 		body["additionalModelRequestFields"] = extra
 	}
-	if tc, w := toolConfig(req, shape); tc != nil || len(w) > 0 {
-		warns = append(warns, w...)
-		if tc != nil {
-			body["toolConfig"] = tc
-		}
+	warns = append(warns, toolWarns...)
+	if tc != nil {
+		body["toolConfig"] = tc
 	}
 	if req.TopK != nil {
 		// topK lives in additionalModelRequestFields, which is per-family and
@@ -182,7 +184,7 @@ func isAnthropicModel(model string) bool {
 // Converse hands these fields to the model's native request, so Claude's are
 // Anthropic's own thinking and output_config. Other publishers spell thinking
 // differently or not at all, and sending it to them is a ValidationException.
-func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.Warning) {
+func additionalFields(t *adapter.Target, req *ir.Request, forcedChoice bool) (map[string]any, []ir.Warning) {
 	r := req.Reasoning
 	if (r != nil && r.Disabled) || req.Metadata["anthropic_thinking_type"] == "disabled" {
 		return disabledThinking(t)
@@ -239,7 +241,7 @@ func additionalFields(t *adapter.Target, req *ir.Request) (map[string]any, []ir.
 	// Forced tool use is incompatible with manual thinking, though not with
 	// adaptive. The forced tool is the client's explicit instruction and an
 	// agentic loop depends on it; the reasoning depth is the softer ask.
-	if forcedToolChoice(req.ToolChoice) {
+	if forcedChoice {
 		return nil, append(warns, ir.Warning{
 			Field: "reasoning", Target: targetName,
 			Reason: "manual thinking is incompatible with a forced tool choice; thinking disabled",
@@ -301,6 +303,14 @@ func thinkingEnabled(extra map[string]any) bool {
 
 func forcedToolChoice(tc *ir.ToolChoice) bool {
 	return tc != nil && (tc.Mode == "any" || tc.Mode == "tool")
+}
+
+// sendsForcedChoice reports whether a rendered toolConfig forces a tool.
+func sendsForcedChoice(toolConfig map[string]any) bool {
+	choice, _ := toolConfig["toolChoice"].(map[string]any)
+	_, anyTool := choice["any"]
+	_, oneTool := choice["tool"]
+	return anyTool || oneTool
 }
 
 // endsInPrefill reports whether the conversation ends in the prefill idiom: a
@@ -402,6 +412,12 @@ func toolConfig(req *ir.Request, shape claudeShape) (map[string]any, []ir.Warnin
 		})
 	}
 	if len(tools) == 0 {
+		if forcedToolChoice(req.ToolChoice) {
+			warns = append(warns, ir.Warning{
+				Field: "tool_choice", Target: targetName,
+				Reason: "no tool was left to declare; the forced tool choice was dropped",
+			})
+		}
 		return nil, warns
 	}
 	cfg := map[string]any{"tools": tools}
