@@ -898,7 +898,7 @@ func TestAnIncompleteListingIsAFailure(t *testing.T) {
 		{name: "more promised with no cursor", requests: 1, page: func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"data":[{"id":"m1"}],"has_more":true}`))
 		}},
-		{name: "cursor never ends", requests: maxListPages, page: func(w http.ResponseWriter, r *http.Request) {
+		{name: "cursor never ends", requests: MaxListPages, page: func(w http.ResponseWriter, r *http.Request) {
 			n, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Query().Get("after_id"), "m"))
 			_, _ = fmt.Fprintf(w, `{"data":[{"id":"m%d"}],"has_more":true,"last_id":"m%d"}`, n+1, n+1)
 		}},
