@@ -60,6 +60,37 @@ func newLoginLimiter(rate, burst float64, concurrency int) *loginLimiter {
 	}
 }
 
+// localPrefixFactor is how many times one address's allowance a whole local
+// /64 gets. Its addresses are keyed one by one, so a device mistyping its
+// password does not lock out its neighbours; a host there can still give
+// itself any number of addresses, and this is all that rotating them buys.
+const localPrefixFactor = 10
+
+// allow spends one attempt for the client at remoteAddr: from its own bucket
+// and, on a local IPv6 network, from its /64's shared one as well. Neither is
+// spent unless both have a token.
+func (l *loginLimiter) allow(remoteAddr string) (ok bool, retryAfter time.Duration) {
+	key, prefix := clientKeys(remoteAddr)
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	b := l.refill(key, l.burst, l.rate, now)
+	if b.tokens < 1 {
+		return false, wait(b, l.rate)
+	}
+	if prefix != "" {
+		rate := l.rate * localPrefixFactor
+		p := l.refill("net "+prefix, l.burst*localPrefixFactor, rate, now)
+		if p.tokens < 1 {
+			return false, wait(p, rate)
+		}
+		p.tokens--
+	}
+	b.tokens--
+	return true, 0
+}
+
 // take spends one token for addr. When the bucket is empty it reports how
 // long until the next token, which is what Retry-After carries.
 func (l *loginLimiter) take(addr string) (ok bool, retryAfter time.Duration) {
@@ -67,7 +98,18 @@ func (l *loginLimiter) take(addr string) (ok bool, retryAfter time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	el, found := l.buckets[addr]
+	b := l.refill(addr, l.burst, l.rate, now)
+	if b.tokens < 1 {
+		return false, wait(b, l.rate)
+	}
+	b.tokens--
+	return true, 0
+}
+
+// refill finds or makes key's bucket and tops it up for the time since it was
+// last seen. The caller holds l.mu.
+func (l *loginLimiter) refill(key string, burst, rate float64, now time.Time) *bucket {
+	el, found := l.buckets[key]
 	if found {
 		l.recency.MoveToFront(el)
 	} else {
@@ -76,18 +118,17 @@ func (l *loginLimiter) take(addr string) (ok bool, retryAfter time.Duration) {
 			l.recency.Remove(oldest)
 			delete(l.buckets, oldest.Value.(*bucket).addr)
 		}
-		el = l.recency.PushFront(&bucket{addr: addr, tokens: l.burst, last: now})
-		l.buckets[addr] = el
+		el = l.recency.PushFront(&bucket{addr: key, tokens: burst, last: now})
+		l.buckets[key] = el
 	}
 	b := el.Value.(*bucket)
-	b.tokens = math.Min(l.burst, b.tokens+now.Sub(b.last).Seconds()*l.rate)
+	b.tokens = math.Min(burst, b.tokens+now.Sub(b.last).Seconds()*rate)
 	b.last = now
-	if b.tokens < 1 {
-		wait := time.Duration((1 - b.tokens) / l.rate * float64(time.Second))
-		return false, wait
-	}
-	b.tokens--
-	return true, 0
+	return b
+}
+
+func wait(b *bucket, rate float64) time.Duration {
+	return time.Duration((1 - b.tokens) / rate * float64(time.Second))
 }
 
 // acquire claims one of the global verification slots without waiting. The
@@ -115,20 +156,36 @@ func (l *loginLimiter) acquire() (release func(), ok bool) {
 // its zone: the same address on two links is two hosts, and the zone is the
 // receiving interface, which the sender cannot choose.
 func clientAddr(remoteAddr string) string {
+	key, _ := clientKeys(remoteAddr)
+	return key
+}
+
+// clientKeys is clientAddr plus, for a unique local or link-local IPv6
+// address, the /64 it shares with its neighbours (with a link-local zone
+// kept). The prefix is empty for everything else.
+func clientKeys(remoteAddr string) (key, localPrefix string) {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return remoteAddr
+		return remoteAddr, ""
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return host
+		return host, ""
 	}
-	if addr.IsLinkLocalUnicast() {
-		return addr.String()
+	zone := addr.Zone()
+	plain := addr.WithZone("")
+	if !plain.Is6() || plain.Is4In6() {
+		return plain.String(), ""
 	}
-	addr = addr.WithZone("")
-	if addr.Is6() && !addr.Is4In6() && !addr.IsPrivate() {
-		return netip.PrefixFrom(addr, 64).Masked().String()
+	prefix := netip.PrefixFrom(plain, 64).Masked().String()
+	switch {
+	case addr.IsLinkLocalUnicast():
+		if zone != "" {
+			prefix += "%" + zone
+		}
+		return addr.String(), prefix
+	case plain.IsPrivate():
+		return plain.String(), prefix
 	}
-	return addr.String()
+	return prefix, ""
 }
