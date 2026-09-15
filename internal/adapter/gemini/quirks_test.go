@@ -224,6 +224,19 @@ func TestBuildRequestDeclaresBuiltInToolsSeparately(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDropsANamelessTypedTool(t *testing.T) {
+	body, warns := builtFor(t, "gemini-2.5-flash", &ir.Request{Tools: []ir.Tool{
+		{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}},
+	}})
+	if tools, ok := body["tools"]; ok {
+		t.Errorf("tools = %v; an Anthropic typed tool is not a Gemini built-in", tools)
+	}
+	if len(warns) != 1 || warns[0].Field != "tools[].type" {
+		t.Errorf("warnings = %v", warns)
+	}
+}
+
 func TestRenderContentsCarriesFunctionCallSignaturesAndMatchesResultsByID(t *testing.T) {
 	body, _ := builtFor(t, "gemini-2.5-flash", &ir.Request{Messages: []ir.Message{
 		{Role: ir.RoleUser, Content: []ir.ContentBlock{{Type: ir.BlockText, Text: "weather in Oslo and Bergen?"}}},

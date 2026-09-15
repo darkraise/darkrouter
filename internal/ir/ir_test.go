@@ -190,6 +190,10 @@ func TestToolBuiltInNeedsAnEmptyNameAndABody(t *testing.T) {
 		{Tool{Name: "lookup"}, false},
 		{Tool{Name: "lookup", Extra: map[string]json.RawMessage{"strict": raw}}, false},
 		{Tool{Extra: map[string]json.RawMessage{"googleSearch": raw}}, true},
+		// Anthropic's mcp_toolset is typed and nameless, and it is Anthropic's
+		// own tool rather than another dialect's built-in.
+		{Tool{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}}, false},
 		{Tool{}, false},
 	}
 	for _, tc := range cases {

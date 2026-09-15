@@ -503,6 +503,23 @@ func TestBuiltInToolsFromAnotherDialectAreWarnedAndDropped(t *testing.T) {
 	}
 }
 
+func TestNamelessTypedToolIsDroppedAsProviderRun(t *testing.T) {
+	req := simple()
+	req.Tools = []ir.Tool{
+		{Extra: map[string]json.RawMessage{
+			"type": json.RawMessage(`"mcp_toolset"`), "mcp_server_name": json.RawMessage(`"srv"`)}},
+		{Name: "f", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	body, _, warns := build(t, anthropicTarget(req.Model), req)
+	tools := body["toolConfig"].(map[string]any)["tools"].([]any)
+	if len(tools) != 1 {
+		t.Errorf("tools = %#v", tools)
+	}
+	if len(warns) != 1 || warns[0].Field != "tools[].type" || !strings.Contains(warns[0].Reason, "provider-run") {
+		t.Errorf("warnings = %+v; one provider-run warning, not one per field", warns)
+	}
+}
+
 // catalogTarget resolves a model's traits the way a live request does, through
 // the shipped presets and the catalog merge, rather than stating them. Stated
 // traits hid that the bedrock preset yields none at all.
