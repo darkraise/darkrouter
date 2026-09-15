@@ -67,13 +67,35 @@ func unhex(c byte) byte {
 	}
 }
 
+// documentTypes names the document formats Bedrock Converse's DocumentBlock
+// accepts. They are fixed here rather than left to mime.TypeByExtension, whose
+// answer depends on the host's MIME tables: the release image has none, and Go's
+// built-in table has no .md.
+var documentTypes = map[string]string{
+	".pdf":      "application/pdf",
+	".txt":      "text/plain",
+	".md":       "text/markdown",
+	".markdown": "text/markdown",
+	".csv":      "text/csv",
+	".html":     "text/html",
+	".htm":      "text/html",
+	".doc":      "application/msword",
+	".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".xls":      "application/vnd.ms-excel",
+	".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
 // fileMedia splits an inline file's data and, when the payload names no type,
 // takes one from the filename: a document with no MIME type is one most
 // targets cannot accept.
 func fileMedia(fileData, filename string) (mimeType, data string) {
 	mimeType, data = splitDataURI(fileData)
 	if mimeType == "" && filename != "" {
-		mimeType, _, _ = strings.Cut(mime.TypeByExtension(filepath.Ext(filename)), ";")
+		ext := strings.ToLower(filepath.Ext(filename))
+		if t, ok := documentTypes[ext]; ok {
+			return t, data
+		}
+		mimeType, _, _ = strings.Cut(mime.TypeByExtension(ext), ";")
 	}
 	return mimeType, data
 }
