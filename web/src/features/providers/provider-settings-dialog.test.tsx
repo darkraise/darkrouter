@@ -59,11 +59,25 @@ describe("settingsPatch", () => {
   it("sends location only once it has been touched", () => {
     // A Vertex row created before location was required has none, and this
     // is the only way to give it one.
-    const p = provider()
+    const p = provider({ kind: "vertex" })
     expect(settingsPatch(draft(p), p)).not.toHaveProperty("location")
     expect(settingsPatch(draft(p, { location: "us-central1" }), p)).toEqual({
       location: "us-central1",
     })
+  })
+
+  it("trims a location, and sends none that is only whitespace", () => {
+    // It can be set once, so a stray space would be stored for good.
+    const p = provider({ kind: "vertex" })
+    expect(settingsPatch(draft(p, { location: "  us-central1 " }), p)).toEqual({
+      location: "us-central1",
+    })
+    expect(settingsPatch(draft(p, { location: "   " }), p)).toEqual({})
+  })
+
+  it("sends no location for a provider that is not Vertex", () => {
+    const p = provider()
+    expect(settingsPatch(draft(p, { location: "us-central1" }), p)).toEqual({})
   })
 
   it("carries an intentional clear", () => {
@@ -138,6 +152,20 @@ describe("settingsPatch base URL", () => {
     // write anyway. Refusing to send it keeps a slip from becoming a 400.
     const p = provider()
     expect(settingsPatch(draft(p, { baseUrl: "   " }), p)).toEqual({})
+  })
+})
+
+describe("the location field", () => {
+  it("is offered only for a Vertex provider, and says it is set once", () => {
+    const { unmount } = mount(
+      <ProviderSettingsDialog provider={provider()} open onOpenChange={() => {}} />,
+    )
+    expect(screen.queryByLabelText("Location")).toBeNull()
+    unmount()
+
+    mount(<ProviderSettingsDialog provider={provider({ kind: "vertex" })} open onOpenChange={() => {}} />)
+    expect(screen.getByLabelText("Location")).toBeInTheDocument()
+    expect(screen.getByText(/location can be set once/i)).toBeInTheDocument()
   })
 })
 

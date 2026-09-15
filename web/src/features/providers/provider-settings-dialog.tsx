@@ -71,7 +71,10 @@ export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string,
   if (draft.freeModelsOnly !== p.free_models_only) patch.free_models_only = draft.freeModelsOnly
   if (draft.region !== null) patch.region = draft.region
   if (draft.project !== null) patch.project = draft.project
-  if (draft.location !== null) patch.location = draft.location
+  // Vertex alone reads a location, and the backend refuses changing one that
+  // is set, so a stray space or an empty value would be stored for good.
+  const location = draft.location?.trim() ?? ""
+  if (p.kind === "vertex" && location !== "") patch.location = location
   return patch
 }
 
@@ -210,19 +213,23 @@ export function ProviderSettingsDialog({
             </div>
             {/* Fills a location the provider was created without. The backend
                 refuses moving one that is set. */}
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-location">Location</Label>
-              <Input
-                id="provider-location"
-                value={draft.location ?? ""}
-                onChange={(e) => setDraft({ ...draft, location: e.target.value })}
-                placeholder="unset"
-                className="w-40"
-              />
-            </div>
+            {provider.kind === "vertex" && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="provider-location">Location</Label>
+                <Input
+                  id="provider-location"
+                  value={draft.location ?? ""}
+                  onChange={(e) => setDraft({ ...draft, location: e.target.value })}
+                  placeholder="unset"
+                  className="w-40"
+                />
+              </div>
+            )}
             <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
               Only the ones you type are written. Leave them alone and they keep
               whatever they hold.
+              {provider.kind === "vertex" &&
+                " The location can be set once: a provider that already has one keeps it."}
             </p>
           </div>
         </div>
