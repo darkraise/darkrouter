@@ -60,6 +60,60 @@ func (f *Fetcher) renderContents(ctx context.Context, req *ir.Request) ([]any, [
 	return out, warns, nil
 }
 
+// skipSignatureValidator is the placeholder signature Google documents, in both
+// the Gemini API and Vertex thought-signature guides, for a function call that
+// has no real signature, such as one from another provider's history.
+const skipSignatureValidator = "skip_thought_signature_validator"
+
+// signCurrentTurn gives the first function call of each model step in the
+// current turn the placeholder signature when it has none, and reports whether
+// it did.
+//
+// Gemini 3 answers 400 at every thinking level when that call lacks its
+// signature. Only the current turn is validated, and it begins at the latest
+// user content that is not only function responses.
+func signCurrentTurn(contents []any) bool {
+	start := 0
+	for i := len(contents) - 1; i >= 0; i-- {
+		c, _ := contents[i].(map[string]any)
+		if c["role"] == "user" && !onlyFunctionResponses(c) {
+			start = i + 1
+			break
+		}
+	}
+	signed := false
+	for _, raw := range contents[start:] {
+		c, _ := raw.(map[string]any)
+		if c["role"] != "model" {
+			continue
+		}
+		parts, _ := c["parts"].([]any)
+		for _, raw := range parts {
+			p, _ := raw.(map[string]any)
+			if _, call := p["functionCall"]; !call {
+				continue
+			}
+			if _, ok := p["thoughtSignature"]; !ok {
+				p["thoughtSignature"] = skipSignatureValidator
+				signed = true
+			}
+			break
+		}
+	}
+	return signed
+}
+
+func onlyFunctionResponses(content map[string]any) bool {
+	parts, _ := content["parts"].([]any)
+	for _, raw := range parts {
+		p, _ := raw.(map[string]any)
+		if _, ok := p["functionResponse"]; !ok {
+			return false
+		}
+	}
+	return len(parts) > 0
+}
+
 // renderParts converts one turn. It returns the parts, and the function calls
 // this turn made so the next turn's responses can be matched to them.
 func (f *Fetcher) renderParts(ctx context.Context, turn int, blocks []ir.ContentBlock,
