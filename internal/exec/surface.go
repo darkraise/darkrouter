@@ -118,6 +118,11 @@ type AttemptCtx struct {
 	secret string
 	// idleArmed records that idle has replaced the pre-commit deadline.
 	idleArmed bool
+	// deadline is where policy.timeout.total runs out for the request, and
+	// committed that a write to the client has begun, after which it no
+	// longer applies. Zero means no total bound.
+	deadline  time.Time
+	committed bool
 	// healthDone guards the one breaker signal an attempt may emit. The first
 	// caller wins: a surface reporting a pre-commit fault, or the loop
 	// reporting a failure after commit, beats the loop's deferred record of
@@ -167,6 +172,7 @@ func (ac *AttemptCtx) clientFailed(werr error) (adapter.Outcome, *ir.Error) {
 // the two are the same duration, so an idle timer left running would expire
 // first and blame the provider for the client's stall.
 func (ac *AttemptCtx) beginWrite() {
+	ac.committed = true
 	if ac.Timer != nil && ac.idleArmed {
 		ac.Timer.Stop()
 	}
@@ -180,15 +186,22 @@ func (ac *AttemptCtx) endWrite() {
 
 // resetIdle moves the attempt's bound from the pre-commit deadline to
 // policy.timeout.idle. Post-commit, total stops applying and idle bounds the
-// gap between events; a unary body is bounded the same way once its headers
+// gap between events; a unary body is bounded by idle too once its headers
 // have arrived, because connect+first_byte was never meant to cover a
 // multi-megabyte body on a slow link.
+//
+// Until the first write to the client, the bound never reaches past total.
+// idle is renewed on every read, so without that cap a body trickling a byte
+// inside every idle interval would hold the request indefinitely.
 func (ac *AttemptCtx) resetIdle() {
 	if ac.Timer == nil {
 		return
 	}
 	if d := ac.Cfg.Policy.Timeout.Idle; d > 0 {
 		ac.idleArmed = true
+		if !ac.committed && !ac.deadline.IsZero() {
+			d = min(d, time.Until(ac.deadline))
+		}
 		ac.Timer.Reset(d)
 	}
 }

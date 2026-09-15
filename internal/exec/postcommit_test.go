@@ -184,6 +184,52 @@ func TestABodyThatKeepsArrivingOutlivesIdle(t *testing.T) {
 	}
 }
 
+// Renewing idle per read must not let a unary body outlast total. Nothing has
+// reached the client while it is read, so total still bounds the attempt, and
+// an upstream sending a byte just inside every idle interval would otherwise
+// hold the request for as long as it liked.
+func TestATricklingUnaryBodyIsBoundedByTotal(t *testing.T) {
+	const trickleFor = 3 * time.Second
+	trickle := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","model":"m","choices":[{"message":`))
+		w.(http.Flusher).Flush()
+		for end := time.Now().Add(trickleFor); time.Now().Before(end) && r.Context().Err() == nil; {
+			time.Sleep(50 * time.Millisecond)
+			_, _ = w.Write([]byte(" "))
+			w.(http.Flusher).Flush()
+		}
+		_, _ = w.Write([]byte(`{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}
+	cfg := func(c *config.Config) {
+		c.Policy.Timeout.Connect = 5 * time.Millisecond
+		c.Policy.Timeout.FirstByte = 300 * time.Millisecond
+		c.Policy.Timeout.Total = 600 * time.Millisecond
+		c.Policy.Timeout.Idle = 200 * time.Millisecond
+	}
+	for _, tc := range []struct {
+		name string
+		post func(*testing.T, *Executor, string) *httptest.ResponseRecorder
+		body string
+	}{
+		{"passthrough", post, `{"model":"m","messages":[{"role":"user","content":"ping"}]}`},
+		{"ir", postAnthropic, anthropicPing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := &scripted{by: map[string]http.HandlerFunc{"g1": trickle}}
+			up := httptest.NewServer(sc)
+			defer up.Close()
+			e, _ := breakerExecutor(t, up, oneKeyFleet(), Deps{Log: &captureLogger{}}, cfg)
+			start := time.Now()
+			rec := tc.post(t, e, tc.body)
+			if took := time.Since(start); rec.Code == 200 || took > 2*time.Second {
+				t.Fatalf("code = %d after %v; a body trickling past total must be cut at total",
+					rec.Code, took)
+			}
+		})
+	}
+}
+
 // A unary body that arrives slowly is bounded by idle once its headers are in,
 // not by the connect+first_byte budget that was only ever meant to cover the
 // wait for those headers.
