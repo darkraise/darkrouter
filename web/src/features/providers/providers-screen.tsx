@@ -28,6 +28,7 @@ import {
 } from "darkraise-ui"
 import { ColumnHeader, DataTable } from "darkraise-ui/data-table"
 import { api } from "../../lib/api"
+import { useRowHeight } from "../../lib/row-height"
 import { useApiMutation } from "../../lib/mutations"
 import { ConfirmButton } from "../shell/confirm-button"
 import {
@@ -86,15 +87,6 @@ const CHIP_SHAPE = "gap-1.5 rounded-full px-3"
  *  where nothing can be measured. */
 const MIN_LIST_HEIGHT = 320
 
-/** A floor, not a guess. The real row height is read back from the rows,
- *  because the density and font-size axes both move it and the window is
- *  placed from whatever number it is told. Low enough that no theme sits
- *  under it, so the measurement always converges from below. */
-const MIN_ROW_HEIGHT = 32
-
-/** The axes that change how tall a row wants to be. Their pinned height has
- *  to be let go before a smaller one can be observed. */
-const ROW_HEIGHT_AXES = ["data-density", "data-font-size"]
 const STATES = ["healthy", "degraded", "disabled", "unconfigured"]
 
 /**
@@ -116,7 +108,7 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
   rowHeight: number
 } {
   const [height, setHeight] = useState(MIN_LIST_HEIGHT)
-  const [rowHeight, setRowHeight] = useState(MIN_ROW_HEIGHT)
+  const rowHeight = useRowHeight(ref)
 
   const measure = useCallback(() => {
     const el = ref.current
@@ -138,20 +130,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
       // observed, so an unguarded write would answer its own notification.
       setHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev))
     }
-
-    // The pinned height is a floor, so a row whose content does not fit
-    // reports the taller figure it actually took. Reading the tallest one back
-    // and pinning to that settles in a step or two and lands on the natural
-    // row height for whatever density and font size are in force.
-    const rows = el.querySelectorAll<HTMLElement>(
-      "tbody tr:not(.dr-data-table-virtual-pad)",
-    )
-    let tallest = 0
-    for (const row of rows) tallest = Math.max(tallest, row.getBoundingClientRect().height)
-    if (tallest > 0) {
-      const next = Math.max(Math.ceil(tallest), MIN_ROW_HEIGHT)
-      setRowHeight((prev) => (prev !== next ? next : prev))
-    }
   }, [ref])
 
   // After every render, not only on mount. The space left over depends on
@@ -171,16 +149,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
     observer.observe(el)
     // The panel above is what decides where the table starts.
     if (el.previousElementSibling) observer.observe(el.previousElementSibling)
-    // Changing density or font size has to let the pin go before it can be
-    // re-measured. The pinned height is a floor, so while it stands no row
-    // can report wanting less than it, and a list that had been at spacious
-    // would keep those rows for ever after a switch to compact. Dropping back
-    // to the floor lets the measurement climb to the new height from below.
-    const axes = new MutationObserver(() => setRowHeight(MIN_ROW_HEIGHT))
-    axes.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ROW_HEIGHT_AXES,
-    })
     // Inter arrives after first paint and re-flows everything above the
     // table. Nothing re-renders for it, so the measurement has to be asked
     // for again explicitly.
@@ -192,7 +160,6 @@ function useListMetrics(ref: RefObject<HTMLDivElement | null>): {
       cancelled = true
       window.removeEventListener("resize", measure)
       observer.disconnect()
-      axes.disconnect()
     }
   }, [measure, ref])
 
