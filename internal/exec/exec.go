@@ -949,16 +949,17 @@ func (e *Executor) priceRecord(rec *store.RequestRecord) {
 		rec.ReasoningTokens != 0
 	if rec.CostMicros == nil && burned && rec.FinalProviderID != "" && rec.FinalModel != "" {
 		if m, ok := snap.Lookup(rec.FinalProviderID, rec.FinalModel); ok {
-			rec.CostMicros = m.Pricing.Cost(catalog.Tokens{
+			tokens := catalog.Tokens{
 				Input: rec.TokensIn, Output: rec.TokensOut,
 				CacheRead: rec.CacheReadTokens, CacheWrite: rec.CacheWriteTokens,
 				CacheWrite5m: rec.CacheWrite5mTokens, CacheWrite1h: rec.CacheWrite1hTokens,
-			})
+			}
+			rec.CostMicros = m.Pricing.Cost(tokens)
 			// Stamped with the cost rather than looked up when the total is
 			// read: a sync re-stamps the catalog row, and a request must keep
 			// reporting the authority it was actually billed on.
 			if rec.CostMicros != nil {
-				rec.PriceGrade = string(m.Pricing.Grade())
+				rec.PriceGrade = string(m.Pricing.GradeFor(tokens))
 			}
 		}
 	}

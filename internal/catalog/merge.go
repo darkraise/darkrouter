@@ -355,11 +355,11 @@ func withUnquotedCacheRates(p Pricing, row store.ModelRow, lower ...Pricing) Pri
 		if !c.Known {
 			continue
 		}
-		if !row.CacheReadKnown && p.CacheReadMicrosPerMTok == 0 {
-			p.CacheReadMicrosPerMTok = c.CacheReadMicrosPerMTok
+		if !row.CacheReadKnown && p.CacheReadMicrosPerMTok == 0 && c.CacheReadMicrosPerMTok != 0 {
+			p.CacheReadMicrosPerMTok, p.CacheReadSource = c.CacheReadMicrosPerMTok, c.Source
 		}
-		if !row.CacheWriteKnown && p.CacheWriteMicrosPerMTok == 0 {
-			p.CacheWriteMicrosPerMTok = c.CacheWriteMicrosPerMTok
+		if !row.CacheWriteKnown && p.CacheWriteMicrosPerMTok == 0 && c.CacheWriteMicrosPerMTok != 0 {
+			p.CacheWriteMicrosPerMTok, p.CacheWriteSource = c.CacheWriteMicrosPerMTok, c.Source
 		}
 	}
 	return p

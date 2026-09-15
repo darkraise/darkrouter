@@ -46,6 +46,28 @@ func (p Pricing) Cost(t Tokens) *int64 {
 	return &total
 }
 
+// GradeFor is the grade of the cost Cost computes for t: Grade, lowered to a
+// filled cache rate's grade when t has tokens priced at that rate. A cost is
+// only as trustworthy as the weakest rate it used.
+func (p Pricing) GradeFor(t Tokens) Grade {
+	g := p.Grade()
+	if t.CacheRead > 0 && p.CacheReadSource != "" {
+		g = weaker(g, p.CacheReadSource.grade())
+	}
+	if t.CacheWrite-t.CacheWrite5m-t.CacheWrite1h > 0 && p.CacheWriteSource != "" {
+		g = weaker(g, p.CacheWriteSource.grade())
+	}
+	return g
+}
+
+func weaker(a, b Grade) Grade {
+	rank := map[Grade]int{GradeMeasured: 3, GradeDeclared: 2, GradeIndexed: 1, GradeGuessed: 0}
+	if rank[b] < rank[a] {
+		return b
+	}
+	return a
+}
+
 // CostMicros is Cost for a caller holding only the four classic counts.
 func (p Pricing) CostMicros(in, out, cacheRead, cacheWrite int64) *int64 {
 	return p.Cost(Tokens{Input: in, Output: out, CacheRead: cacheRead, CacheWrite: cacheWrite})

@@ -343,6 +343,17 @@ func TestAListedPriceTakesCacheRatesItDidNotQuote(t *testing.T) {
 			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
 	}
 
+	// The filled rates are models.dev's, and a cost that used one rests on it.
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000}); got != GradeMeasured {
+		t.Errorf("grade without cached tokens = %q, want measured", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache reads = %q, want indexed: the read rate is models.dev's", got)
+	}
+	if got := m.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache writes = %q, want indexed: the write rate is models.dev's", got)
+	}
+
 	// A rate the listing did quote, zero included, is still the listing's.
 	q, _ := cat.Snapshot().Lookup("p", "quoted-zero-cache")
 	if q.Pricing.CacheReadMicrosPerMTok != 0 {
@@ -350,6 +361,17 @@ func TestAListedPriceTakesCacheRatesItDidNotQuote(t *testing.T) {
 	}
 	if q.Pricing.CacheWriteMicrosPerMTok != 60_000 {
 		t.Errorf("cache write = %d, want models.dev's 60000", q.Pricing.CacheWriteMicrosPerMTok)
+	}
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheRead: 1000}); got != GradeMeasured {
+		t.Errorf("grade with cache reads = %q, want measured: the listing quoted that rate", got)
+	}
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000}); got != GradeIndexed {
+		t.Errorf("grade with cache writes = %q, want indexed", got)
+	}
+	// A write whose TTL the response broke out is priced from the input rate,
+	// which the listing quoted.
+	if got := q.Pricing.GradeFor(Tokens{Input: 1000, CacheWrite: 1000, CacheWrite5m: 1000}); got != GradeMeasured {
+		t.Errorf("grade with TTL-priced cache writes = %q, want measured", got)
 	}
 }
 
