@@ -28,9 +28,24 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The parsed JSON error body, for a caller that needs more of it than
+     *  the message -- such as whether a failed write had in fact committed. */
+    readonly body?: unknown,
   ) {
     super(message)
   }
+}
+
+/** A write the server committed but could not load into routing. It answers
+ *  as an error because the gateway still serves the previous settings, yet
+ *  repeating it would repeat a change that already happened. */
+export function committedButNotRouted(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    typeof err.body === "object" &&
+    err.body !== null &&
+    (err.body as { routing_updated?: unknown }).routing_updated === false
+  )
 }
 
 /** A failure the next attempt might not repeat: the network dropped, or the
@@ -146,14 +161,15 @@ async function request<T>(
   }
   if (!res.ok) {
     let message = res.statusText
+    let parsed: { error?: string } | undefined
     try {
-      const parsed = (await res.json()) as { error?: string }
+      parsed = (await res.json()) as { error?: string }
       if (parsed.error) message = parsed.error
     } catch {
       // A non-JSON error body means something upstream of the API answered.
       // The status line is all there is to report.
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, parsed)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
