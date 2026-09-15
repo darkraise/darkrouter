@@ -410,8 +410,8 @@ func TestWriteConfigRejectsAStaleAliasesRevision(t *testing.T) {
 	}
 
 	_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
-		Aliases:         map[string][]string{"fast": {"groq/a"}, "slow": {"groq/c"}},
-		AliasesRevision: &stale,
+		Aliases:          map[string][]string{"fast": {"groq/a"}, "slow": {"groq/c"}},
+		AliasesRevisions: []string{stale},
 	})
 	var conflict config.ConflictError
 	if !errors.As(err, &conflict) {
@@ -438,10 +438,11 @@ func TestWriteConfigAcceptsAMatchingAliasesRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	current := config.AliasesRevision(map[string][]string{"fast": {"groq/a"}})
+	stale := config.AliasesRevision(map[string][]string{"fast": {"groq/z"}})
 
 	if _, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
-		Aliases:         map[string][]string{"fast": {"groq/a", "groq/b"}},
-		AliasesRevision: &current,
+		Aliases:          map[string][]string{"fast": {"groq/a", "groq/b"}},
+		AliasesRevisions: []string{stale, current},
 	}); err != nil {
 		t.Fatalf("WriteConfig: %v", err)
 	}

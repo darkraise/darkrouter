@@ -23,12 +23,12 @@ type Patch struct {
 	// an empty non-nil map deletes every alias, which is what an operator who
 	// removed the last one meant.
 	Aliases map[string][]string
-	// AliasesRevision pins an Aliases write to the table it was read against.
-	// Nil skips the check; a non-nil value that no longer matches what
-	// AliasesRevision(current) computes is a ConflictError, because Aliases
-	// was built from a copy another admin has since changed and would
-	// otherwise silently replace their edit.
-	AliasesRevision *string
+	// AliasesRevisions pins an Aliases write to the table it was read against.
+	// Nil skips the check; otherwise, when none of the listed revisions
+	// matches what AliasesRevision(current) computes, the write is a
+	// ConflictError, because Aliases was built from a copy another admin has
+	// since changed and would otherwise silently replace their edit.
+	AliasesRevisions []string
 }
 
 // RejectedError is a write refused for what it says rather than for a failure
