@@ -710,8 +710,8 @@ func (s *Server) Run(ctx context.Context) error {
 	// SIGTERM arrives instead of letting them drain. It is cancelled only when
 	// the drain deadline expires, which is the signal handlers need to emit a
 	// terminal event.
-	lc, cancelLC := context.WithCancel(context.Background())
-	defer cancelLC()
+	lc, cancelLC := context.WithCancelCause(context.Background())
+	defer cancelLC(nil)
 
 	readTimeout, idleTimeout := listenerTimeouts(cfg.Policy.Timeout)
 	proxy := &http.Server{
@@ -768,18 +768,7 @@ func (s *Server) Run(ctx context.Context) error {
 	drain, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 
-	// Shutdown closes listeners and waits, but on deadline it returns and leaves
-	// active connections running. Cancelling the lifecycle context propagates to
-	// each handler's request context, which aborts its upstream read and lets
-	// the stream path emit a final error event; Close then forces the sockets
-	// down so the process can actually exit.
-	shutdownErr := proxy.Shutdown(drain)
-	if shutdownErr != nil {
-		cancelLC()
-		timer := time.NewTimer(terminalGrace)
-		<-timer.C
-		_ = proxy.Close()
-	}
+	shutdownErr := shutdownProxy(proxy, drain, cancelLC)
 	_ = admin.Shutdown(drain)
 	_ = admin.Close()
 
@@ -789,6 +778,24 @@ func (s *Server) Run(ctx context.Context) error {
 	stopWorkers()
 	workers.Wait()
 	return shutdownErr
+}
+
+// shutdownProxy drains the proxy until drain expires. Shutdown closes the
+// listeners and waits, but on deadline it returns and leaves active
+// connections running. Cancelling the lifecycle context propagates to each
+// handler's request context, which aborts its upstream read and lets the
+// stream path emit a final error event; Close then forces the sockets down so
+// the process can actually exit. The cause is what lets a handler record the
+// cut as the gateway's rather than as its client hanging up.
+func shutdownProxy(proxy *http.Server, drain context.Context, cancelLC context.CancelCauseFunc) error {
+	err := proxy.Shutdown(drain)
+	if err != nil {
+		cancelLC(exec.ErrShutdown)
+		timer := time.NewTimer(terminalGrace)
+		<-timer.C
+		_ = proxy.Close()
+	}
+	return err
 }
 
 // Listener bounds. minReadTimeout covers max_body_bytes at modest bandwidth;

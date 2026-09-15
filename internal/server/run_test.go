@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
@@ -15,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
 	"github.com/darkraise/darkrouter/internal/crypto"
+	"github.com/darkraise/darkrouter/internal/exec"
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/provider/providertest"
@@ -577,5 +581,72 @@ func TestHealthzReportsPendingRestartAcrossAnUnrelatedReload(t *testing.T) {
 	})
 	if got := pending(); !slices.Contains(got, "catalog.sync_interval") {
 		t.Fatalf("pending_restart = %v after an unrelated save, want the notice still standing", got)
+	}
+}
+
+// A stream still running when the drain expires is cut by the gateway, and
+// the handler has to be able to tell that apart from a client hanging up, or
+// its request row blames the client. The cancellation also has to leave the
+// handler time to send its final event before the socket is closed.
+func TestADrainThatExpiresCancelsRequestsAsAShutdown(t *testing.T) {
+	lc, cancelLC := context.WithCancelCause(context.Background())
+	defer cancelLC(nil)
+	started := make(chan struct{})
+	causes := make(chan error, 1)
+	proxy := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("data: first\n\n"))
+			w.(http.Flusher).Flush()
+			close(started)
+			<-r.Context().Done()
+			causes <- context.Cause(r.Context())
+			_, _ = w.Write([]byte("data: last\n\n"))
+		}),
+		BaseContext: func(net.Listener) context.Context { return lc },
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = proxy.Serve(ln)
+	}()
+	defer func() { <-served }()
+
+	body := make(chan string, 1)
+	go func() {
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("http://" + ln.Addr().String())
+		if err != nil {
+			body <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		body <- string(b)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream never started")
+	}
+
+	drain, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := shutdownProxy(proxy, drain, cancelLC); err == nil {
+		t.Fatal("the drain completed with a stream still in flight")
+	}
+	select {
+	case cause := <-causes:
+		if !errors.Is(cause, exec.ErrShutdown) {
+			t.Errorf("request context cancelled with %v, want %v", cause, exec.ErrShutdown)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the in-flight request was never cancelled")
+	}
+	if got := <-body; !strings.Contains(got, "data: last") {
+		t.Errorf("client saw %q, want the handler's final event", got)
 	}
 }
