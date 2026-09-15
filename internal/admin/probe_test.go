@@ -189,6 +189,11 @@ func TestOnlyARefusalMarksTheCredentialRejected(t *testing.T) {
 			body: `{"error":{"message":"IP not authorized: your request IP does not match the configured IP allowlist for your project or organization."}}`},
 		{name: "401 organization", status: http.StatusUnauthorized, probe: "permission",
 			body: `{"error":{"message":"You must be a member of an organization to use the API."}}`},
+		// A restricted key without the Models read permission. The key is
+		// real; its scopes are not, and a new key with the same scopes would
+		// meet the same answer.
+		{name: "401 missing scopes", status: http.StatusUnauthorized, probe: "permission",
+			body: `{"error":{"message":"You have insufficient permissions for this operation. Missing scopes: api.model.read. Check that you have the correct role in your organization (Reader, Writer, Owner) and project (Member, Owner), and if you're using a restricted API key, that it has the necessary scopes.","type":"invalid_request_error","param":null,"code":null}}`},
 		{name: "403", status: http.StatusForbidden, probe: "permission"},
 		{name: "429", status: http.StatusTooManyRequests},
 		{name: "503", status: http.StatusServiceUnavailable},
