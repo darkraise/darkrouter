@@ -297,9 +297,13 @@ func isGemini3(model string) bool {
 }
 
 // nonThinking reports a generation from before thinking existed. It takes no
-// thinkingConfig, so a request to turn thinking off is already honored.
+// thinkingConfig, so a request to turn thinking off is already honored. The
+// 2.0 Flash Thinking experiments are the exception in that generation.
 func nonThinking(model string) bool {
 	m := strings.ToLower(model)
+	if strings.Contains(m, "gemini-2.0-flash-thinking") {
+		return false
+	}
 	return strings.Contains(m, "gemini-1.") || strings.Contains(m, "gemini-2.0-")
 }
 

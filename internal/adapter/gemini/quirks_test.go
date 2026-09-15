@@ -168,6 +168,8 @@ func TestThinkingConfigFollowsEachModelsLevels(t *testing.T) {
 		{"gemini-1.5-pro", ir.Reasoning{Budget: 64}, nil, nil, true},
 		{"gemini-1.5-flash-002", ir.Reasoning{Effort: "high"}, nil, nil, true},
 		{"gemini-2.0-flash", ir.Reasoning{Effort: "low"}, nil, nil, true},
+		// The one 2.0 model that did think.
+		{"gemini-2.0-flash-thinking-exp-01-21", ir.Reasoning{Budget: 2048}, nil, float64(2048), false},
 	}
 	for _, c := range cases {
 		r := c.reasoning
