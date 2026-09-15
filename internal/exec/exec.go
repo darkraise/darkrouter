@@ -639,6 +639,7 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 
 	resp.Body = &idleBody{ReadCloser: resp.Body, ac: ac}
 	cw := NewCommitWriter(w)
+	cw.hold = ac
 	var aerr *ir.Error
 	switch {
 	case path == PathPassthrough && streaming:
@@ -793,7 +794,11 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	// response must not be killed, while a provider that goes silent must be.
 	ac.resetIdle()
 
-	var streamErr error
+	var (
+		streamErr error
+		streamOut adapter.Outcome
+		streamIE  *ir.Error
+	)
 	events := func(yield func(ir.StreamEvent, error) bool) {
 		for _, buffered := range buf.events() {
 			if !yield(buffered, nil) {
@@ -803,7 +808,7 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 		if haveCommitted && !yield(committed, nil) {
 			return
 		}
-		for {
+		for cw.Err() == nil {
 			ev, err, ok := next()
 			if !ok {
 				return
@@ -815,7 +820,11 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 				}
 				streamWarns = append(streamWarns, ev.Warnings...)
 			} else {
+				// Classified before the error event is written: a client
+				// that is gone by then fails that write too, and the
+				// provider's failure came first.
 				streamErr = err
+				streamOut, streamIE = ac.failedAfterCommit(err)
 			}
 			if !yield(ev, err) {
 				return
@@ -830,7 +839,10 @@ func (e *Executor) attemptStream(d edge.Dialect, resp *http.Response, ac *Attemp
 	_ = d.WriteStream(cw, events)
 	rec.Warnings = warningStrings(append(ac.Warns, streamWarns...))
 	if streamErr != nil {
-		return ac.failedAfterCommit(streamErr)
+		return streamOut, streamIE
+	}
+	if werr := cw.Err(); werr != nil {
+		return ac.clientFailed(werr)
 	}
 	return adapter.OutcomeSuccess, nil
 }

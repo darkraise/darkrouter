@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -135,17 +136,43 @@ func (ac *AttemptCtx) recordHealth(o adapter.Outcome, resp *http.Response) {
 // the body is cancelled by the same two sources as the send, and they are
 // told apart in the same order classify uses, so a client that hangs up
 // mid-body is never recorded against the provider.
+//
+// A failed client write is checked before either. The response stopped
+// because the client did, and the write's failure is itself what cancels the
+// inbound context, by which time a deadline may have fired as well.
 func (ac *AttemptCtx) readOutcome(err error) adapter.Outcome {
+	if errors.Is(err, errClientWrite) {
+		return adapter.OutcomeClientCancelled
+	}
 	if ac.upstream != nil && errors.Is(context.Cause(ac.upstream), errDarkrouterTimeout) {
 		return adapter.OutcomeRetryableProvider
 	}
 	if ac.inbound != nil && errors.Is(ac.inbound.Err(), context.Canceled) {
 		return adapter.OutcomeClientCancelled
 	}
-	if errors.Is(err, errClientWrite) {
-		return adapter.OutcomeClientCancelled
-	}
 	return outcomeForParseError(err)
+}
+
+// clientFailed ends a committed response whose client stopped taking it.
+func (ac *AttemptCtx) clientFailed(werr error) (adapter.Outcome, *ir.Error) {
+	return ac.failedAfterCommit(fmt.Errorf("%w: %w", errClientWrite, werr))
+}
+
+// beginWrite and endWrite keep idle from running while a write to the client
+// blocks. Idle bounds a provider that goes silent; a response stalled behind a
+// client that stopped reading is bounded by the listener's write deadline, and
+// the two are the same duration, so an idle timer left running would expire
+// first and blame the provider for the client's stall.
+func (ac *AttemptCtx) beginWrite() {
+	if ac.Timer != nil && ac.idleArmed {
+		ac.Timer.Stop()
+	}
+}
+
+func (ac *AttemptCtx) endWrite() {
+	if ac.idleArmed {
+		ac.resetIdle()
+	}
 }
 
 // resetIdle moves the attempt's bound from the pre-commit deadline to

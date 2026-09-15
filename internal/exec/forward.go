@@ -54,6 +54,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 
 	commit := func() {
 		committed = true
+		// Before the replay rather than after it, so the replay's writes to
+		// the client are held off idle like every later one.
+		ac.resetIdle()
 		ac.served(ac.Warns)
 		copyResponseHeaders(cw.Header(), resp.Header)
 		e.writeDiagnostics(cw, rec.ID, c, ac.Seq)
@@ -63,7 +66,6 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		}
 		pending, pendingBytes = nil, 0
 		cw.Flush()
-		ac.resetIdle()
 	}
 
 	// step handles one whole event. A non-nil error ends the attempt.
@@ -126,6 +128,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				if out, ierr := step(raw); ierr != nil {
 					return out, ierr
 				}
+				if werr := cw.Err(); werr != nil {
+					return ac.clientFailed(werr)
+				}
 			}
 			if serr != nil {
 				if !committed {
@@ -149,6 +154,12 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				if !committed {
 					return ac.reclassifyStream(rerr)
 				}
+				// Classified before anything more is written, since a client
+				// that is gone fails those writes as well.
+				out, ierr := ac.failedAfterCommit(rerr)
+				if out == adapter.OutcomeClientCancelled {
+					return out, ierr
+				}
 				// Spec §9: after commit a failure becomes an in-stream error.
 				// Whatever the splitter still holds goes out first, so the
 				// error event lands on an event boundary rather than inside a
@@ -158,7 +169,7 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				}
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
 				se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
-				return ac.failedAfterCommit(rerr)
+				return out, ierr
 			}
 			break
 		}
@@ -176,6 +187,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 		// legitimately empty completion rather than a fault: failing over here
 		// would burn the whole chain every time a model stops immediately.
 		commit()
+	}
+	if werr := cw.Err(); werr != nil {
+		return ac.clientFailed(werr)
 	}
 	if failed != nil {
 		return ac.failedAfterCommit(failed)
