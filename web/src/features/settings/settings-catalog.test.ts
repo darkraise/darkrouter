@@ -6,6 +6,7 @@ import {
   formatBytes,
   formatDuration,
   parseBytes,
+  sameSetting,
   settingGroups,
   settingRow,
 } from "./settings-catalog"
@@ -36,6 +37,31 @@ describe("formatBytes", () => {
 
   it("leaves a small count alone", () => {
     expect(formatBytes(512)).toBe("512 bytes")
+  })
+})
+
+describe("sameSetting", () => {
+  it("reads a duration the way the gateway re-spells it", () => {
+    expect(sameSetting("96h0m0s", "96h", "duration")).toBe(true)
+    expect(sameSetting("1m30s", "90s", "duration")).toBe(true)
+    expect(sameSetting("500ms", "0.5s", "duration")).toBe(true)
+    expect(sameSetting("0s", "0", "duration")).toBe(true)
+    expect(sameSetting("96h0m0s", "95h", "duration")).toBe(false)
+    expect(sameSetting("soon", "soon ", "duration")).toBe(true)
+    expect(sameSetting("soon", "later", "duration")).toBe(false)
+  })
+
+  it("reads numbers and switches the way the gateway parses them", () => {
+    expect(sameSetting("10", "010", "int")).toBe(true)
+    expect(sameSetting("1048576", "+1048576", "bytes")).toBe(true)
+    expect(sameSetting("10", "11", "int")).toBe(false)
+    expect(sameSetting("true", "1", "bool")).toBe(true)
+    expect(sameSetting("false", "F", "bool")).toBe(true)
+    expect(sameSetting("true", "yes", "bool")).toBe(false)
+  })
+
+  it("compares a string as text", () => {
+    expect(sameSetting("10", "010", "string")).toBe(false)
   })
 })
 

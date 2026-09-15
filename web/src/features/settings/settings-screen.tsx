@@ -13,7 +13,7 @@ import type { ConfigResponse, Session } from "../../lib/api-types"
 import { AccountsCard } from "./accounts-card"
 import { ChangePasswordDialog } from "./change-password-dialog"
 import { SettingField } from "./setting-field"
-import { displayOf, settingGroups, type GroupId } from "./settings-catalog"
+import { displayOf, sameSetting, settingGroups, type GroupId } from "./settings-catalog"
 
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
@@ -182,8 +182,9 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
       next[f] = typed
       const error = errors[f]
       if (error) kept[f] = error
-      if (stored !== before[f] && stored !== typed) {
-        const shown = displayOf(stored, to.fields[f]?.kind ?? "string")
+      const kind = to.fields[f]?.kind ?? "string"
+      if (stored !== before[f] && !sameSetting(stored, typed, kind)) {
+        const shown = displayOf(stored, kind)
         kept[f] = `Changed elsewhere to ${shown} while you were editing. Saving replaces it with the value here.`
       }
     }
