@@ -53,11 +53,11 @@ export function StatusMark({
 
 /** Whether a request was served. */
 export function RequestStatus({ status }: { status: string }) {
-  return status === "success" ? (
-    <StatusMark icon={CircleCheck} tone="good" label="served" />
-  ) : (
-    <StatusMark icon={CircleX} tone="serious" label={status} />
-  )
+  if (status === "success") return <StatusMark icon={CircleCheck} tone="good" label="served" />
+  if (status === "cancelled") {
+    return <StatusMark icon={CircleSlash} tone="neutral" label="cancelled by the client" />
+  }
+  return <StatusMark icon={CircleX} tone="serious" label={status} />
 }
 
 /** Which renderer served it. Not an outcome, so it never wears a state tone. */

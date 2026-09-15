@@ -304,7 +304,11 @@ export function TraceDrawer({
               <dd>
                 <Badge
                   variant={
-                    trace.data.status === "success" ? "green" : "destructive"
+                    trace.data.status === "success"
+                      ? "green"
+                      : trace.data.status === "cancelled"
+                        ? "secondary"
+                        : "destructive"
                   }
                 >
                   {trace.data.status}

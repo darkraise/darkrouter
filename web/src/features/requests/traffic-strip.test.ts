@@ -27,6 +27,11 @@ describe("the traffic strip", () => {
     expect(buckets.reduce((n, b) => n + b.failed, 0)).toBe(1)
   })
 
+  it("does not count a request the client abandoned as a failure", () => {
+    const buckets = bucketRequests([row(0, "cancelled"), row(10, "error")], 1)
+    expect(buckets[0]).toMatchObject({ total: 2, failed: 1 })
+  })
+
   it("survives a page that spans no time at all", () => {
     // Every row in the same millisecond would divide by zero on the span.
     const buckets = bucketRequests([row(5), row(5), row(5)], 3)
