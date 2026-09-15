@@ -44,3 +44,22 @@ func TestMakingRoomKeepsAnActiveAddressLimited(t *testing.T) {
 		t.Error("the drained address got a fresh bucket when room was made for a new one")
 	}
 }
+
+func TestAnIPv6SenderSharesOneBucketPerSlash64(t *testing.T) {
+	// One allocation hands a client a whole /64, so a bucket per address is no
+	// limit at all. IPv4, and IPv4 carried in IPv6, stay per address.
+	if a, b := clientAddr("[2001:db8:1:2::1]:4000"),
+		clientAddr("[2001:db8:1:2:ffff:ffff:ffff:fffe]:4001"); a != b {
+		t.Errorf("one /64 keyed %q and %q; want one bucket", a, b)
+	}
+	distinct := [][2]string{
+		{"[2001:db8:1:2::1]:4000", "[2001:db8:1:3::1]:4000"},
+		{"192.0.2.1:4000", "192.0.2.2:4000"},
+		{"[::ffff:192.0.2.1]:4000", "[::ffff:192.0.2.2]:4000"},
+	}
+	for _, pair := range distinct {
+		if a, b := clientAddr(pair[0]), clientAddr(pair[1]); a == b {
+			t.Errorf("%s and %s share the bucket %q; want one each", pair[0], pair[1], a)
+		}
+	}
+}
