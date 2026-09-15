@@ -352,3 +352,40 @@ func TestAListedPriceTakesCacheRatesItDidNotQuote(t *testing.T) {
 		t.Errorf("cache write = %d, want models.dev's 60000", q.Pricing.CacheWriteMicrosPerMTok)
 	}
 }
+
+// A model the listing quotes free is free for cached tokens too. Syncs before
+// cache columns were tracked stored a quoted zero cache rate as unset, so a
+// fill here would start charging for a model the provider gives away.
+func TestAFreeListedPriceTakesNoCacheRates(t *testing.T) {
+	ctx := context.Background()
+	db := discoveryDB(t, "p")
+	if _, err := db.Write.ExecContext(ctx,
+		`UPDATE providers SET preset = ? WHERE id = 'p'`, embeddedPreset); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "p", []store.DiscoveredModel{
+		{ModelID: embeddedModel, Pricing: &store.ModelPricing{}},
+	}, nil, time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	src := &staticSource{ps: []provider.Provider{{ID: "p", Kind: "openaicompat", Preset: embeddedPreset}}}
+	cat := NewStore(db, src)
+	cat.SetDoc(func() Doc {
+		return Doc{embeddedPreset: {embeddedModel: Metadata{
+			CacheReadMicrosPerMTok: 25_000, CacheWriteMicrosPerMTok: 60_000,
+			PriceKnown: true,
+		}}}
+	})
+	if err := cat.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	m, _ := cat.Snapshot().Lookup("p", embeddedModel)
+	if m.Pricing.Source != SourceDiscovered || !m.Pricing.Known {
+		t.Fatalf("pricing = %+v, want the listing's known free price", m.Pricing)
+	}
+	if m.Pricing.CacheReadMicrosPerMTok != 0 || m.Pricing.CacheWriteMicrosPerMTok != 0 {
+		t.Errorf("cache = %d/%d, want 0/0 for a model listed free",
+			m.Pricing.CacheReadMicrosPerMTok, m.Pricing.CacheWriteMicrosPerMTok)
+	}
+}
