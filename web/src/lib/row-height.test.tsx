@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { render, screen, act } from "@testing-library/react"
 import { useRef } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -59,5 +62,26 @@ describe("useRowHeight", () => {
     })
     expect(screen.getByRole("status")).toHaveTextContent("40")
     document.documentElement.removeAttribute("data-density")
+  })
+})
+
+describe("the row pin", () => {
+  // The measured figure is only true if every row is held to it. jsdom applies
+  // no stylesheet, so the rule itself is what is checked.
+  const css = readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../styles/globals.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "")
+
+  it("holds every non-spacer row of a pinned table to --row-h", () => {
+    const rule = css.match(
+      /\.row-height-pinned \.dr-data-table-frame tbody tr:not\(\.dr-data-table-virtual-pad\)\s*\{([^}]*)\}/,
+    )
+    expect(rule?.[1]).toMatch(/(^|[\s;])height:\s*var\(--row-h\)/)
+  })
+
+  it("defaults the height to auto until one is measured", () => {
+    const rule = css.match(/\n\.row-height-pinned\s*\{([^}]*)\}/)
+    expect(rule?.[1]).toMatch(/--row-h:\s*auto/)
   })
 })
