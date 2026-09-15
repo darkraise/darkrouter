@@ -419,11 +419,11 @@ func (d *Discoverer) doc() Doc {
 	return FallbackDoc()
 }
 
-// maxListPages bounds how far a listing's cursor is followed. At the smallest
+// MaxListPages bounds how far a listing's cursor is followed. At the smallest
 // default page size in use, Anthropic's twenty, it still admits two thousand
 // models, and it stops an upstream whose cursor never ends from holding a
 // sweep slot forever.
-const maxListPages = 100
+const MaxListPages = 100
 
 // list reads every page of the listing. Anything short of the whole listing
 // is an error: a successful listing that omits a model is what retires it, so
@@ -456,15 +456,39 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		}
 		return models, err
 	}
+	return ListPages(ctx, d.client, pr, func(resp *http.Response) error {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			// A rejected key on a probe is the same evidence as a rejected key on
+			// a request, so it cools the credential across every model it serves.
+			d.health.Record(
+				health.Key{ProviderID: providerID, KeyID: keyID},
+				health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: resp.StatusCode},
+			)
+			return fmt.Errorf("listing rejected the credential: %s", resp.Status)
+		}
+		return nil
+	})
+}
+
+// ListPages reads every page of pr's generic listing through client, following
+// the cursor up to MaxListPages and returning each model once, in listing
+// order. An empty listing is an error.
+//
+// classify, when set, sees every response before its body is read, and any
+// error it returns ends the listing. A non-2xx response it lets through is
+// still an error.
+func ListPages(ctx context.Context, client *http.Client, pr Probe,
+	classify func(*http.Response) error) ([]Discovered, error) {
+
 	var out []Discovered
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
 	cursor := ""
 	for page := 0; ; page++ {
-		if page == maxListPages {
-			return nil, fmt.Errorf("listing did not end within %d pages", maxListPages)
+		if page == MaxListPages {
+			return nil, fmt.Errorf("listing did not end within %d pages", MaxListPages)
 		}
-		models, next, err := d.listPage(ctx, pr, providerID, keyID, cursor)
+		models, next, err := listPage(ctx, client, pr, cursor, classify)
 		if err != nil {
 			return nil, err
 		}
@@ -490,8 +514,8 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 }
 
 // listPage performs one page's request and classifies the response.
-func (d *Discoverer) listPage(ctx context.Context, pr Probe, providerID, keyID,
-	cursor string) ([]Discovered, string, error) {
+func listPage(ctx context.Context, client *http.Client, pr Probe, cursor string,
+	classify func(*http.Response) error) ([]Discovered, string, error) {
 
 	req, err := BuildListRequest(ctx, pr)
 	if err != nil {
@@ -503,7 +527,7 @@ func (d *Discoverer) listPage(ctx context.Context, pr Probe, providerID, keyID,
 	if err := authorize(ctx, pr, req); err != nil {
 		return nil, "", err
 	}
-	resp, err := d.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -512,14 +536,10 @@ func (d *Discoverer) listPage(ctx context.Context, pr Probe, providerID, keyID,
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		// A rejected key on a probe is the same evidence as a rejected key on
-		// a request, so it cools the credential across every model it serves.
-		d.health.Record(
-			health.Key{ProviderID: providerID, KeyID: keyID},
-			health.Signal{Outcome: adapter.OutcomeRetryableCredential, StatusCode: resp.StatusCode},
-		)
-		return nil, "", fmt.Errorf("listing rejected the credential: %s", resp.Status)
+	if classify != nil {
+		if err := classify(resp); err != nil {
+			return nil, "", err
+		}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("listing returned %s", resp.Status)
