@@ -116,6 +116,43 @@ func TestPutAliasesAcceptsAWeakIfMatch(t *testing.T) {
 	}
 }
 
+// If-Match is a list: a client holding more than one representation may send
+// every ETag it has, and the save is pinned if any of them is current.
+func TestPutAliasesAcceptsAnIfMatchList(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	seedProviderWithKey(t, s, cookie, token, "groq", "http://127.0.0.1:1")
+
+	stale := do(t, s, cookie, token, "GET", "/api/aliases", "").Header().Get("ETag")
+	if w := putIfMatch(t, s, cookie, token, stale, `{"fast":["groq/a"]}`); w.Code != 200 {
+		t.Fatalf("first PUT = %d: %s", w.Code, w.Body.String())
+	}
+	current := do(t, s, cookie, token, "GET", "/api/aliases", "").Header().Get("ETag")
+
+	if w := putIfMatch(t, s, cookie, token, stale+`, W/`+current, `{"fast":["groq/b"]}`); w.Code != 200 {
+		t.Fatalf("PUT with a list naming the current ETag = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	current = do(t, s, cookie, token, "GET", "/api/aliases", "").Header().Get("ETag")
+
+	r := httptest.NewRequest("PUT", "/api/aliases", strings.NewReader(`{"fast":["groq/c"]}`))
+	r.AddCookie(cookie)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	r.Header.Set(csrfHeader, token)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Add("If-Match", stale)
+	r.Header.Add("If-Match", current)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("PUT with the current ETag on a second If-Match line = %d, want 200: %s",
+			w.Code, w.Body.String())
+	}
+
+	if w := putIfMatch(t, s, cookie, token, stale+`, `+current, `{"fast":["groq/d"]}`); w.Code != 409 {
+		t.Fatalf("PUT with a list of stale ETags = %d, want 409: %s", w.Code, w.Body.String())
+	}
+}
+
 // If-Match: * asks only that the resource exist, which the alias table always
 // does, so it pins nothing.
 func TestPutAliasesTreatsAStarIfMatchAsNoPin(t *testing.T) {

@@ -64,14 +64,13 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 	patch := config.Patch{Aliases: aliases}
 	// Optional: a caller that never read the ETag gets today's behaviour
 	// rather than a refusal it has no way to satisfy.
-	if match, ok := aliasesIfMatch(r.Header.Get("If-Match")); ok {
-		patch.AliasesRevision = &match
-	}
+	patch.AliasesRevisions = aliasesIfMatch(r.Header.Values("If-Match"))
 	s.commitConfig(w, r, patch)
 }
 
-// aliasesIfMatch reads the revision an If-Match header pins, and whether it
-// pins one at all.
+// aliasesIfMatch reads the revisions If-Match pins, nil when it pins none. The
+// header is a comma-separated list and may repeat; a revision is hex, so a
+// comma never falls inside one.
 //
 // A weak validator is accepted as its strong form. A compressing reverse proxy
 // rewrites the ETag it forwards to W/"...", the browser echoes that back, and
@@ -79,13 +78,22 @@ func (s *Server) handlePutAliases(w http.ResponseWriter, r *http.Request) {
 // sound here because the revision fingerprints the table itself, not a byte
 // encoding of it. "*" only asks that the resource exist, which the alias table
 // always does, so it pins nothing.
-func aliasesIfMatch(header string) (string, bool) {
-	match := strings.TrimSpace(header)
-	if match == "" || match == "*" {
-		return "", false
+func aliasesIfMatch(headers []string) []string {
+	var revisions []string
+	for _, header := range headers {
+		for _, match := range strings.Split(header, ",") {
+			match = strings.TrimSpace(match)
+			if match == "*" {
+				return nil
+			}
+			if match == "" {
+				continue
+			}
+			match = strings.TrimPrefix(match, "W/")
+			revisions = append(revisions, strings.Trim(match, `"`))
+		}
 	}
-	match = strings.TrimPrefix(match, "W/")
-	return strings.Trim(match, `"`), true
+	return revisions
 }
 
 func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
