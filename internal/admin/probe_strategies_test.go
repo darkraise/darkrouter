@@ -34,6 +34,7 @@ type probeReply struct {
 	LatencyMs  int64  `json:"latency_ms"`
 	Error      string `json:"error"`
 	Rejected   bool   `json:"rejected"`
+	AuthStyle  string `json:"auth_style"`
 }
 
 func probeProvider(t *testing.T, s *Server, cookie *http.Cookie, token, id string) probeReply {
@@ -487,6 +488,31 @@ func TestGCPProbeKeepsAKeyOnClockSkew(t *testing.T) {
 	if got.Rejected {
 		t.Errorf("a skewed clock is not a rejected credential: %s", got.Error)
 	}
+}
+
+func TestARejectedProbeNamesTheAuthStyle(t *testing.T) {
+	// The console deletes a key the probe rejects, unless the secret is one
+	// the operator cannot download again. The probe resolves the style the
+	// provider actually authenticates with, so the answer carries it.
+	t.Run("sigv4", func(t *testing.T) {
+		aws, srv := newFakeAWS(t)
+		aws.status = http.StatusUnauthorized
+		s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+		id := bedrockProvider(t, s, cookie, token, srv.URL)
+
+		got := probeProvider(t, s, cookie, token, id)
+		if !got.Rejected || got.AuthStyle != auth.StyleSigV4 {
+			t.Errorf("rejected = %v, auth_style = %q; want a rejected sigv4 key", got.Rejected, got.AuthStyle)
+		}
+	})
+	t.Run("gcp-sa from the preset", func(t *testing.T) {
+		s, cookie, token := vertexProbeServer(t, http.StatusUnauthorized)
+
+		got := probeProvider(t, s, cookie, token, "vx")
+		if !got.Rejected || got.AuthStyle != auth.StyleGCPSA {
+			t.Errorf("rejected = %v, auth_style = %q; want a rejected gcp-sa key", got.Rejected, got.AuthStyle)
+		}
+	})
 }
 
 const gcpCanaryKeyID = "0f1e2d3c4b5a69788796a5b4c3d2e1f0canary"
