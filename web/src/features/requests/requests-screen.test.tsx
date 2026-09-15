@@ -391,6 +391,95 @@ describe("loading older requests", () => {
   })
 })
 
+describe("showing newer requests", () => {
+  const firstPages = (pages: RequestPage[]) => {
+    let calls = 0
+    return () => {
+      const page = pages[Math.min(calls, pages.length - 1)]!
+      calls++
+      return json(page)
+    }
+  }
+
+  it("keeps every row between the newer ones and the pages already loaded", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r3", model: "model-three" }), row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r4", model: "model-four" }), row({ id: "r3", model: "model-three" })], next_cursor: "c-r3" },
+    ])
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (url.includes("cursor=c-r2")) return json({ requests: [row({ id: "r1", model: "model-one" })] })
+      if (url.includes("cursor=")) return json({ requests: [row({ id: "wrong", model: "WRONG-PAGE" })] })
+      return nextFirst()
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await screen.findByText("model-one")
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /1 newer/i }))
+
+    await screen.findByText("model-four")
+    for (const model of ["model-three", "model-two", "model-one"]) {
+      expect(screen.getByText(model)).toBeInTheDocument()
+    }
+    expect(screen.queryByText("WRONG-PAGE")).toBeNull()
+  })
+
+  it("starts paging over from the new first page when it no longer meets the loaded rows", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r9", model: "model-nine" }), row({ id: "r8", model: "model-eight" })], next_cursor: "c-r8" },
+    ])
+    const cursors: string[] = []
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      const cursor = /cursor=([^&]+)/.exec(url)?.[1]
+      if (cursor === undefined) return nextFirst()
+      cursors.push(cursor)
+      return json({ requests: [row({ id: `after-${cursor}`, model: `after-${cursor}` })] })
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await screen.findByText("after-c-r2")
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /2 newer/i }))
+
+    await screen.findByText("model-nine")
+    expect(screen.queryByText("after-c-r2")).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: /load more/i }))
+    await screen.findByText("after-c-r8")
+    expect(cursors).toEqual(["c-r2", "c-r8"])
+  })
+
+  it("drops an older page still in flight when paging starts over", async () => {
+    const nextFirst = firstPages([
+      { requests: [row({ id: "r2", model: "model-two" })], next_cursor: "c-r2" },
+      { requests: [row({ id: "r9", model: "model-nine" })], next_cursor: "c-r9" },
+    ])
+    let release: (() => void) | undefined
+    mockByPath((url) => {
+      if (!url.includes("/api/requests")) return json({})
+      if (!url.includes("cursor=")) return nextFirst()
+      return new Promise<Response>((resolve) => {
+        release = () => resolve(json({ requests: [row({ id: "r1", model: "OLD-PAGE" })] }))
+      })
+    })
+    const { client } = await renderAt("/requests")
+
+    await userEvent.click(await screen.findByRole("button", { name: /load more/i }))
+    await waitFor(() => expect(release).toBeDefined())
+    await client.refetchQueries({ queryKey: ["requests"] })
+    await userEvent.click(await screen.findByRole("button", { name: /1 newer/i }))
+    await screen.findByText("model-nine")
+
+    release!()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText("OLD-PAGE")).toBeNull()
+  })
+})
+
 describe("a requests list that fails to load", () => {
   it("shows a load error instead of the empty state", async () => {
     mockByPath(() => json({ error: "log unavailable" }, 500))
