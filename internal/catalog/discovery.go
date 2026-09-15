@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
@@ -426,6 +427,10 @@ func (d *Discoverer) doc() Doc {
 // sweep slot forever.
 const MaxListPages = 100
 
+// maxListerCalls is a paged listing plus the one unpaged call Bedrock makes
+// before it.
+const maxListerCalls = MaxListPages + 1
+
 // list reads every page of the listing. Anything short of the whole listing
 // is an error: a successful listing that omits a model is what retires it, so
 // a partial one must never be recorded as a success.
@@ -438,7 +443,9 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		// sweep waits on every probe, so the bound travels on the context.
 		// It bounds each call rather than the listing: the lister signs once
 		// per call, so every signature restarts the clock, and a listing of
-		// many profile pages is not failed for being long.
+		// many profile pages is not failed for being long. The calls are
+		// capped instead, which keeps the whole listing within
+		// maxListerCalls timeouts.
 		lctx, cancel := context.WithCancelCause(ctx)
 		defer cancel(nil)
 		expire := func() { cancel(context.DeadlineExceeded) }
@@ -446,7 +453,11 @@ func (d *Discoverer) list(ctx context.Context, pr Probe, providerID, keyID strin
 		defer timer.Stop()
 		lpr := pr
 		if pr.Authorize != nil {
+			var calls atomic.Int64
 			lpr.Authorize = func(ctx context.Context, req *http.Request) error {
+				if calls.Add(1) > maxListerCalls {
+					return fmt.Errorf("listing did not end within %d calls", maxListerCalls)
+				}
 				timer.Reset(d.opts.Timeout)
 				return pr.Authorize(ctx, req)
 			}

@@ -2,9 +2,13 @@ package bedrock
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+
+	"github.com/darkraise/darkrouter/internal/catalog"
 )
 
 // ListInferenceProfiles is paginated. An account with more profiles than one
@@ -64,5 +68,32 @@ func TestProfileListingRefusesARepeatedPageToken(t *testing.T) {
 
 	if _, err := NewLister(srv.Client()).List(context.Background(), listerProbe(srv.URL)); err == nil {
 		t.Fatal("a repeated page token was followed without end or error")
+	}
+}
+
+// A fresh token on every page never repeats, so only a page cap ends it.
+func TestProfileListingStopsAtThePageCap(t *testing.T) {
+	var pages atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/foundation-models" {
+			_, _ = w.Write([]byte(`{"modelSummaries":[]}`))
+			return
+		}
+		n := pages.Add(1)
+		if n > catalog.MaxListPages+5 {
+			_, _ = w.Write([]byte(`{"inferenceProfileSummaries":[]}`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"inferenceProfileSummaries":[],"nextToken":"t%d"}`, n)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := NewLister(srv.Client()).List(context.Background(), listerProbe(srv.URL))
+	if err == nil {
+		t.Fatal("a listing whose cursor never ends was followed past the page cap")
+	}
+	if got := pages.Load(); got != catalog.MaxListPages {
+		t.Errorf("pages requested = %d, want %d", got, catalog.MaxListPages)
 	}
 }
