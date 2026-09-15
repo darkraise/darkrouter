@@ -402,14 +402,18 @@ func TestParseListLeavesAnUnpricedListingNil(t *testing.T) {
 	}
 }
 
-// Ollama Cloud documents /api/tags as its only listing, and the preset lists
-// there. Read as a data[] listing it reported no models on every sweep.
-func TestParseListReadsOllamaCloudTags(t *testing.T) {
+// The fixture is ollama.com/v1/models, captured live on 2026-09-15. It named
+// the same 20 models as /api/tags did at the same moment.
+func TestParseListReadsOllamaCloudsListing(t *testing.T) {
+	pre := Embedded()["ollama-cloud"]
+	if !strings.HasSuffix(pre.ModelsURL, "/v1/models") {
+		t.Fatalf("ollama-cloud lists from %q, not its OpenAI-compatible /v1/models", pre.ModelsURL)
+	}
 	body, err := os.ReadFile("testdata/listing-ollama-cloud.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ParseList(Embedded()["ollama-cloud"].Kind, body)
+	got, err := ParseList(pre.Kind, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,6 +428,19 @@ func TestParseListReadsOllamaCloudTags(t *testing.T) {
 		if !ids[want] {
 			t.Errorf("%s missing from %v", want, ids)
 		}
+	}
+}
+
+// A native models[] listing is not an OpenAI-compatible one. Gemini's names
+// carry a "models/" prefix no chat request accepts, so importing any models[]
+// body would fill the catalogue with ids nothing can route to.
+func TestParseListDoesNotReadANativeModelsListAsOpenAICompatible(t *testing.T) {
+	body, err := os.ReadFile("testdata/listing-ollama-tags.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ParseList("openaicompat", body); err == nil {
+		t.Errorf("imported %d models from a native tags listing", len(got))
 	}
 }
 
