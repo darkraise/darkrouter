@@ -3,6 +3,7 @@ package gemini
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -165,13 +166,23 @@ func newCallIDs(responseID string) *callIDs {
 		}
 		return -1
 	}, responseID)
-	if base == "" {
+	switch {
+	case base == "":
 		var b [8]byte
 		_, _ = rand.Read(b[:])
 		base = hex.EncodeToString(b[:])
+	case len(base) > maxCallIDBase:
+		// OpenAI rejects a tool call id over 40 characters. A digest rather
+		// than a prefix keeps two long ids that share a prefix apart.
+		sum := sha256.Sum256([]byte(base))
+		base = hex.EncodeToString(sum[:])[:maxCallIDBase]
 	}
 	return &callIDs{base: base}
 }
+
+// maxCallIDBase leaves room in 40 characters for "call_", "_" and a ten-digit
+// counter.
+const maxCallIDBase = 24
 
 // next returns the supplied id, or a new one when Gemini gave none.
 func (c *callIDs) next(supplied string) string {
