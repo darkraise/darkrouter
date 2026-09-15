@@ -185,12 +185,40 @@ func TestARevocationTheRouterDidNotLoadIsNotReportedAsDone(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "saved") {
 		t.Errorf("body = %s; it must say the change itself was saved", w.Body.String())
 	}
+	if got := decodeRouting(t, w.Body.Bytes()); got.RoutingUpdated == nil || *got.RoutingUpdated {
+		t.Errorf("reply = %s, want routing_updated false", w.Body.String())
+	}
 	creds, err := db.CredentialSummaries(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(creds["p"]) != 1 || creds["p"][0].Enabled {
 		t.Errorf("credential = %+v, want it disabled in the database", creds["p"])
+	}
+}
+
+// routing_updated:false tells a client its write committed and must not be
+// repeated. A patch that wrote nothing must not carry it, even while every
+// reload would fail, or the console reports a refused change as saved.
+func TestAPatchThatWroteNothingDoesNotSayItCommitted(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	keyID := seedProviderWithKey(t, s, cookie, token, "p", "http://p.invalid")
+	breakNextReload(t, s, cookie, token)
+
+	for _, tc := range []struct{ name, path, body string }{
+		{"disable an unknown key", "/api/providers/p/keys/nosuch", `{"enabled":false}`},
+		{"replace under the wrong provider", "/api/providers/broken/keys/" + keyID, `{"secret":"sk-rotated-9876543210"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := do(t, s, cookie, token, "PATCH", tc.path, tc.body)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("patch = %d %s, want 404", w.Code, w.Body.String())
+			}
+			if got := decodeRouting(t, w.Body.Bytes()); got.RoutingUpdated != nil {
+				t.Errorf("reply = %s; nothing was written, so routing_updated must be absent", w.Body.String())
+			}
+		})
 	}
 }
 
