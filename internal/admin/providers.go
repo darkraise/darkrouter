@@ -77,11 +77,16 @@ var endpointSchemes = []string{"http", "https", localcli.AuggieScheme}
 // kind check is skipped when no registry was supplied, which is a test
 // building a server without an executor.
 func (s *Server) validateProviderRow(row store.ProviderRow) error {
-	if !providerIDPattern.MatchString(row.ID) {
-		return fmt.Errorf("id must match %s", providerIDPattern.String())
-	}
 	if err := checkEndpoint(row); err != nil {
 		return err
+	}
+	return s.validateProviderFields(row)
+}
+
+// validateProviderFields is validateProviderRow without the endpoint check.
+func (s *Server) validateProviderFields(row store.ProviderRow) error {
+	if !providerIDPattern.MatchString(row.ID) {
+		return fmt.Errorf("id must match %s", providerIDPattern.String())
 	}
 	if s.deps.Kinds != nil && !slices.Contains(s.deps.Kinds, row.Kind) {
 		return fmt.Errorf("kind %q is not one this build serves", row.Kind)
@@ -361,7 +366,15 @@ func (s *Server) handlePatchProvider(w http.ResponseWriter, r *http.Request) {
 	if patch.Project != nil {
 		next.Project = *patch.Project
 	}
-	if err := s.validateProviderRow(next); err != nil {
+	validate := s.validateProviderRow
+	if patch.BaseURL == nil && patch.Region == nil && patch.Project == nil {
+		// A row can predate a stricter endpoint rule, and no patch field can
+		// bring every such row up to it — there is no location to patch — so
+		// checking an endpoint the patch leaves alone would refuse even
+		// disabling the row.
+		validate = s.validateProviderFields
+	}
+	if err := validate(next); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
