@@ -262,6 +262,33 @@ func TestForwardStreamRecordsAPostCommitTransportFailure(t *testing.T) {
 	}
 }
 
+func TestForwardStreamEndsWithOneErrorEventWhenTheProviderSentOne(t *testing.T) {
+	// A provider can announce its failure in an error event and then drop the
+	// connection, as a local CLI does. The client has its error already; a
+	// synthesized second one would end the stream twice.
+	cw, ac := forwardFixture(t)
+	body := "data: c-first\n\ndata: e-overloaded\n\n"
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(&flakyBody{r: strings.NewReader(body), err: errors.New("exit status 1")}),
+	}
+	se := &recordedStreamError{}
+	out, ierr := ac.Exec.forwardStream(cw, resp, ac, fakeForwarder{}, se, false)
+	if out != adapter.OutcomeRetryableProvider || ierr == nil {
+		t.Fatalf("outcome = %v err = %v, want the provider's failure reported", out, ierr)
+	}
+	if got := recorderBody(cw); got != body {
+		t.Errorf("client saw %q, want exactly the provider's events %q", got, body)
+	}
+	if len(se.errs) != 0 {
+		t.Errorf("stream errors = %+v, want none after the provider's own error event", se.errs)
+	}
+	if ierr != nil && strings.Contains(ierr.Message, "exit status") {
+		t.Errorf("error = %q, want the provider's error event rather than the close that followed it", ierr.Message)
+	}
+}
+
 func TestForwardStreamStripsOnlyTheInjectedUsageChunk(t *testing.T) {
 	body := "data: c-first\n\ndata: u-usage\n\ndata: [DONE]\n\n"
 	cw, ac := forwardFixture(t)

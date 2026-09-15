@@ -161,9 +161,16 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 				if !committed {
 					return ac.reclassifyStream(rerr)
 				}
+				// A provider that announced its failure in an error event and
+				// then dropped the connection has already told the client, and
+				// the event says more than the close that followed it.
+				cause := rerr
+				if failed != nil {
+					cause = failed
+				}
 				// Classified before anything more is written, since a client
 				// that is gone fails those writes as well.
-				out, ierr := ac.failedAfterCommit(rerr)
+				out, ierr := ac.failedAfterCommit(cause)
 				if out == adapter.OutcomeClientCancelled {
 					return out, ierr
 				}
@@ -175,7 +182,9 @@ func (e *Executor) forwardStream(cw *CommitWriter, resp *http.Response, ac *Atte
 					_, _ = cw.Write(tail)
 				}
 				recordWarning("upstream connection failed after commit: " + rerr.Error())
-				se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
+				if failed == nil {
+					se.WriteStreamError(cw, &ir.Error{Type: ir.ErrAPI, Message: msgUpstreamReadFailed})
+				}
 				return out, ierr
 			}
 			break
