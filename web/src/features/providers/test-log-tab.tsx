@@ -114,20 +114,34 @@ export function TestLogTab({ providerId }: { providerId: string }) {
       >
         {rows.map((r) => {
           const outcome = outcomeOf(r)
+          const when = relativeTime(r.ts_ms)
+          const latency = r.total_ms === null ? "—" : duration(r.total_ms)
           return (
             <AccordionItem key={r.id} value={r.id}>
               <AccordionTrigger className="gap-3 px-4 py-2 hover:bg-[hsl(var(--muted))]">
-                <span className={`w-16 shrink-0 text-left font-mono ${outcome.tone}`}>
+                {/* Widths in ch, not rem: the font-size axis grows the text
+                    without growing the root, so a rem column spills into
+                    its neighbour at the larger steps. */}
+                <span
+                  className={`w-[12ch] shrink-0 truncate text-left font-mono ${outcome.tone}`}
+                  title={outcome.word}
+                >
                   {outcome.word}
                 </span>
-                <span className="w-20 shrink-0 text-left font-mono text-[hsl(var(--legend))]">
-                  {relativeTime(r.ts_ms)}
+                <span
+                  className="w-[10ch] shrink-0 truncate text-left font-mono text-[hsl(var(--legend))]"
+                  title={when}
+                >
+                  {when}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-left font-mono" title={r.model}>
                   {r.model}
                 </span>
-                <span className="w-16 shrink-0 text-right font-mono tabular-nums text-[hsl(var(--legend))]">
-                  {r.total_ms === null ? "—" : duration(r.total_ms)}
+                <span
+                  className="w-[7ch] shrink-0 truncate text-right font-mono tabular-nums text-[hsl(var(--legend))]"
+                  title={latency}
+                >
+                  {latency}
                 </span>
               </AccordionTrigger>
 
