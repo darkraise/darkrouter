@@ -226,7 +226,8 @@ export const SETTINGS: Record<string, SettingMeta> = {
   },
   "server.shutdown_grace": {
     name: "Shutdown grace period",
-    description: "How long in-flight requests have to finish when the gateway is stopping.",
+    description:
+      "How long in-flight requests have to finish when the gateway is stopping. The shipped compose files kill the container 30s after asking it to stop, so a value above 25s raises a warning; raise stop_grace_period to at least this value plus 5s first.",
     group: "server",
   },
   "server.sse.max_line_bytes": {
