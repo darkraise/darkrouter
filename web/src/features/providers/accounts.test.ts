@@ -161,6 +161,38 @@ describe("addCredentials when the provider refuses a secret that cannot be downl
   })
 })
 
+describe("addCredentials after a create the gateway did not load", () => {
+  const createdUnrouted = () => json({ id: "cred-1", label: "work", routing_updated: false, warning: ROUTING }, 201)
+  const refused = (auth_style: string) =>
+    json({ ok: false, probe: "listing", latency_ms: 1, error: "401", rejected: true, auth_style })
+
+  it("drops the warning once a clean delete reloaded routing", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/keys") && method === "POST") return createdUnrouted()
+      if (url.includes("/test")) return refused("bearer")
+      if (method === "DELETE") return new Response(null, { status: 204 })
+    })
+
+    const result = await addCredentials("groq", draft, false)
+
+    expect(result.rejected.map((r) => r.label)).toEqual(["work"])
+    expect(result.routingNotUpdated).toBeUndefined()
+  })
+
+  it("drops the warning once a clean disable reloaded routing", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/keys") && method === "POST") return createdUnrouted()
+      if (url.includes("/test")) return refused("sigv4")
+      if (method === "PATCH") return json({ id: "cred-1", enabled: false })
+    })
+
+    const result = await addCredentials("bedrock", draft, false)
+
+    expect(result.disabled.map((d) => d.label)).toEqual(["work"])
+    expect(result.routingNotUpdated).toBeUndefined()
+  })
+})
+
 describe("retryDraft", () => {
   const failedOn = (secrets: string[], d: typeof draft, needsAccount = false) =>
     draftAccounts(d, needsAccount)
