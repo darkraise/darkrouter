@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/darkraise/darkrouter/internal/auth"
+	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
@@ -49,11 +50,23 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	// Breaker entries are per triple. Folded per provider here because spec §6
 	// asks for provider-level signals: forty models cooling on one dead
 	// credential is one dead provider, and forty red dots would say otherwise.
+	//
+	// Only enabled credentials count, as on the Providers screen: the router
+	// drops a disabled one, so its cooldown says nothing about whether the
+	// provider can be sent to.
+	enabled := map[health.Key]bool{}
+	for providerID, creds := range summaries {
+		for _, c := range creds {
+			if c.Enabled {
+				enabled[health.Key{ProviderID: providerID, KeyID: c.ID}] = true
+			}
+		}
+	}
 	cooling := map[string]int{}
 	if s.deps.Breaker != nil {
 		now := time.Now()
 		for _, e := range s.deps.Breaker.Snapshot() {
-			if e.CoolingUntil.After(now) {
+			if e.CoolingUntil.After(now) && enabled[health.Key{ProviderID: e.Key.ProviderID, KeyID: e.Key.KeyID}] {
 				cooling[e.Key.ProviderID]++
 			}
 		}
@@ -64,12 +77,15 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		t := tileView{ID: p.ID, Name: p.Name, Enabled: p.Enabled, Cooling: cooling[p.ID]}
 		creds := summaries[p.ID]
 		t.Credentials = len(creds)
+		usable := 0
 		for _, c := range creds {
 			// The one state only the operator can fix. Everything else
 			// either recovers on its own or is a provider's problem, so
 			// it is called out rather than folded into "degraded".
 			if !c.Enabled {
 				t.NeedsAuth = true
+			} else {
+				usable++
 			}
 		}
 		switch {
@@ -82,6 +98,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			t.State = "healthy"
 		case t.Credentials == 0:
 			t.State = "unconfigured"
+		case usable == 0 && auth.IsKeyless(p.AuthStyle):
+			t.State = "healthy"
+		case usable == 0:
+			t.State = "degraded"
 		case t.Cooling > 0:
 			t.State = "degraded"
 		default:
