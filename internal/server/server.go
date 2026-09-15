@@ -37,6 +37,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/writedeadline"
 )
 
 // Version is stamped at build time with -ldflags "-X ...Version=v1.2.3".
@@ -370,7 +371,7 @@ func (s *Server) ProxyHandler() http.Handler {
 	mux.HandleFunc("POST /v1beta/models/{model}", s.authed(gm, s.handleGemini))
 	mux.HandleFunc("GET /v1beta/models", s.authed(gm, s.handleGeminiModels))
 
-	return writeDeadlines(mux, s.idleTimeout)
+	return writedeadline.Handler(mux, s.idleTimeout)
 }
 
 // idleTimeout is the live policy.timeout.idle, which also bounds a single
@@ -604,7 +605,7 @@ func (s *Server) AdminHandler() http.Handler {
 	// an orchestrator and a Prometheus scrape read them, and a session in front
 	// of either breaks it.
 	mux.Handle("/", s.adm.Handler())
-	return writeDeadlines(mux, s.idleTimeout)
+	return writedeadline.Handler(mux, s.idleTimeout)
 }
 
 func (s *Server) addWarning(w string) {

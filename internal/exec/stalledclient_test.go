@@ -18,42 +18,8 @@ import (
 	anthropicedge "github.com/darkraise/darkrouter/internal/edge/anthropic"
 	openaiedge "github.com/darkraise/darkrouter/internal/edge/openai"
 	"github.com/darkraise/darkrouter/internal/ir"
+	"github.com/darkraise/darkrouter/internal/writedeadline"
 )
-
-// perWriteDeadline bounds each write to the client the way the proxy listener
-// does: every write renews a deadline of d from now, so a client that stops
-// reading fails the write that blocks rather than pinning it forever. It is
-// repeated here because the listener's own wrapper is internal to the server.
-func perWriteDeadline(next http.Handler, d time.Duration) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&deadlineWriter{ResponseWriter: w, rc: http.NewResponseController(w), d: d}, r)
-	})
-}
-
-type deadlineWriter struct {
-	http.ResponseWriter
-	rc *http.ResponseController
-	d  time.Duration
-}
-
-func (w *deadlineWriter) extend() { _ = w.rc.SetWriteDeadline(time.Now().Add(w.d)) }
-
-func (w *deadlineWriter) WriteHeader(code int) {
-	w.extend()
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *deadlineWriter) Write(p []byte) (int, error) {
-	w.extend()
-	return w.ResponseWriter.Write(p)
-}
-
-func (w *deadlineWriter) Flush() { _ = w.FlushError() }
-
-func (w *deadlineWriter) FlushError() error {
-	w.extend()
-	return w.rc.Flush()
-}
 
 // The attempt's timer can fire in the same instant a write to the client
 // fails. The copy stopped at the write, so the failure is the client's.
@@ -156,11 +122,11 @@ func TestAClientThatStopsReadingIsNotAProviderFailure(t *testing.T) {
 
 				returned := make(chan struct{})
 				serve := tc.serve(e)
-				gw := httptest.NewServer(perWriteDeadline(http.HandlerFunc(
+				gw := httptest.NewServer(writedeadline.Handler(http.HandlerFunc(
 					func(w http.ResponseWriter, r *http.Request) {
 						defer close(returned)
 						serve(w, r)
-					}), writeDeadline))
+					}), func() time.Duration { return writeDeadline }))
 				defer gw.Close()
 
 				conn, err := net.Dial("tcp", gw.Listener.Addr().String())

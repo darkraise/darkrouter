@@ -1,11 +1,12 @@
-package server
+// Package writedeadline bounds how long a single write to a client may block.
+package writedeadline
 
 import (
 	"net/http"
 	"time"
 )
 
-// writeDeadlines bounds how long any single write to a client may block.
+// Handler bounds how long any single write to a client may block.
 //
 // Neither listener sets WriteTimeout, because it would cut a long stream at a
 // fixed age. Without some bound, though, a client that stops reading fills its
@@ -18,7 +19,7 @@ import (
 //
 // idle is policy.timeout.idle, read per request: the bound the gateway already
 // puts on a silent provider is the bound it puts on a silent client.
-func writeDeadlines(next http.Handler, idle func() time.Duration) http.Handler {
+func Handler(next http.Handler, idle func() time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d := idle()
 		if d <= 0 {
