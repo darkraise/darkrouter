@@ -7,9 +7,15 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 )
 
-var flock = syscall.Flock
+var (
+	flock        = syscall.Flock
+	openLockFile = os.OpenFile
+	// noLockBackoff is the wait before each retry of an ENOLCK.
+	noLockBackoff = []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond}
+)
 
 // Lock takes the exclusive process lock on the database at dbPath, without
 // waiting, and returns its release. It fails with ErrDatabaseInUse while
@@ -33,21 +39,37 @@ func Lock(dbPath string) (unlock func() error, err error) {
 	// and an exclusive one fails with EBADF on a read-only descriptor. A
 	// command run as a different uid than the gateway may not be able to open
 	// the file for writing, and falls back to read-only so that a local lock
-	// still refuses it for the right reason rather than an unrelated one.
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	// still refuses it for the right reason rather than an unrelated one. On
+	// NFS that fallback cannot lock at all, which cannot be told apart from
+	// the gateway holding it.
+	readOnly := false
+	f, err := openLockFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if errors.Is(err, os.ErrPermission) {
-		f, err = os.OpenFile(path, os.O_RDONLY, 0)
+		readOnly = true
+		f, err = openLockFile(path, os.O_RDONLY, 0)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", path, err)
 	}
-	if err := flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	err = flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	for _, wait := range noLockBackoff {
+		if !errors.Is(err, syscall.ENOLCK) {
+			break
+		}
+		time.Sleep(wait)
+		err = flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	}
+	if err != nil {
 		_ = f.Close()
 		switch {
 		case errors.Is(err, syscall.EWOULDBLOCK):
 			return nil, fmt.Errorf("%s: %w", dbPath, ErrDatabaseInUse)
+		case readOnly && errors.Is(err, syscall.EBADF):
+			return nil, fmt.Errorf("lock %s: the database is in use or not lockable by this user "+
+				"(the lock file is not writable, and this filesystem locks only writable files): %w",
+				path, err)
 		case errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EOPNOTSUPP),
-			errors.Is(err, syscall.ENOLCK):
+			errors.Is(err, syscall.ENOSYS), errors.Is(err, syscall.ENOLCK):
 			return nil, fmt.Errorf("lock %s: %w: %w", path, ErrLockUnavailable, err)
 		}
 		return nil, fmt.Errorf("lock %s: %w", path, err)
