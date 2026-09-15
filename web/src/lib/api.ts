@@ -61,6 +61,16 @@ export async function routingNotUpdated(write: Promise<unknown>): Promise<string
   }
 }
 
+/** The server's warning when a create committed but did not reach routing.
+ *  A create answers that as a 201 rather than an error, since an error
+ *  invites the retry that stores a second copy, so it only shows in the body. */
+export function createdButNotRouted(reply: unknown): string | undefined {
+  if (typeof reply !== "object" || reply === null) return undefined
+  const { routing_updated, warning } = reply as { routing_updated?: unknown; warning?: unknown }
+  if (routing_updated !== false) return undefined
+  return typeof warning === "string" && warning !== "" ? warning : "the gateway did not load the change"
+}
+
 /** A failure the next attempt might not repeat: the network dropped, or the
  *  server answered 5xx. A 4xx is the server's verdict on the request itself
  *  and comes back identical however often it is retried. */

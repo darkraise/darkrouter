@@ -1,4 +1,4 @@
-import { committedButNotRouted } from "../../lib/api"
+import { committedButNotRouted, createdButNotRouted } from "../../lib/api"
 import type { ProbeResult } from "../../lib/api-types"
 
 /** The slice of the api client this needs, so the orchestration can be tested
@@ -32,12 +32,6 @@ export type LocalOutcome =
 /** What a create answers once the row is stored. */
 type Created = { routing_updated?: boolean; warning?: string }
 
-/** The server's warning when a committed create did not reach routing. */
-function routingWarning(reply: Created | undefined): string | undefined {
-  if (reply?.routing_updated !== false) return undefined
-  return reply.warning || "the gateway did not load the change"
-}
-
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -56,7 +50,7 @@ async function create(api: ProviderApi, d: LocalDraft, enabled: boolean): Promis
     // here would be offering a choice with one right answer.
     ...(d.apiKey ? { auth_style: "bearer" } : {}),
   })
-  return routingWarning(reply)
+  return createdButNotRouted(reply)
 }
 
 /** Stores the key, if there is one, before anything probes the endpoint: a
@@ -68,7 +62,7 @@ async function addKey(api: ProviderApi, d: LocalDraft): Promise<string | undefin
     label: "default",
     secret: d.apiKey,
   })
-  return routingWarning(reply)
+  return createdButNotRouted(reply)
 }
 
 async function probe(api: ProviderApi, id: string): Promise<LocalOutcome> {

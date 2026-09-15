@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { toast } from "darkraise-ui"
 import { AddKeylessDialog } from "./add-keyless-dialog"
 import type { Preset } from "../../lib/api-types"
 
@@ -92,6 +93,35 @@ describe("adding a keyless provider", () => {
     rerender(true)
 
     expect(screen.getByLabelText(/import free models only/i)).not.toBeChecked()
+  })
+
+  it("warns when the provider was stored but the gateway did not load it", async () => {
+    // A create that committed answers 201 even when the reload failed, so the
+    // only sign is in the body. A plain "added" would tell the operator the
+    // provider is serving when the gateway is still routing without it.
+    const success = vi.spyOn(toast, "success")
+    const warning = vi.spyOn(toast, "warning")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (_url, init) =>
+        new Response(
+          JSON.stringify(
+            init?.method === "POST"
+              ? { id: "aihorde", routing_updated: false, warning: "still routing with the previous settings" }
+              : {},
+          ),
+          { status: init?.method === "POST" ? 201 : 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    )
+    const { onDone } = mount()
+    await userEvent.click(screen.getByRole("button", { name: /Add AI Horde/ }))
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith("aihorde"))
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("still routing with the previous settings"))
+    expect(success).not.toHaveBeenCalled()
+    success.mockRestore()
+    warning.mockRestore()
   })
 
   it("renders nothing without a preset to add", () => {

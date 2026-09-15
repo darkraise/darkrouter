@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "darkraise-ui"
-import { POLL, api, routingNotUpdated } from "../../lib/api"
+import { POLL, api, createdButNotRouted, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import {
   keys,
@@ -105,6 +105,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
         free_models_only: freeOnly,
       }),
     success: `${preset.name} added`,
+    warning: (reply) => createdButNotRouted(reply),
     invalidates: [keys.providers, keys.health, keys.overview, keys.models],
   })
 
