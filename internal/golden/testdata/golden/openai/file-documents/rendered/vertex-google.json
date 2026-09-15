@@ -1,0 +1,36 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Summarise these files."
+        },
+        {
+          "inlineData": {
+            "data": "cGxhaW4gbm90ZXMK",
+            "mimeType": "text/plain"
+          }
+        },
+        {
+          "inlineData": {
+            "data": "IyBIZWFkaW5nCgpib2R5Cg==",
+            "mimeType": "text/markdown"
+          }
+        },
+        {
+          "inlineData": {
+            "data": "JVBERi0xLjQK",
+            "mimeType": "application/pdf"
+          }
+        },
+        {
+          "inlineData": {
+            "data": "UEsDBBQAAAA=",
+            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}
