@@ -107,8 +107,13 @@ func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
 		// rejected separates a refusal of the credential from a probe that
 		// could not finish — a timeout, a rate limit, an outage — so a caller
 		// deciding whether to discard the key does not discard a good one.
+		//
+		// auth_style is the style resolved above, which a caller cannot
+		// derive from the provider row alone: an empty one means the
+		// preset's. It tells the caller whether a rejected secret is one the
+		// operator can download again.
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok": false, "probe": kind, "latency_ms": latency,
+			"ok": false, "probe": kind, "latency_ms": latency, "auth_style": style,
 			"error":    redact.Error(perr, probeSecrets(style, cred.Secret)...).Error(),
 			"rejected": errors.As(perr, new(rejectedCredential)),
 		})
