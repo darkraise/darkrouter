@@ -273,7 +273,7 @@ func TestConflictRecordedEvenWhenEntryFailsToPreset(t *testing.T) {
 		AuthType: "oauth",
 		Transport: nineTransport{
 			BaseURL: "https://api.example.com/v1/messages",
-			Quirks:  map[string]bool{"dropClientMetadata": true},
+			Quirks:  map[string]any{"dropClientMetadata": true},
 		},
 	}}
 
@@ -292,7 +292,7 @@ func TestConflictRecordedEvenWhenEntryFailsToPreset(t *testing.T) {
 func TestNewProviderQuirkIsReportedNotApplied(t *testing.T) {
 	nine := []nineEntry{{ID: "freshquirk", Transport: nineTransport{
 		BaseURL: "https://api.freshquirk.example/v1",
-		Quirks:  map[string]bool{"dropClientMetadata": true},
+		Quirks:  map[string]any{"dropClientMetadata": true},
 	}}}
 
 	got := mergeSources(nil, map[string]displayEntry{}, nine)
@@ -325,7 +325,7 @@ func TestUnmappedQuirkIsReportedNotApplied(t *testing.T) {
 	omni := []entry{{id: "p", baseURL: "https://api.example.com/v1"}}
 	nine := []nineEntry{{ID: "p", Transport: nineTransport{
 		BaseURL: "https://api.example.com/v1",
-		Quirks:  map[string]bool{"dropClientMetadata": true},
+		Quirks:  map[string]any{"dropClientMetadata": true},
 	}}}
 
 	got := mergeSources(omni, map[string]displayEntry{}, nine)
@@ -348,7 +348,7 @@ func TestUnmappedQuirkIsReportedNotApplied(t *testing.T) {
 func TestNineRouterOnlyQuirkWinnerIsNotOmniRoute(t *testing.T) {
 	nine := []nineEntry{{ID: "kimchi", Transport: nineTransport{
 		BaseURL: "https://api.kimchi.example/v1",
-		Quirks:  map[string]bool{"dropClientMetadata": true},
+		Quirks:  map[string]any{"dropClientMetadata": true},
 	}}}
 	got := mergeSources(nil, map[string]displayEntry{}, nine)
 	var found bool
@@ -457,7 +457,7 @@ func TestNineRouterPlainOpenAIFormatIsKept(t *testing.T) {
 // mergeSources it is only ever exercised with one quirk at a time, which
 // leaves the off-flag and ordering rules untested.
 func TestQuirkConflictsReportsWithoutApplying(t *testing.T) {
-	got := quirkConflicts("acme", srcOmni, map[string]bool{
+	got := quirkConflicts("acme", srcOmni, map[string]any{
 		"zebraMode":          true,
 		"alphaMode":          true,
 		"disabledQuirk":      false,

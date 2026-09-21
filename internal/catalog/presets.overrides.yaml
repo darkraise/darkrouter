@@ -167,6 +167,7 @@ lmstudio:
     style: none
   surfaces: [llm, embedding]
   no_models_dev: true
+  no_litellm: true
   website: https://lmstudio.ai
   quirks: []
 
@@ -204,6 +205,7 @@ vllm:
     style: none
   surfaces: [llm]
   no_models_dev: true
+  no_litellm: true
   website: https://docs.vllm.ai
   quirks: []
 
@@ -215,6 +217,7 @@ llama-cpp:
     style: none
   surfaces: [llm, embedding]
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/ggml-org/llama.cpp
   quirks: []
 
@@ -226,6 +229,7 @@ llamafile:
     style: none
   surfaces: [llm]
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/Mozilla-Ocho/llamafile
   quirks: []
 
@@ -237,6 +241,7 @@ oobabooga:
     style: none
   surfaces: [llm]
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/oobabooga/text-generation-webui
   quirks: []
 
@@ -252,6 +257,7 @@ xinference:
   # rerank request to a 404.
   surfaces: [llm, embedding]
   no_models_dev: true
+  no_litellm: true
   website: https://inference.readthedocs.io
   quirks: []
 
@@ -263,6 +269,7 @@ docker-model-runner:
     style: none
   surfaces: [llm, embedding]
   no_models_dev: true
+  no_litellm: true
   website: https://docs.docker.com/ai/model-runner
   quirks: []
 
@@ -286,6 +293,7 @@ mlx-lm:
     style: none
   surfaces: [llm]
   no_models_dev: true
+  no_litellm: true
   website: https://github.com/ml-explore/mlx-lm
   quirks: []
 
@@ -376,6 +384,7 @@ auggie:
     style: optional
   surfaces: [llm]
   no_models_dev: true
+  no_litellm: true
   website: https://augmentcode.com
 
 ai21:

@@ -45,8 +45,9 @@ type nineTransport struct {
 	// this phase's "openaicompat" kind can serve. Everything else ("claude",
 	// "openai-responses", "ollama", "cursor", "kiro", "gemini-cli",
 	// "commandcode", ...) is a different protocol entirely.
-	Format string          `json:"format"`
-	Quirks map[string]bool `json:"quirks"`
+	Format string `json:"format"`
+	// Upstream quirks include boolean flags and structured configuration.
+	Quirks map[string]any `json:"quirks"`
 }
 
 // nineAuth is the header block upstream publishes per credential kind. It
