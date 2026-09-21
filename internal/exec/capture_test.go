@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,8 +28,6 @@ func capturingExecutor(t *testing.T, upstream string, maxBytes int) (*Executor, 
 		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: log})
 	return e, log
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 func TestCaptureStoresTextBodiesWhenEnabled(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
