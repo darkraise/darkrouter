@@ -7,28 +7,57 @@ package storetest
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-// Migrated opens a migrated database in a temp directory.
-//
-// It mirrors store's own openTest plus migrated helpers exactly; if those
-// grow a step, this has to grow it too. The alternative — every package
-// reimplementing Open plus Migrate — is how two packages end up testing
-// against differently-shaped databases.
+// migratedImage runs the real migrations once per test binary. Close checkpoints
+// the WAL before the database bytes are read; no live handles are shared.
+// Migration tests in package store still exercise fresh databases directly.
+var migratedImage = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "darkrouter-test-schema-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "template.db")
+	db, err := store.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := db.Close(); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+})
+
+// Migrated opens an isolated copy of the migrated schema in a temp directory.
+// Replaying every migration for every API test dominates race-test runtime.
+// Copying the closed database keeps the same schema and independent data while
+// avoiding that repeated work.
 func Migrated(t *testing.T) *store.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	image, err := migratedImage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "test.db")
+	if err := os.WriteFile(path, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := db.Migrate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 	return db
 }
 

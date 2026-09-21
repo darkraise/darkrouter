@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/adapter/openaicompat"
 	"github.com/darkraise/darkrouter/internal/catalog"
@@ -189,14 +191,15 @@ func doSite(t *testing.T, s *Server, site string, cookie *http.Cookie, token, me
 	return w
 }
 
-// mustHash is a bcrypt hash of password, or a fatal error.
+// mustHash creates fixture credentials at minimum cost, like testHash.
+// Password and API tests still exercise HashPassword at the production cost.
 func mustHash(t *testing.T, password string) string {
 	t.Helper()
-	h, err := HashPassword(password)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h
+	return string(h)
 }
 
 // newServerWithSession returns a server whose console is claimed by one admin

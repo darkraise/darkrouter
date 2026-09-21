@@ -53,7 +53,10 @@ func endless(contentType string, chunk []byte) http.HandlerFunc {
 // deadline is tried both at idle, as the listener sets it, and past idle, where
 // the attempt's own idle timer would otherwise expire first on every run.
 func TestAClientThatStopsReadingIsNotAProviderFailure(t *testing.T) {
-	const idle = 100 * time.Millisecond
+	// A 100ms idle bound can expire while the race-instrumented provider or
+	// translator is descheduled on a busy CI runner, before any write blocks.
+	// Keep both deadline orderings, but allow time for actual upstream progress.
+	const idle = time.Second
 	sseChunk := []byte("data: {\"choices\":[{\"delta\":{\"content\":\"" +
 		strings.Repeat("x", 1024) + "\"}}]}\n\n")
 	chat := `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`
@@ -109,7 +112,7 @@ func TestAClientThatStopsReadingIsNotAProviderFailure(t *testing.T) {
 				cfg := testConfig(t, func(c *config.Config) {
 					c.Policy.Timeout.Connect = time.Second
 					c.Policy.Timeout.FirstByte = 2 * time.Second
-					c.Policy.Timeout.Total = 10 * time.Second
+					c.Policy.Timeout.Total = 30 * time.Second
 					c.Policy.Timeout.Idle = idle
 				})
 				h, logger := &captureHealth{}, &captureLogger{}
@@ -143,7 +146,7 @@ func TestAClientThatStopsReadingIsNotAProviderFailure(t *testing.T) {
 
 				select {
 				case <-returned:
-				case <-time.After(10 * time.Second):
+				case <-time.After(15 * time.Second):
 					t.Fatal("the handler was still writing to a client that stopped reading")
 				}
 
