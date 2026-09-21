@@ -114,11 +114,13 @@ func contestedFields(id, omniRaw string, n nineEntry) []conflict {
 // preset as it stands: srcOmni when OmniRoute's structural fields won the
 // contested id, srcDarkrouter when the id is new to darkrouter and no
 // upstream "won" anything.
-func quirkConflicts(id, winner string, quirks map[string]bool) []conflict {
+func quirkConflicts(id, winner string, quirks map[string]any) []conflict {
 	var out []conflict
 	names := make([]string, 0, len(quirks))
-	for q, on := range quirks {
-		if on {
+	for q, value := range quirks {
+		// Only explicit false/null disable a declaration. Structured values
+		// still need review, but must never become runtime preset quirks.
+		if value != nil && value != false {
 			names = append(names, q)
 		}
 	}

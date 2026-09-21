@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -35,7 +36,7 @@ func TestScrapeNineRouterReadsAPlainEntry(t *testing.T) {
 	if e.Display.Notice.APIKeyURL != "https://cloud.cerebras.ai/platform" {
 		t.Errorf("APIKeyURL = %q", e.Display.Notice.APIKeyURL)
 	}
-	if len(e.Transport.Quirks) != 1 || !e.Transport.Quirks["dropClientMetadata"] {
+	if len(e.Transport.Quirks) != 1 || e.Transport.Quirks["dropClientMetadata"] != true {
 		t.Errorf("Quirks = %v", e.Transport.Quirks)
 	}
 }
@@ -116,5 +117,38 @@ func write(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Upstream added array-valued quirks in September 2026. They must survive
+// decoding and reach the review table without being applied to runtime presets.
+func TestScrapeNineRouterStructuredQuirks(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "deepseek.js", `export default {
+   id: "deepseek", category: "apikey",
+   transport: { baseUrl: "https://api.deepseek.com/v1", quirks: {
+     claudeSupportedToolTypes: ["web_search_20250305", "web_search_20260209"],
+     forceAutoToolChoiceModels: ["muse-spark-1.3-contributor-free"],
+     options: { mode: "strict" }, enabled: true, disabled: false, absent: null
+   }}
+ };`)
+	entries, err := scrapeNineRouter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mergeSources(nil, nil, entries)
+	if _, ok := got.Presets["deepseek"]; !ok {
+		t.Fatal("provider was dropped")
+	}
+	if len(got.Presets["deepseek"].Quirks) != 0 {
+		t.Fatal("upstream quirks were applied")
+	}
+	var fields []string
+	for _, c := range got.Conflicts {
+		fields = append(fields, c.Field)
+	}
+	want := []string{"quirk:claudeSupportedToolTypes", "quirk:enabled", "quirk:forceAutoToolChoiceModels", "quirk:options"}
+	if !slices.Equal(fields, want) {
+		t.Fatalf("conflicts = %v, want %v", fields, want)
 	}
 }

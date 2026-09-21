@@ -506,12 +506,11 @@ func TestADiscoveredPriceIsGradedByWhoSetIt(t *testing.T) {
 	}
 }
 
-// The rule only bites if the shipped preset data marks the aggregators. Both
-// serve someone else's listing: hackclub's is OpenRouter's schema verbatim,
-// down to the openrouter/auto row.
+// The rule only bites if the shipped preset data marks the aggregators.
+// Hackclub was removed upstream; only require providers still in the registry.
 func TestTheShippedAggregatorPresetsResellTheirPrices(t *testing.T) {
 	ps := Embedded()
-	for _, id := range []string{"hackclub", "naga-ac", "openrouter", "requesty"} {
+	for _, id := range []string{"naga-ac", "openrouter", "requesty"} {
 		p, ok := ps[id]
 		if !ok {
 			t.Fatalf("%s is not a shipped preset", id)

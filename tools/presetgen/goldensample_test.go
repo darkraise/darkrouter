@@ -50,7 +50,7 @@ func TestGoldenSampleDecodesTheRealSchema(t *testing.T) {
 			Transport: nineTransport{
 				BaseURL:     "https://api.cerebras.ai/v1/chat/completions",
 				ValidateURL: "https://api.cerebras.ai/v1/models",
-				Quirks:      map[string]bool{"dropClientMetadata": true},
+				Quirks:      map[string]any{"dropClientMetadata": true},
 			},
 		},
 	}, {
@@ -114,7 +114,7 @@ func TestGoldenSampleDecodesTheRealSchema(t *testing.T) {
 				BaseURL: "https://api.anthropic.com/v1/messages",
 				Format:  "claude",
 				Auth:    nineAuth{APIKey: nineAuthKind{Header: "x-api-key"}},
-				Quirks:  map[string]bool{"cloakToolsOnOAuth": true},
+				Quirks:  map[string]any{"cloakToolsOnOAuth": true},
 			},
 		},
 	}} {
