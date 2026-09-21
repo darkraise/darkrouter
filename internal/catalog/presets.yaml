@@ -12,7 +12,6 @@
 
 agentrouter:
   name: AgentRouter
-  resells_prices: true
   kind: anthropic
   base_url: https://agentrouter.org/v1
   auth:
@@ -23,6 +22,7 @@ agentrouter:
   no_litellm: true
   free_tier: true
   website: https://agentrouter.org
+  resells_prices: true
 agnes:
   name: Agnes AI
   kind: openaicompat
@@ -35,6 +35,7 @@ agnes:
   no_litellm: true
   free_tier: true
   website: https://agnes-ai.com
+  models_url: https://apihub.agnes-ai.com/v1/models
 ai21:
   name: AI21 Labs
   kind: openaicompat
@@ -43,7 +44,7 @@ ai21:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: ai21
   litellm_id: ai21
   free_tier: true
   website: https://www.ai21.com
@@ -63,7 +64,6 @@ aihorde:
   models_url: https://oai.aihorde.net/v1/models
 aimlapi:
   name: AI/ML API
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.aimlapi.com/v1
   auth:
@@ -73,6 +73,7 @@ aimlapi:
   no_models_dev: true
   litellm_id: aiml
   website: https://aimlapi.com
+  resells_prices: true
 ainative:
   name: AINative Studio
   kind: openaicompat
@@ -271,7 +272,6 @@ anthropic-oauth:
       port: 54545
 anyapi:
   name: AnyAPI AI
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.anyapi.ai/v1
   auth:
@@ -282,6 +282,7 @@ anyapi:
   no_litellm: true
   free_tier: true
   website: https://anyapi.ai
+  resells_prices: true
   models_url: https://api.anyapi.ai/v1/models
 api-airforce:
   name: Api.airforce
@@ -297,6 +298,18 @@ api-airforce:
   website: https://api.airforce
   api_key_url: https://api.airforce
   models_url: https://api.airforce/v1/models
+arcee-ai:
+  name: Arcee AI
+  kind: openaicompat
+  base_url: https://api.arcee.ai/api/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://arcee.ai
 auggie:
   name: Augment (Auggie CLI)
   kind: openaicompat
@@ -573,17 +586,6 @@ cloudflare-ai:
   free_tier: true
   website: https://developers.cloudflare.com/workers-ai
   api_key_url: https://dash.cloudflare.com/profile/api-tokens
-clova-studio:
-  name: Naver CLOVA Studio
-  kind: openaicompat
-  base_url: https://clovastudio.stream.ntruss.com/v1/openai
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  no_litellm: true
-  website: https://api.ncloud-docs.com/docs/en/ai-naver-clovastudio-summary
 codestral:
   name: Codestral
   kind: openaicompat
@@ -797,6 +799,18 @@ electronhub:
   free_tier: true
   website: https://www.electronhub.ai
   models_url: https://api.electronhub.ai/v1/models
+eurouter:
+  name: EURouter
+  kind: openaicompat
+  base_url: https://api.eurouter.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://eurouter.ai
+  models_url: https://api.eurouter.ai/v1/models
 factory:
   name: Factory
   kind: openaicompat
@@ -810,7 +824,6 @@ factory:
   website: https://factory.ai
 fastrouter:
   name: FastRouter
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.fastrouter.ai/api/v1
   auth:
@@ -821,6 +834,7 @@ fastrouter:
   no_litellm: true
   free_tier: true
   website: https://fastrouter.ai
+  resells_prices: true
   models_url: https://api.fastrouter.ai/api/v1/models
 featherless:
   name: Featherless
@@ -844,7 +858,6 @@ featherless-ai:
     - llm
   no_models_dev: true
   litellm_id: featherless_ai
-  free_tier: true
   website: https://featherless.ai
 fireworks:
   name: Fireworks AI
@@ -1024,6 +1037,18 @@ glm-cn:
   no_litellm: true
   website: https://open.bigmodel.cn
   api_key_url: https://open.bigmodel.cn/usercenter/apikeys
+greenpt:
+  name: GreenPT
+  kind: openaicompat
+  base_url: https://api.greenpt.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: greenpt
+  no_litellm: true
+  website: https://greenpt.com
+  models_url: https://api.greenpt.ai/v1/models
 groq:
   name: Groq
   kind: openaicompat
@@ -1039,19 +1064,6 @@ groq:
   free_tier: true
   website: https://groq.com
   api_key_url: https://console.groq.com/keys
-hackclub:
-  name: Hackclub AI
-  kind: openaicompat
-  base_url: https://ai.hackclub.com/proxy/v1
-  auth:
-    style: bearer
-  surfaces:
-    - llm
-  no_models_dev: true
-  no_litellm: true
-  free_tier: true
-  website: https://ai.hackclub.com
-  models_url: https://ai.hackclub.com/proxy/v1/models
 haiper:
   name: Haiper
   kind: openaicompat
@@ -1224,7 +1236,6 @@ kie:
   website: https://kie.ai
 kilo-gateway:
   name: Kilo Gateway
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.kilo.ai/api/gateway
   auth:
@@ -1234,6 +1245,7 @@ kilo-gateway:
   no_models_dev: true
   no_litellm: true
   website: https://kilo.ai
+  resells_prices: true
   api_key_url: https://kilo.ai/dashboard?tab=apiKeys
   models_url: https://api.kilo.ai/api/gateway/models
 kimchi:
@@ -1353,7 +1365,6 @@ llamafile:
   website: https://github.com/Mozilla-Ocho/llamafile
 llamagate:
   name: LlamaGate
-  resells_prices: true
   kind: openaicompat
   base_url: https://llamagate.ai/v1
   auth:
@@ -1363,6 +1374,7 @@ llamagate:
   no_models_dev: true
   litellm_id: llamagate
   website: https://llamagate.ai
+  resells_prices: true
 llm-kiwi:
   name: LLM.Kiwi
   kind: openaicompat
@@ -1392,7 +1404,6 @@ llm7:
   models_url: https://api.llm7.io/v1/models
 llmgateway:
   name: LLM Gateway
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.llmgateway.io/v1
   auth:
@@ -1403,6 +1414,7 @@ llmgateway:
   no_litellm: true
   free_tier: true
   website: https://llmgateway.io
+  resells_prices: true
   models_url: https://api.llmgateway.io/v1/models
 lmstudio:
   name: LM Studio
@@ -1416,6 +1428,19 @@ lmstudio:
   no_models_dev: true
   no_litellm: true
   website: https://lmstudio.ai
+logfare:
+  name: Logfare
+  kind: openaicompat
+  base_url: https://logfare.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://logfare.ai
+  models_url: https://logfare.ai/v1/models
 longcat:
   name: LongCat AI
   kind: openaicompat
@@ -1597,7 +1622,6 @@ naga-ai:
   models_url: https://api.naga.ac/v1/models
 nanogpt:
   name: NanoGPT
-  resells_prices: true
   kind: openaicompat
   base_url: https://nano-gpt.com/api/v1
   auth:
@@ -1607,6 +1631,7 @@ nanogpt:
   no_models_dev: true
   no_litellm: true
   website: https://nano-gpt.com
+  resells_prices: true
   models_url: https://nano-gpt.com/api/v1/models
 nara:
   name: NaraRouter
@@ -1649,7 +1674,7 @@ nebius:
 nlpcloud:
   name: NLP Cloud
   kind: openaicompat
-  base_url: https://api.nlpcloud.io/v1
+  base_url: https://api.nlpcloud.io/v1/gpu
   auth:
     style: bearer
   surfaces:
@@ -1761,6 +1786,18 @@ ollama-cloud:
   free_tier: true
   website: https://ollama.com/settings/keys
   models_url: https://ollama.com/v1/models
+oneminai:
+  name: 1min.AI
+  kind: openaicompat
+  base_url: https://api.1min.ai/api/chat-with-ai
+  auth:
+    style: api-key
+    header: api-key
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://1min.ai
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat
@@ -1843,7 +1880,6 @@ openference-api:
   website: https://openference.com
 openrouter:
   name: OpenRouter
-  resells_prices: true
   kind: openaicompat
   base_url: https://openrouter.ai/api/v1
   auth:
@@ -1854,6 +1890,7 @@ openrouter:
   litellm_id: openrouter
   free_tier: true
   website: https://openrouter.ai
+  resells_prices: true
   api_key_url: https://openrouter.ai/settings/keys
   quirks:
     - echo-reasoning-content
@@ -1869,9 +1906,20 @@ openvecta:
   no_litellm: true
   free_tier: true
   website: https://openvecta.com
+opper:
+  name: Opper
+  kind: openaicompat
+  base_url: https://api.opper.ai/v3/compat
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: opper
+  no_litellm: true
+  website: https://opper.ai
+  models_url: https://api.opper.ai/v3/compat/models
 orcarouter:
   name: OrcaRouter
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.orcarouter.ai/v1
   auth:
@@ -1881,6 +1929,7 @@ orcarouter:
   models_dev_id: orcarouter
   no_litellm: true
   website: https://www.orcarouter.ai
+  resells_prices: true
 ovhcloud:
   name: OVHcloud AI
   kind: openaicompat
@@ -2062,7 +2111,6 @@ reka:
   website: https://docs.reka.ai/chat/overview
 requesty:
   name: Requesty
-  resells_prices: true
   kind: openaicompat
   base_url: https://router.requesty.ai/v1
   auth:
@@ -2073,6 +2121,7 @@ requesty:
   no_litellm: true
   free_tier: true
   website: https://requesty.ai
+  resells_prices: true
   models_url: https://router.requesty.ai/v1/models
 routeway:
   name: Routeway
@@ -2136,6 +2185,19 @@ sealion:
   no_litellm: true
   free_tier: true
   website: https://sea-lion.ai
+seekai:
+  name: SeekAi
+  kind: openaicompat
+  base_url: https://seekai.cc/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://seekai.cc
+  models_url: https://seekai.cc/v1/models
 sensenova:
   name: SenseNova
   kind: openaicompat
@@ -2274,7 +2336,6 @@ together:
   api_key_url: https://api.together.xyz/settings/api-keys
 token-kiosk:
   name: Token Kiosk
-  resells_prices: true
   kind: openaicompat
   base_url: https://agent-router.gaib.ai/v1
   auth:
@@ -2284,6 +2345,7 @@ token-kiosk:
   no_models_dev: true
   no_litellm: true
   website: https://agent-router.gaib.ai
+  resells_prices: true
   models_url: https://agent-router.gaib.ai/v1/models
 tokenreply:
   name: TokenReply
@@ -2300,7 +2362,6 @@ tokenreply:
   models_url: https://api.tokenreply.com/v1/models
 tokenrouter:
   name: TokenRouter
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.tokenrouter.com/v1
   auth:
@@ -2311,6 +2372,7 @@ tokenrouter:
   no_litellm: true
   free_tier: true
   website: https://tokenrouter.com
+  resells_prices: true
   api_key_url: https://www.tokenrouter.com
   models_url: https://api.tokenrouter.com/v1/models
 typhoon:
@@ -2325,6 +2387,17 @@ typhoon:
   no_litellm: true
   free_tier: true
   website: https://docs.opentyphoon.ai
+uc-direct:
+  name: UC Direct (uncensored.com)
+  kind: openaicompat
+  base_url: https://api.uncensored.com/api/v1
+  auth:
+    style: x-api-key
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://uncensored.com
 udio:
   name: Udio
   kind: openaicompat
@@ -2349,9 +2422,9 @@ uncloseai:
   no_litellm: true
   free_tier: true
   website: https://uncloseai.com
+  models_url: https://hermes.ai.unturf.com/v1/models
 unorouter:
   name: UnoRouter
-  resells_prices: true
   kind: openaicompat
   base_url: https://api.unorouter.com/v1
   auth:
@@ -2362,6 +2435,7 @@ unorouter:
   no_litellm: true
   free_tier: true
   website: https://unorouter.ai
+  resells_prices: true
   models_url: https://api.unorouter.com/v1/models
 upstage:
   name: Upstage
@@ -2399,7 +2473,6 @@ venice:
   api_key_url: https://venice.ai/settings/api
 vercel-ai-gateway:
   name: Vercel AI Gateway
-  resells_prices: true
   kind: openaicompat
   base_url: https://ai-gateway.vercel.sh/v1
   auth:
@@ -2409,6 +2482,7 @@ vercel-ai-gateway:
   models_dev_id: vercel
   litellm_id: vercel_ai_gateway
   website: https://vercel.com/docs/ai-gateway
+  resells_prices: true
   api_key_url: https://vercel.com/dashboard/~/ai-gateway
 vertex:
   name: Google Vertex AI
@@ -2601,6 +2675,18 @@ xinference:
   no_models_dev: true
   no_litellm: true
   website: https://inference.readthedocs.io
+xkiro:
+  name: xKiro
+  kind: openaicompat
+  base_url: https://api.xkiro.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://xkiro.com
 yi:
   name: Yi (01.AI)
   kind: openaicompat
@@ -2638,7 +2724,6 @@ zai:
   website: https://open.bigmodel.cn
 zenmux:
   name: ZenMux
-  resells_prices: true
   kind: openaicompat
   base_url: https://zenmux.ai/api/v1
   auth:
@@ -2649,6 +2734,7 @@ zenmux:
   no_litellm: true
   free_tier: true
   website: https://zenmux.ai
+  resells_prices: true
   models_url: https://zenmux.ai/api/v1/models
 zerolimitai:
   name: ZeroLimitAI

@@ -2,12 +2,13 @@
 #
 # Which upstream supplied each structural field. Price provenance is a
 # runtime fact and lives in the models.price_source column instead.
-omniroute_sha: 6cd4d38e2
-ninerouter_sha: 699edac3
+omniroute_sha: 7a921299
+ninerouter_sha: a8c9d38
 presets:
   agentrouter:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   agnes:
     base_url: omniroute
@@ -15,6 +16,7 @@ presets:
     website: omniroute
   ai21:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   aihorde:
@@ -23,7 +25,9 @@ presets:
     website: omniroute
   aimlapi:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
+    resells_prices: override
     website: omniroute
   ainative:
     base_url: omniroute
@@ -64,6 +68,7 @@ presets:
   anthropic:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     model_traits: override
     models_dev_id: override
     name: omniroute
@@ -73,6 +78,7 @@ presets:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     models_dev_id: override
     name: override
     oauth: override
@@ -82,9 +88,14 @@ presets:
   anyapi:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   api-airforce:
     api_key_url: 9router
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
+  arcee-ai:
     base_url: omniroute
     name: omniroute
     website: omniroute
@@ -93,6 +104,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     surfaces: override
     website: override
@@ -119,6 +131,7 @@ presets:
     website: omniroute
   baseten:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   bazaarlink:
@@ -130,6 +143,7 @@ presets:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     models_dev_id: override
     name: override
     quirks: override
@@ -157,6 +171,7 @@ presets:
   cerebras:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     website: omniroute
@@ -191,20 +206,19 @@ presets:
     website: omniroute
   cloudflare-ai:
     api_key_url: 9router
-    base_url: omniroute
-    name: omniroute
-    website: omniroute
-  clova-studio:
-    base_url: omniroute
+    base_url: override
+    litellm_id: override
     name: omniroute
     website: omniroute
   codestral:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   cohere:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     quirks: override
@@ -228,10 +242,12 @@ presets:
     website: omniroute
   databricks:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   deepinfra:
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     surfaces: override
@@ -241,6 +257,7 @@ presets:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     models_dev_id: override
     name: override
     quirks: override
@@ -267,6 +284,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
@@ -283,6 +301,10 @@ presets:
     base_url: omniroute
     name: omniroute
     website: omniroute
+  eurouter:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
   factory:
     base_url: omniroute
     name: omniroute
@@ -290,19 +312,23 @@ presets:
   fastrouter:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   featherless:
     api_key_url: 9router
     base_url: 9router
+    litellm_id: override
     name: 9router
     website: 9router
   featherless-ai:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   fireworks:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     model_aliases: override
     models_dev_id: override
     name: omniroute
@@ -334,6 +360,7 @@ presets:
     website: omniroute
   friendliai:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   galadriel:
@@ -343,12 +370,14 @@ presets:
   gemini:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     surfaces: override
     website: omniroute
   gigachat:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   gitlawb:
@@ -365,17 +394,18 @@ presets:
     base_url: 9router
     name: 9router
     website: 9router
+  greenpt:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
   groq:
     api_key_url: 9router
     base_url: omniroute
     free_tier: override
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     surfaces: override
-    website: omniroute
-  hackclub:
-    base_url: omniroute
-    name: omniroute
     website: omniroute
   haiper:
     base_url: omniroute
@@ -395,6 +425,7 @@ presets:
     website: omniroute
   heroku:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   huggingface:
@@ -404,6 +435,7 @@ presets:
   hyperbolic:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   ideogram:
@@ -416,6 +448,7 @@ presets:
     website: omniroute
   inception:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   inference-net:
@@ -438,6 +471,7 @@ presets:
     api_key_url: 9router
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   kimchi:
     base_url: 9router
@@ -453,12 +487,14 @@ presets:
     name: omniroute
   lambda-ai:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   lemonade:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     name: override
     no_models_dev: override
     quirks: override
@@ -481,6 +517,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
@@ -490,13 +527,16 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
     website: override
   llamagate:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
+    resells_prices: override
     website: omniroute
   llm-kiwi:
     base_url: omniroute
@@ -510,16 +550,22 @@ presets:
   llmgateway:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   lmstudio:
     auth: override
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
     website: override
+  logfare:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
   longcat:
     base_url: omniroute
     name: omniroute
@@ -530,16 +576,19 @@ presets:
     website: omniroute
   meta-llama:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   minimax:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   mistral:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     quirks: override
@@ -554,6 +603,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
@@ -577,6 +627,7 @@ presets:
   morph:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   naga-ac:
@@ -590,6 +641,7 @@ presets:
   nanogpt:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   nara:
     base_url: omniroute
@@ -602,10 +654,12 @@ presets:
   nebius:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   nlpcloud:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   nous-research:
@@ -614,10 +668,12 @@ presets:
     website: omniroute
   novita:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   nscale:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   nube:
@@ -627,6 +683,7 @@ presets:
   nvidia:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     website: omniroute
@@ -639,12 +696,19 @@ presets:
     base_url: override
     capability_probe: override
     kind: override
+    litellm_id: override
     name: override
     no_models_dev: override
     quirks: override
     surfaces: override
     website: override
   ollama-cloud:
+    base_url: omniroute
+    litellm_id: override
+    models_url: override
+    name: omniroute
+    website: omniroute
+  oneminai:
     base_url: omniroute
     name: omniroute
     website: omniroute
@@ -653,6 +717,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
@@ -664,6 +729,7 @@ presets:
   openai:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     quirks: override
@@ -686,25 +752,34 @@ presets:
   openrouter:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     quirks: override
+    resells_prices: override
     website: omniroute
   openvecta:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
+  opper:
     base_url: omniroute
     name: omniroute
     website: omniroute
   orcarouter:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   ovhcloud:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   perplexity:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     website: omniroute
@@ -735,6 +810,7 @@ presets:
     website: omniroute
   publicai:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   qianfan:
@@ -751,6 +827,7 @@ presets:
     website: 9router
   qwen-cloud:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   regolo:
@@ -764,6 +841,7 @@ presets:
   requesty:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   routeway:
     base_url: omniroute
@@ -772,17 +850,24 @@ presets:
   sambanova:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   sarvam:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   scaleway:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   sealion:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
+  seekai:
     base_url: omniroute
     name: omniroute
     website: omniroute
@@ -796,7 +881,8 @@ presets:
     name: omniroute
     website: omniroute
   snowflake:
-    base_url: omniroute
+    base_url: override
+    litellm_id: override
     name: omniroute
     website: omniroute
   sparkdesk:
@@ -826,11 +912,13 @@ presets:
   tencent:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   together:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     surfaces: override
@@ -838,6 +926,7 @@ presets:
   token-kiosk:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   tokenreply:
     base_url: omniroute
@@ -847,8 +936,13 @@ presets:
     api_key_url: 9router
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   typhoon:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
+  uc-direct:
     base_url: omniroute
     name: omniroute
     website: omniroute
@@ -863,6 +957,7 @@ presets:
   unorouter:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   upstage:
     base_url: omniroute
@@ -881,14 +976,17 @@ presets:
   vercel-ai-gateway:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
+    resells_prices: override
     website: omniroute
   vertex:
     api_key_url: 9router
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     models_dev_id: override
     name: override
     publisher: override
@@ -899,6 +997,7 @@ presets:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     models_dev_id: override
     name: override
     publisher: override
@@ -910,6 +1009,7 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
@@ -920,17 +1020,20 @@ presets:
     website: omniroute
   volcengine:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   volcengine-ark:
     api_key_url: 9router
     base_url: 9router
+    litellm_id: override
     name: 9router
     website: 9router
   voyage:
     auth: override
     base_url: override
     kind: override
+    litellm_id: override
     name: override
     no_models_dev: override
     surfaces: override
@@ -941,6 +1044,7 @@ presets:
     website: omniroute
   wandb:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   writer:
@@ -954,6 +1058,7 @@ presets:
   xai:
     api_key_url: 9router
     base_url: omniroute
+    litellm_id: override
     models_dev_id: override
     name: omniroute
     website: omniroute
@@ -976,10 +1081,15 @@ presets:
     base_url: override
     kind: override
     name: override
+    no_litellm: override
     no_models_dev: override
     quirks: override
     surfaces: override
     website: override
+  xkiro:
+    base_url: omniroute
+    name: omniroute
+    website: omniroute
   yi:
     base_url: omniroute
     name: omniroute
@@ -990,11 +1100,13 @@ presets:
     website: omniroute
   zai:
     base_url: omniroute
+    litellm_id: override
     name: omniroute
     website: omniroute
   zenmux:
     base_url: omniroute
     name: omniroute
+    resells_prices: override
     website: omniroute
   zerolimitai:
     base_url: omniroute
