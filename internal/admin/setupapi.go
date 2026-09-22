@@ -100,7 +100,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		writeRateLimited(w, time.Second)
 		return
 	}
-	hash, err := HashPassword(body.Password)
+	hash, err := s.hashPassword(body.Password)
 	release() // held over the hash only; the insert below is not what it caps
 	if err != nil {
 		internalError(w, r, err)

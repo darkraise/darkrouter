@@ -1,6 +1,31 @@
 package admin
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/darkraise/darkrouter/internal/store/storetest"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func TestServerPasswordDefaultsUseProductionCost(t *testing.T) {
+	// Deliberately bypass testServer: its private overrides must never change
+	// what a normally constructed server uses for writes or unknown users.
+	s, err := New(Deps{DB: storetest.Migrated(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	hash, err := s.hashPassword("production-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, h := range map[string]string{"account": hash, "unknown user": s.dummyHash} {
+		cost, err := bcrypt.Cost([]byte(h))
+		if err != nil || cost != 12 {
+			t.Errorf("%s bcrypt cost = %d, err = %v; want 12", name, cost, err)
+		}
+	}
+}
 
 func TestAHashedPasswordVerifies(t *testing.T) {
 	h, err := HashPassword("correct horse battery staple")

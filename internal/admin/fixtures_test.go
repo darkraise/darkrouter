@@ -192,7 +192,7 @@ func doSite(t *testing.T, s *Server, site string, cookie *http.Cookie, token, me
 }
 
 // mustHash creates fixture credentials at minimum cost, like testHash.
-// Password and API tests still exercise HashPassword at the production cost.
+// Password tests separately verify HashPassword and server production defaults.
 func mustHash(t *testing.T, password string) string {
 	t.Helper()
 	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)

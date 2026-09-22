@@ -94,7 +94,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "that username is already taken")
 		return
 	}
-	hash, err := HashPassword(body.Password)
+	hash, err := s.hashPassword(body.Password)
 	if err != nil {
 		internalError(w, r, err)
 		return
