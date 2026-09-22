@@ -90,13 +90,17 @@ in front of it and guessing http would put a client's token on the wire in the
 clear. Write the scheme out to override that, and add a port or a path prefix
 where one exists; both are carried through as written.
 
-The Connect page then lists **both** addresses: the configured public one and
-the LAN one it works out from the page's own address plus `proxy_listen`'s
-port. A gateway with a domain still answers on the LAN, and a client inside the
-network usually wants the address that does not leave it. The client snippets
-default to the public address and carry a toggle for the other. With nothing
-configured the page shows the LAN address alone, and says it was worked out
-rather than told.
+Set this in **Connect → Public base URL → Save address**, or in Settings as
+`server.public_url`. It is stored in the database and applies immediately.
+For a Docker mapping of `18080:8080`, enter `http://your-host:18080`.
+For a reverse proxy domain, enter `https://llm.example.com`. Include any
+proxy path prefix, but omit dialect suffixes such as `/v1` and `/v1beta`.
+
+The Connect page lists the configured address first and uses it for client
+snippets by default. It also shows an estimated address built from the console
+hostname and the internal proxy listen port. That estimate may be unreachable
+when ports are remapped or a reverse proxy is used. Clearing the public URL
+returns the page to using the estimate.
 
 It is validated at load: a host is required, and a query or fragment is
 refused. It is hot-reloadable, since nothing but the console reads it.

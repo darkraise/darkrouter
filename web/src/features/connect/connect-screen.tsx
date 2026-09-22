@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
   Badge,
@@ -27,6 +28,7 @@ import type { ConfigResponse, Model, ProxyToken } from "../../lib/api-types"
 import { EmptyState } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
+import type { SaveResult } from "../settings/settings-screen"
 
 const DIALECTS = ["anthropic", "openai", "gemini"] as const
 type Dialect = (typeof DIALECTS)[number]
@@ -125,7 +127,57 @@ export function liveSurfaces(models: Model[]): string[] {
 // The LAN row is derived, never configured, so the caveat belongs beside it
 // permanently rather than only while nothing else is set.
 const LAN_NOTE =
-  "Worked out from this page's address and the gateway's listen port."
+  "Worked out from this page's address and the gateway's internal listen port; this estimate may not be reachable."
+
+function PublicUrlEditor({ value }: { value: string }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const save = useApiMutation({
+    mutationFn: (url: string) => api.put<SaveResult>("/api/config", {
+      set: { "server.public_url": url.trim() },
+    }),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: keys.config })
+      if (!result.valid) {
+        toast.error(result.error ?? "Saved, but the gateway could not apply the address. Reload configuration in Settings.")
+        return
+      }
+      setDraft(null)
+      toast.success("Public base URL saved")
+    },
+  })
+  return (
+    <form
+      className="mb-5 flex flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        save.mutate(draft ?? value)
+      }}
+    >
+      <Label htmlFor="public-base-url">Public base URL</Label>
+      <div className="flex gap-2">
+        <Input
+          id="public-base-url"
+          value={draft ?? value}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="http://gateway:18080 or https://llm.example.com"
+          aria-describedby="public-base-url-help"
+          disabled={save.isPending}
+        />
+        <Button type="submit" disabled={save.isPending || (draft ?? value) === value}>
+          {save.isPending ? "Saving…" : "Save address"}
+        </Button>
+      </div>
+      <p id="public-base-url-help" className="text-sm text-[hsl(var(--muted-foreground))]">
+        Enter the address clients use, including the host's published port or your
+        domain. Use http:// for plain HTTP; a bare domain uses HTTPS. Include any
+        path prefix, without /v1 or /v1beta. Leave empty to use the estimated
+        address. Changes apply immediately and are stored in Settings as{" "}
+        <code className="font-mono">server.public_url</code>.
+      </p>
+    </form>
+  )
+}
 
 function DialectRows({ origin }: { origin: string }) {
   return (
@@ -217,6 +269,8 @@ export function ConnectScreen() {
     <>
       <Card className="mb-6 p-4">
         <h2 className="mb-3 text-sm font-medium">Base URLs</h2>
+        {config.data && <PublicUrlEditor value={publicOrigin(config.data)} />}
+        {config.isError && <LoadError what="configuration" error={config.error} onRetry={() => void config.refetch()} />}
         {origins.public ? (
           <div className="flex flex-col gap-5">
             <div>
@@ -227,7 +281,7 @@ export function ConnectScreen() {
             </div>
             <div>
               <h3 className="mb-2 text-sm font-medium">
-                On this network
+                Estimated address
               </h3>
               <DialectRows origin={origins.lan} />
               <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
@@ -241,11 +295,8 @@ export function ConnectScreen() {
             <DialectRows origin={origins.lan} />
             <p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">
               {LAN_NOTE} If a published container port, a reverse proxy or a
-              path prefix sits in front of the gateway, these are wrong. The
-              gateway cannot see what sits in front of it, so{" "}
-              <code className="font-mono">server.public_url</code> has to be set
-              to the domain clients actually use. This screen does not offer an
-              editor for it yet, so it is written through the API for now.
+              path prefix sits in front of the gateway, set the public base URL
+              above to the address clients actually use.
             </p>
           </>
         )}
