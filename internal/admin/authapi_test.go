@@ -7,10 +7,7 @@ import (
 
 func TestLoginBindsTheSessionToTheAccount(t *testing.T) {
 	s, _ := testServer(t)
-	hash, err := HashPassword("correct-horse-battery")
-	if err != nil {
-		t.Fatal(err)
-	}
+	hash := mustHash(t, "correct-horse-battery")
 	if _, err := s.deps.DB.ClaimFirstUser(t.Context(), "u1", "Alice", hash); err != nil {
 		t.Fatal(err)
 	}

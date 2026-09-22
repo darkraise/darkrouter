@@ -111,7 +111,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// wrong password and an unclaimed console is only half the promise; equal
 	// work is the other half, or the response time answers what the wording
 	// refuses to.
-	hash := dummyHash
+	hash := s.dummyHash
 	if found {
 		hash = user.PasswordHash
 	}

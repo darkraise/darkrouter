@@ -23,6 +23,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  frontend:
+    name: frontend checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Test and lint the SPA
+        working-directory: web
+        run: |
+          npm ci --no-audit
+
+          # Reports, but does not gate. The advisories endpoint is an external
+          # service reached on every run, and when it is degraded it answers a
+          # ~750-package bulk request with a timeout or a 503 -- which under
+          # `bash -e` failed the step before a single test ran, so a registry
+          # outage read as a broken build. Findings are raised as an annotation
+          # so they stay visible in the run summary.
+          #
+          # The trade is deliberate: a genuine high-severity advisory no longer
+          # stops a release, so it has to be caught by reading this warning.
+          npm audit --audit-level=high \
+            || echo "::warning title=npm audit::did not pass, or the advisories endpoint could not be reached -- see the step log"
+
+          npm test
+          npm run lint
+
   test:
     name: vet and test
     runs-on: ubuntu-latest
@@ -41,30 +74,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # internal/admin/.gitignore keeps dist/* out of the repository, so a fresh
-      # checkout carries only .gitkeep. go:embed still compiles against that, but
-      # the SPA handler would serve an empty bundle and its tests would assert
-      # against something the release image never ships. Building here makes the
-      # Go tests run against the same asset the Dockerfile embeds.
-      - name: Test and build the SPA
+      # Go's SPA tests need the real embedded bundle. Build it here while
+      # frontend tests and lint run independently on another runner.
+      - name: Build the SPA for Go tests
         working-directory: web
         run: |
-          npm ci
-
-          # Reports, but does not gate. The advisories endpoint is an external
-          # service reached on every run, and when it is degraded it answers a
-          # ~750-package bulk request with a timeout or a 503 -- which under
-          # `bash -e` failed the step before a single test ran, so a registry
-          # outage read as a broken build. Findings are raised as an annotation
-          # so they stay visible in the run summary.
-          #
-          # The trade is deliberate: a genuine high-severity advisory no longer
-          # stops a release, so it has to be caught by reading this warning.
-          npm audit --audit-level=high \
-            || echo "::warning title=npm audit::did not pass, or the advisories endpoint could not be reached -- see the step log"
-
-          npm test
-          npm run lint
+          npm ci --no-audit
           npm run build
 
       # gofmt prints the files it would change and exits 0 either way, so the
@@ -92,9 +107,32 @@ jobs:
       - name: go test -race
         env:
           CGO_ENABLED: 1
-        # The admin suite exercises production-cost password hashing under
-        # the race detector; hosted runners can exceed Go's default 10m limit.
-        run: go test -race -cover -count=1 -timeout=20m ./...
+        run: |
+          set -o pipefail
+          go test -json -race -cover -count=1 -timeout=20m ./... | tee go-test.json | jq -r 'select(.Action == "output") | .Output'
+
+      - name: Go test timings
+        if: always()
+        run: |
+          if [ ! -f go-test.json ]; then exit 0; fi
+          {
+            echo '### Slowest Go packages'
+            echo '| Package | Seconds | Result |'
+            echo '| --- | ---: | --- |'
+            jq -rs '[.[] | select((.Action == "pass" or .Action == "fail") and .Test == null)] | sort_by(.Elapsed) | reverse | .[:15][] | "| \(.Package) | \(.Elapsed) | \(.Action) |"' go-test.json
+            echo '### Slowest Go tests'
+            echo '| Test | Seconds | Result |'
+            echo '| --- | ---: | --- |'
+            jq -rs '[.[] | select((.Action == "pass" or .Action == "fail") and .Test != null)] | sort_by(.Elapsed) | reverse | .[:20][] | "| \(.Package)/\(.Test) | \(.Elapsed) | \(.Action) |"' go-test.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: go-test-timings
+          path: go-test.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   # The next release number, derived from the conventional-commit subjects since
   # the last v-tag. It runs before the image so the version it derives can be
@@ -226,7 +264,7 @@ jobs:
     # A pull request builds nothing: it has no access to the registry secrets,
     # and pushing from an unmerged branch is what a tag is for.
     if: github.event_name != 'pull_request'
-    needs: [test, version]
+    needs: [frontend, test, version]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:

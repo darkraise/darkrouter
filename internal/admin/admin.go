@@ -101,6 +101,11 @@ type Server struct {
 	probes probeLocks
 	logins *loginLimiter
 
+	// Fixed production defaults, private so only this package's tests can
+	// substitute inexpensive bcrypt without changing process-wide state.
+	hashPassword func(string) (string, error)
+	dummyHash    string
+
 	// listeners are the temporary loopback servers receiving OAuth redirects,
 	// keyed by provider so a second flow replaces the first rather than failing
 	// to bind a port the first still holds.
@@ -129,9 +134,11 @@ func New(deps Deps) (*Server, error) {
 	}
 	s := &Server{
 		deps: deps, csrf: csrf,
-		logins:    newLoginLimiter(loginRate, loginBurst, loginConcurrency),
-		stopSweep: make(chan struct{}),
-		now:       time.Now,
+		hashPassword: HashPassword,
+		dummyHash:    dummyHash,
+		logins:       newLoginLimiter(loginRate, loginBurst, loginConcurrency),
+		stopSweep:    make(chan struct{}),
+		now:          time.Now,
 	}
 	if _, err := deps.DB.SweepSessions(ctx); err != nil {
 		return nil, fmt.Errorf("admin: sweep sessions: %w", err)

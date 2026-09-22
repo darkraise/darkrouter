@@ -128,7 +128,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the new password must be at most 72 bytes")
 		return
 	}
-	hash, err := HashPassword(body.New)
+	hash, err := s.hashPassword(body.New)
 	if err != nil {
 		internalError(w, r, err)
 		return

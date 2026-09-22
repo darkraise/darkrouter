@@ -50,11 +50,17 @@ var dummyHash = func() string {
 // that writes users.password_hash -- the claim and a password change -- goes
 // through it, so the cost parameter has one home.
 func HashPassword(password string) (string, error) {
+	return hashPasswordAtCost(password, passwordCost)
+}
+
+// hashPasswordAtCost lets handler tests use real bcrypt with inexpensive
+// credentials. Production always enters through HashPassword at cost 12.
+func hashPasswordAtCost(password string, cost int) (string, error) {
 	if password == "" {
 		return "", fmt.Errorf("password is empty")
 	}
 	hashCalls.Add(1)
-	h, err := bcrypt.GenerateFromPassword([]byte(password), passwordCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
 		return "", fmt.Errorf("hash password: %w", err)
 	}

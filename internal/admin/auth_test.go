@@ -75,6 +75,11 @@ func testServer(t *testing.T) (*Server, *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.hashPassword = func(password string) (string, error) {
+		return hashPasswordAtCost(password, bcrypt.MinCost)
+	}
+	s.dummyHash = testHash()
+	t.Cleanup(s.Close)
 	return s, db
 }
 
