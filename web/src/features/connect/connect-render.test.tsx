@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
@@ -14,10 +14,16 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function mount(tokens: unknown[], values: Record<string, string> = {}) {
+function mount(tokens: unknown[], values: Record<string, string> = {}, saveError?: string) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/config" && init?.method === "PUT") {
+        if (saveError) return new Response(JSON.stringify({ error: saveError }), { status: 400 })
+        const patch = JSON.parse(init.body as string)
+        Object.assign(values, patch.set)
+        return new Response(JSON.stringify({ valid: true, restart_required: [] }))
+      }
       const body = url.includes("/api/proxy-tokens")
         ? { tokens }
         : url.includes("/api/models")
@@ -55,6 +61,41 @@ function mount(tokens: unknown[], values: Record<string, string> = {}) {
 }
 
 describe("the connect screen", () => {
+  it("saves a published host port and updates URLs and snippets", async () => {
+    const user = userEvent.setup()
+    mount([], { "server.proxy_listen": ":8080", "server.admin_listen": ":8081" })
+    expect(await screen.findByText("http://localhost:8080/v1")).toBeInTheDocument()
+    await user.type(await screen.findByLabelText("Public base URL"), "http://prod-host:18080")
+    await user.click(screen.getByRole("button", { name: "Save address" }))
+    expect(await screen.findByText("http://prod-host:18080/v1")).toBeInTheDocument()
+    expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/prod-host:18080/)).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith("/api/config", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ set: { "server.public_url": "http://prod-host:18080" } }),
+    }))
+  })
+
+  it("clears the configured address and returns to the estimate", async () => {
+    const user = userEvent.setup()
+    mount([], { "server.public_url": "https://llm.example.com" })
+    await user.clear(await screen.findByLabelText("Public base URL"))
+    await user.click(screen.getByRole("button", { name: "Save address" }))
+    await waitFor(() => expect(screen.queryByText("https://llm.example.com/v1")).not.toBeInTheDocument())
+    expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/localhost:18080/)).toBeInTheDocument()
+  })
+
+  it("keeps the draft and existing URLs when saving is rejected", async () => {
+    const user = userEvent.setup()
+    mount([], { "server.public_url": "https://llm.example.com" }, "Invalid URL")
+    const input = await screen.findByLabelText("Public base URL")
+    await user.clear(input)
+    await user.type(input, "invalid?")
+    await user.click(screen.getByRole("button", { name: "Save address" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save address" })).toBeEnabled())
+    expect(input).toHaveValue("invalid?")
+    expect(screen.getByText("https://llm.example.com/v1")).toBeInTheDocument()
+  })
+
   it("labels the token name and points the empty copy at the form", async () => {
     mount([])
     expect(await screen.findByLabelText("Name")).toBeInTheDocument()
@@ -87,7 +128,7 @@ describe("the connect screen", () => {
     expect(screen.getByText("http://localhost:18080/v1")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Public" })).toBeInTheDocument()
     expect(
-      screen.getByRole("heading", { name: "On this network" }),
+      screen.getByRole("heading", { name: "Estimated address" }),
     ).toBeInTheDocument()
   })
 
@@ -96,7 +137,7 @@ describe("the connect screen", () => {
     expect(await screen.findByText("http://localhost:18080/v1")).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Public" })).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("heading", { name: "On this network" }),
+      screen.queryByRole("heading", { name: "Estimated address" }),
     ).not.toBeInTheDocument()
   })
 
@@ -105,7 +146,7 @@ describe("the connect screen", () => {
     expect(await screen.findByText(/worked out from this page/i)).toBeInTheDocument()
     // Naming the key is the whole point: a caveat that does not say what to
     // do about it leaves the operator debugging their client instead.
-    expect(screen.getByText("server.public_url")).toBeInTheDocument()
+    expect(await screen.findByText("server.public_url")).toBeInTheDocument()
   })
 
   it("writes snippets against the public address by default", async () => {
