@@ -451,6 +451,18 @@ presets:
   kimi-k3:
     base_url: omniroute
     name: omniroute
+  kiraai:
+    api_key_url: override
+    auth: override
+    base_url: override
+    free_tier: override
+    kind: override
+    name: override
+    no_litellm: override
+    no_models_dev: override
+    resells_prices: override
+    surfaces: override
+    website: override
   lambda-ai:
     base_url: omniroute
     name: omniroute
