@@ -552,3 +552,25 @@ unorouter:
 
 zenmux:
   resells_prices: true
+
+# Kira AI is in neither upstream registry: 9router's PR #4339 proposed it and
+# the merge dropped it. Values below are from kiraai.vn/documents and a live
+# GET /api/v1/models on 2026-09-30, which answers without a key; a completion
+# without one is a 401.
+#
+# Its listing mixes chat, image, audio and video rows. Only chat is declared:
+# /images/generations takes aspect_ratio rather than size, and neither images
+# nor /audio/speech has been exercised with a key.
+kiraai:
+  name: Kira AI
+  kind: openaicompat
+  base_url: https://kiraai.vn/api/v1
+  auth:
+    style: bearer
+  surfaces: [llm]
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  resells_prices: true
+  website: https://kiraai.vn
+  api_key_url: https://kiraai.vn/developer/

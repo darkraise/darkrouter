@@ -1269,6 +1269,20 @@ kimi-k3:
     - llm
   no_models_dev: true
   no_litellm: true
+kiraai:
+  name: Kira AI
+  kind: openaicompat
+  base_url: https://kiraai.vn/api/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://kiraai.vn
+  resells_prices: true
+  api_key_url: https://kiraai.vn/developer/
 lambda-ai:
   name: Lambda AI
   kind: openaicompat
