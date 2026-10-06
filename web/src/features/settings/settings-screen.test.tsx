@@ -167,11 +167,20 @@ describe("fieldErrors", () => {
       .toEqual({ "log.retention": "log.retention must be at least 48h, got 1h" })
   })
 
-  it("attaches a cross-key refusal to every key it names", () => {
-    const msg =
-      "[policy.timeout.total policy.timeout.connect policy.timeout.first_byte] broke the timeout budget rule (policy.timeout.total (5s) must be at least connect + first_byte (1m10s))"
-    expect(fieldErrors(msg, ["policy.timeout.total", "policy.timeout.connect", "log.retention"]))
-      .toEqual({ "policy.timeout.total": msg, "policy.timeout.connect": msg })
+  it("attaches a cross-key refusal to every key the gateway names, not only the ones in its sentence", () => {
+    const msg = "policy.timeout.total (5s) must be at least connect + first_byte (1m10s)"
+    const keys = ["policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"]
+    expect(fieldErrors(msg, ["policy.timeout.total", "log.retention"], keys)).toEqual({
+      "policy.timeout.total": msg,
+      "policy.timeout.connect": msg,
+      "policy.timeout.first_byte": msg,
+    })
+  })
+
+  it("falls back to the patched keys a refusal without keys names", () => {
+    const msg = "policy.timeout.total (5s) must be at least connect + first_byte (1m10s)"
+    expect(fieldErrors(msg, ["policy.timeout.total", "log.retention"]))
+      .toEqual({ "policy.timeout.total": msg })
   })
 
   it("attaches nothing when the message names no key", () => {
@@ -526,6 +535,63 @@ describe("the settings form", () => {
     expect(
       screen.queryAllByRole("status").some((s) => /must be at least 48h/.test(s.textContent ?? "")),
     ).toBe(false)
+  })
+
+  it("refuses a size it cannot read on the row, before a round trip", async () => {
+    // The server only ever sees bytes, so its refusal of "2 TB" would be about
+    // a spelling the operator never used.
+    const { saves } = stubSettingsFetch({
+      config: () => {
+        const c = cfg()
+        c.values["capture.max_bytes"] = "1048576"
+        c.fields["capture.max_bytes"] = { source: "default", hot_reloadable: true, kind: "bytes" }
+        return c
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Largest body recorded")
+    await user.clear(box)
+    await user.type(box, "2 TB")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    expect(await screen.findByText("Use a size such as 512 KB, 32 MB or 1 GB.")).toBeInTheDocument()
+    expect(box).toHaveAttribute("aria-describedby", "capture.max_bytes-error")
+    expect(saves).toHaveLength(0)
+  })
+
+  it("puts a cross-key refusal on every field the gateway names", async () => {
+    stubSettingsFetch({
+      config: () => {
+        const c = cfg()
+        for (const [k, v] of [
+          ["policy.timeout.total", "5m0s"],
+          ["policy.timeout.connect", "10s"],
+          ["policy.timeout.first_byte", "1m0s"],
+        ]) {
+          c.values[k!] = v!
+          c.fields[k!] = { source: "default", hot_reloadable: true, kind: "duration" }
+        }
+        return c
+      },
+      save: {
+        status: 400,
+        body: {
+          error: "policy.timeout.total (30s) must be at least connect + first_byte (1m10s)",
+          keys: ["policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"],
+        },
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Total request time")
+    await user.clear(box)
+    await user.type(box, "30s")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(screen.getAllByText(/must be at least connect \+ first_byte/)).toHaveLength(3))
   })
 
   it("toasts a refusal that names no field", async () => {

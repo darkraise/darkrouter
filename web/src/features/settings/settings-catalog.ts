@@ -432,10 +432,31 @@ export function parseBytes(text: string): number | undefined {
   const n = Number(m[1])
   const unit = (m[2] ?? "").toLowerCase()
   if (!Number.isFinite(n) || n < 0) return undefined
-  if (unit === "" || unit === "bytes") return Math.round(n)
-  const scale = BYTE_UNITS[unit]
+  const scale = unit === "" || unit === "bytes" ? 1 : BYTE_UNITS[unit]
   if (scale === undefined) return undefined
-  return Math.round(n * scale)
+  const bytes = Math.round(n * scale)
+  // Past 2^53 a double no longer holds every integer, so "9999999999 GB"
+  // became a number nobody typed and that was not even the exact product.
+  // Undefined sends nothing in its place; bytesProblem says why.
+  return Number.isSafeInteger(bytes) ? bytes : undefined
+}
+
+/**
+ * Why a size box's text cannot be saved, or null when it can.
+ *
+ * The box accepts "32 MB" and stores bytes, so a refusal has to be worded the
+ * way the box is used: the server only ever sees bytes, and its "must be a
+ * whole number of bytes" reads as wrong to someone who typed a unit the box
+ * itself displays.
+ */
+export function bytesProblem(text: string): string | null {
+  if (parseBytes(text) !== undefined) return null
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]*)\s*$/.exec(text)
+  const unit = (m?.[2] ?? "").toLowerCase()
+  if (m && (unit === "" || unit === "bytes" || unit in BYTE_UNITS)) {
+    return "That size is too large."
+  }
+  return "Use a size such as 512 KB, 32 MB or 1 GB."
 }
 
 /** Every setting this build knows how to explain, in reading order.

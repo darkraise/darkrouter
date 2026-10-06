@@ -94,7 +94,7 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 	// do not validate, which is a bug in this binary rather than anything the
 	// operator wrote. It must reach the caller as a server fault, not as a
 	// refusal they could act on.
-	_, warnings, skipped, err := buildConfig(next, boot, aliases)
+	_, warnings, skipped, refusals, err := buildConfigExplained(next, boot, aliases)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func WriteConfig(ctx context.Context, d *DB, boot config.Bootstrap, p config.Pat
 	}
 	for _, k := range skipped {
 		if touched[k] {
-			return nil, config.RejectedError{Msg: refusalFor(k, warnings)}
+			return nil, refusalFor(k, refusals, warnings)
 		}
 	}
 
@@ -200,10 +200,20 @@ func sortedFlags(m map[string]bool) []string {
 	return out
 }
 
-// refusalFor turns the loader's revert warning into a refusal. The loader
-// explains why a key cannot be used and then says it fell back to the default;
-// a write has a person waiting, so the reason is kept and the fallback dropped.
-func refusalFor(key string, warnings []string) string {
+// refusalFor is the answer to a save that touched key and would see it
+// reverted. The loader explains each revert twice: once for its log, quoting
+// Go's parser and a rule's key list as a Go slice, and once for a person,
+// which is the one a save answers with. The log's sentence is the fallback
+// only for a revert the loader could not pin on a reason, with its "using the
+// default" tail dropped, because a refused write falls back to nothing.
+func refusalFor(key string, refusals map[string]config.RejectedError, warnings []string) config.RejectedError {
+	if r, ok := refusals[key]; ok {
+		return r
+	}
+	return config.RejectedError{Msg: refusalText(key, warnings), Keys: []string{key}}
+}
+
+func refusalText(key string, warnings []string) string {
 	trim := func(w string) string {
 		if i := strings.Index(w, "; "); i >= 0 {
 			w = w[:i]
