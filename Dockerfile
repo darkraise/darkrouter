@@ -66,7 +66,7 @@ RUN mkdir -p /opt/auggie
 
 FROM auggie-${WITH_AUGGIE} AS auggie
 
-FROM alpine:3.24
+FROM alpine:3.24 AS runtime
 ARG WITH_AUGGIE
 # nodejs is here for auggie alone — the gateway itself is a static binary and
 # needs no runtime. It is the cost of a vendor who ships a CLI instead of an API.
