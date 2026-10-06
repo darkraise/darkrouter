@@ -1,7 +1,15 @@
 import { useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Badge,
   Button,
   Card,
@@ -22,9 +30,9 @@ import {
 import { api } from "../../lib/api"
 import { ConfirmButton } from "../shell/confirm-button"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useConfig, useModels, useProxyTokens } from "../../lib/queries"
+import { keys, useConfig, useModels } from "../../lib/queries"
 import { dateOnly, dateTime, zoneLabel } from "../../lib/format"
-import type { ConfigResponse, Model, ProxyToken } from "../../lib/api-types"
+import type { ConfigResponse, Model, ProxyToken, ProxyTokensResponse } from "../../lib/api-types"
 import { EmptyState } from "../shell/empty-state"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { baseUrlFor, snippetFor, TOOLS, type Tool } from "./snippets"
@@ -129,45 +137,108 @@ export function liveSurfaces(models: Model[]): string[] {
 const LAN_NOTE =
   "Worked out from this page's address and the gateway's internal listen port; this estimate may not be reachable."
 
+/**
+ * Why `raw` cannot be the public base URL, or `undefined` when it can.
+ *
+ * The same rules the server applies to server.public_url, checked here so an
+ * obvious mistake is named under the field before a round trip rather than
+ * after it. The server stays the authority -- this only spares the operator
+ * a save that was always going to be refused -- and every message quotes the
+ * value as typed, not the normalised form the server would quote back.
+ */
+export function publicUrlProblem(raw: string): string | undefined {
+  const typed = raw.trim()
+  if (typed === "") return undefined
+  // A bare domain is how the setting is written; the server prefixes https://
+  // the same way, so "llm.example.com" is not a mistake.
+  const candidate = typed.includes("://") || typed.startsWith("/") ? typed : `https://${typed}`
+  let url: URL
+  try {
+    url = new URL(candidate)
+  } catch {
+    return `"${typed}" is not a URL. Enter a domain such as llm.example.com or an address such as http://gateway:18080.`
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return `"${typed}" uses ${url.protocol.slice(0, -1)}://. Clients reach the gateway over http:// or https:// only.`
+  }
+  if (!url.hostname) return `"${typed}" names no host.`
+  if (url.search || url.hash || typed.includes("?") || typed.includes("#")) {
+    return `"${typed}" carries a query or fragment. Enter only the scheme, host, port and any path prefix.`
+  }
+  // Each dialect appends its own version segment, so a /v1 here becomes
+  // /v1/v1 in every base URL and snippet below.
+  if (/\/v1(beta)?\/*$/i.test(url.pathname)) {
+    return `"${typed}" ends in ${url.pathname.replace(/\/+$/, "")}. Leave it off: each dialect adds its own /v1 or /v1beta.`
+  }
+  return undefined
+}
+
 function PublicUrlEditor({ value }: { value: string }) {
   const [draft, setDraft] = useState<string | null>(null)
+  // The refusal stays beside the field until the value changes. A toast
+  // alone vanished while the field still held the rejected value, and the
+  // addresses below it still showed the previous one as though it were
+  // current.
+  const [refusal, setRefusal] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const save = useApiMutation({
     mutationFn: (url: string) => api.put<SaveResult>("/api/config", {
       set: { "server.public_url": url.trim() },
     }),
-    onSuccess: async (result) => {
+    // Shown under the field instead; see `refusal`.
+    quietError: true,
+    onSuccess: async (result, url) => {
       await queryClient.invalidateQueries({ queryKey: keys.config })
       if (!result.valid) {
-        toast.error(result.error ?? "Saved, but the gateway could not apply the address. Reload configuration in Settings.")
+        setRefusal(
+          `"${url.trim()}" was stored, but the gateway could not apply it: ${result.error ?? "reload configuration in Settings."}`,
+        )
         return
       }
       setDraft(null)
+      setRefusal(null)
       toast.success("Public base URL saved")
     },
   })
+  const current = draft ?? value
+  const problem = draft === null ? undefined : publicUrlProblem(draft)
+  const error = problem ?? refusal ?? undefined
   return (
     <form
       className="mb-5 flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        save.mutate(draft ?? value)
+        if (problem) return
+        setRefusal(null)
+        const typed = current
+        save.mutate(typed, {
+          onError: (err) => setRefusal(`"${typed.trim()}" was not saved: ${err.message}`),
+        })
       }}
     >
       <Label htmlFor="public-base-url">Public base URL</Label>
       <div className="flex gap-2">
         <Input
           id="public-base-url"
-          value={draft ?? value}
-          onChange={(event) => setDraft(event.target.value)}
+          value={current}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            setRefusal(null)
+          }}
           placeholder="http://gateway:18080 or https://llm.example.com"
-          aria-describedby="public-base-url-help"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "public-base-url-error public-base-url-help" : "public-base-url-help"}
           disabled={save.isPending}
         />
-        <Button type="submit" disabled={save.isPending || (draft ?? value) === value}>
+        <Button type="submit" disabled={save.isPending || current === value || !!problem}>
           {save.isPending ? "Saving…" : "Save address"}
         </Button>
       </div>
+      {error && (
+        <p id="public-base-url-error" role="alert" className="text-sm text-[hsl(var(--destructive))]">
+          {error}
+        </p>
+      )}
       <p id="public-base-url-help" className="text-sm text-[hsl(var(--muted-foreground))]">
         Enter the address clients use, including the host's published port or your
         domain. Use http:// for plain HTTP; a bare domain uses HTTPS. Include any
@@ -218,6 +289,60 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+/**
+ * Whether the gateway refuses a client that presents no token.
+ *
+ * Not readable off the token list. The proxy switches authentication on when
+ * the first client token is issued and never back off -- revoking the last
+ * token must refuse its clients, not open the gateway to everyone -- so an
+ * empty list means "open" on a fresh gateway and "every client refused" on
+ * one whose tokens were all revoked. The listing carries `issued` so this
+ * screen can tell the two apart; a server too old to send it is read from
+ * the list, which is right for every state but the all-revoked one.
+ *
+ * - `open`: no shared secret, no token ever issued. Anyone may call.
+ * - `shared`: only the shared server.proxy_token is in force.
+ * - `tokens`: client tokens are in force and at least one is live.
+ * - `revoked`: tokens were issued and every one has been revoked, so only
+ *   the shared secret, if set, still gets a client in.
+ */
+export type GatewayAuth = "open" | "shared" | "tokens" | "revoked"
+
+export function gatewayAuth(listing: ProxyTokensResponse): GatewayAuth {
+  if (listing.tokens.length > 0) return "tokens"
+  if (listing.issued) return "revoked"
+  return listing.shared_secret ? "shared" : "open"
+}
+
+function authStatus(auth: GatewayAuth, shared: boolean): string {
+  switch (auth) {
+    case "open":
+      return "The gateway accepts requests without a token. Creating the first client token switches authentication on for every client, and it stays on."
+    case "shared":
+      return "Every request must carry the shared server.proxy_token. Client tokens work alongside it."
+    case "tokens":
+      return shared
+        ? "Every request must carry a client token or the shared server.proxy_token. A request with neither is refused with 401."
+        : "Every request must carry a client token. A request without one is refused with 401."
+    case "revoked":
+      return shared
+        ? "Every client token has been revoked, and authentication is still on: a request without the shared server.proxy_token is refused with 401. Create a new token and give it to each client that should keep working."
+        : "Every client token has been revoked, and authentication is still on: every client is refused with 401 until it presents a new token. Create one below and give it to each client that should keep working."
+  }
+}
+
+/**
+ * The full listing rather than the bare array `useProxyTokens` keeps: whether
+ * authentication is on travels beside the list, not in it. Keyed under
+ * keys.proxyTokens so every write that invalidates the list refreshes this.
+ */
+function useTokenListing() {
+  return useQuery({
+    queryKey: [...keys.proxyTokens, "listing"],
+    queryFn: ({ signal }) => api.get<ProxyTokensResponse>("/api/proxy-tokens", { signal }),
+  })
+}
+
 export function ConnectScreen() {
   const [name, setName] = useState("")
   const [minted, setMinted] = useState<ProxyToken | null>(null)
@@ -225,7 +350,15 @@ export function ConnectScreen() {
   // offered when there are two; a copied snippet that names the wrong side of
   // the router is the failure this whole screen exists to prevent.
   const [scope, setScope] = useState<"public" | "lan">("public")
-  const tokens = useProxyTokens()
+  const listing = useTokenListing()
+  const tokenList = listing.data?.tokens
+  const auth = listing.data ? gatewayAuth(listing.data) : undefined
+  const shared = listing.data?.shared_secret === true
+  // Asked before the first token, and whenever the listing cannot say
+  // whether one was issued: creating it is a gateway-wide switch that no
+  // later revoke undoes, so not knowing is a reason to ask, not to skip.
+  const switchesAuthOn = auth !== "tokens" && auth !== "revoked"
+  const [confirming, setConfirming] = useState(false)
   const config = useConfig()
   const models = useModels()
 
@@ -260,7 +393,7 @@ export function ConnectScreen() {
 
   // A prefix, never a secret: the store holds a digest and cannot reproduce
   // one, so this is the same "…" the token table already shows.
-  const firstToken = tokens.data?.[0]
+  const firstToken = tokenList?.[0]
   const tokenPrefix = firstToken ? `${firstToken.prefix}…` : ""
 
   const surfaces = liveSurfaces(models.data?.models ?? [])
@@ -307,7 +440,11 @@ export function ConnectScreen() {
         <p className="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
           {firstToken
             ? "Snippets show only the token's prefix, never the secret — the full value was shown once, at creation. Paste your own token in its place."
-            : "No client token exists yet, so snippets show a placeholder. Create one under New client token, below, and paste it in."}
+            : auth === "revoked"
+              ? "Every client token has been revoked, so snippets show a placeholder — and the gateway still requires a token. Create a new one under New client token, below, and paste it in."
+              : auth === "shared"
+                ? "No client token exists yet, so snippets show a placeholder. Paste the shared server.proxy_token in its place, or create a client token under New client token, below."
+                : "No client token exists yet, so snippets show a placeholder. Create one under New client token, below, and paste it in."}
         </p>
         {origins.public && (
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -333,7 +470,10 @@ export function ConnectScreen() {
           </div>
         )}
         <Tabs defaultValue={TOOLS[0]}>
-          <TabsList>
+          {/* Wraps rather than overflows: five triggers are wider than a
+              phone, and a strip that sticks out of its card scrolls the
+              whole page sideways. */}
+          <TabsList className="flex max-w-full flex-wrap justify-start">
             {TOOLS.map((tool) => (
               <TabsTrigger key={tool} value={tool}>
                 {TOOL_LABEL[tool]}
@@ -385,27 +525,61 @@ export function ConnectScreen() {
 
       <Card className="mb-6 p-4">
         <h2 className="mb-3 text-sm font-medium">New client token</h2>
+        {auth && (
+          <p
+            className={
+              auth === "revoked"
+                ? "mb-3 rounded border border-[hsl(var(--warning))] p-3 text-sm"
+                : "mb-3 text-sm text-[hsl(var(--muted-foreground))]"
+            }
+          >
+            {authStatus(auth, shared)}
+          </p>
+        )}
         <form
           className="flex flex-wrap items-end gap-2"
           onSubmit={(e) => {
             e.preventDefault()
-            if (name) create.mutate(name)
+            if (!name) return
+            if (switchesAuthOn) setConfirming(true)
+            else create.mutate(name)
           }}
         >
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {/* The cap is on the wrapper, not the input: a capped input in a
+              flex-1 wrapper left Create stranded at the card's far edge. */}
+          <div className="flex min-w-0 max-w-96 flex-1 flex-col gap-1.5">
             <Label htmlFor="token-name">Name</Label>
             <Input
               id="token-name"
               placeholder="what will use it — laptop, CI, a teammate"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="max-w-96"
             />
           </div>
           <Button type="submit" size="sm" disabled={!name || create.isPending}>
             Create
           </Button>
         </form>
+        {/* Controlled rather than a ConfirmButton: the form also submits on
+            Enter, and the question has to stand in front of both. */}
+        <AlertDialog open={confirming} onOpenChange={setConfirming}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Require a token from every client?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {shared
+                  ? "This is the first client token. Clients holding the shared server.proxy_token keep working, but from now on the gateway requires a token even if server.proxy_token is later removed. Revoking every client token does not switch authentication off."
+                  : "This is the first client token. Once it exists, the gateway refuses every request that does not carry a valid token: each client that works today without one starts getting 401. Revoking the token later does not switch authentication back off. Give the new token to every client that should keep working."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => create.mutate(name)}>
+                Create and require tokens
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {minted?.secret && (
           // A region rather than an alert: role="alert" would read the
@@ -429,18 +603,18 @@ export function ConnectScreen() {
         )}
       </Card>
 
-      {tokens.isError && (
+      {listing.isError && (
         <LoadError
           what="The client tokens"
-          error={tokens.error}
-          onRetry={() => void tokens.refetch()}
+          error={listing.error}
+          onRetry={() => void listing.refetch()}
           className="mb-4"
         />
       )}
 
-      {tokens.isPending && <LoadingRows rows={3} />}
+      {listing.isPending && <LoadingRows rows={3} />}
 
-      {tokens.data && tokens.data.length > 0 && (
+      {tokenList && tokenList.length > 0 && (
       <div className="overflow-x-auto">
       <Table>
         <TableHeader>
@@ -453,7 +627,7 @@ export function ConnectScreen() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tokens.data.map((t) => (
+          {tokenList.map((t) => (
             <TableRow key={t.id}>
               <TableCell>{t.name}</TableCell>
               <TableCell className="font-mono text-sm">{t.prefix}…</TableCell>
@@ -473,7 +647,11 @@ export function ConnectScreen() {
                   variant="ghost"
                   className="text-[hsl(var(--destructive))]"
                   title={`Revoke ${t.name}?`}
-                  description="Every client still holding this token starts being refused, and the token cannot be reissued — the store keeps a digest, not the secret."
+                  description={
+                    tokenList.length === 1
+                      ? "Every client still holding this token starts being refused, and the token cannot be reissued — the store keeps a digest, not the secret. It is the last client token, and authentication stays on without it: every client without a token is refused until you create a new one."
+                      : "Every client still holding this token starts being refused, and the token cannot be reissued — the store keeps a digest, not the secret."
+                  }
                   confirmLabel="Revoke"
                   destructive
                   onConfirm={() => revoke.mutate(t.id)}
@@ -488,14 +666,28 @@ export function ConnectScreen() {
       </div>
       )}
 
-      {tokens.data?.length === 0 && (
+      {tokenList?.length === 0 &&
         // No action: the form that creates one is directly above, and a
         // second button for it would be the same offer twice.
-        <EmptyState
-          title="A client token names who is calling"
-          hint="Give each client its own, and a token you revoke stops that client alone. Create one in the form above. The shared server.proxy_token keeps working if one is configured."
-        />
-      )}
+        (auth === "revoked" ? (
+          <EmptyState
+            title="Every client token has been revoked"
+            hint={`Authentication stayed on: revoking the last token does not reopen the gateway. ${
+              shared
+                ? "Only clients holding the shared server.proxy_token get in."
+                : "Every client is refused with 401."
+            } Create a new token in the form above and give it to each client that should keep working.`}
+          />
+        ) : (
+          <EmptyState
+            title="A client token names who is calling"
+            hint={`Give each client its own, so revoking one stops that client without touching the others. Create one in the form above. ${
+              shared
+                ? "The shared server.proxy_token keeps working alongside them."
+                : "The first one switches authentication on for the whole gateway, and revoking every token later does not switch it off."
+            }`}
+          />
+        ))}
     </>
   )
 }
