@@ -48,7 +48,7 @@ function EmptyCatalogue({ discovery }: { discovery?: DiscoveryHealthRow }) {
         title={`Discovery has failed ${n === 1 ? "once" : `${n} times`}`}
         hint={
           discovery?.last_error
-            ? `The last sweep got: ${discovery.last_error}. Check the provider is reachable from the gateway, then run discovery again from Health below.`
+            ? `The last sweep got: ${discovery.last_error.replace(/\.$/, "")}. Check the provider is reachable from the gateway, then run discovery again from Health below.`
             : "Check the provider is reachable from the gateway, then run discovery again from Health below."
         }
       />
