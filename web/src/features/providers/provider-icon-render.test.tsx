@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { render } from "@testing-library/react"
 import { ProviderIcon } from "./provider-icon"
+import { PROVIDER_ASSETS } from "./provider-assets"
 
 describe("ProviderIcon", () => {
   it("draws a shipped logo for a preset with no brand mark", () => {
@@ -10,8 +11,15 @@ describe("ProviderIcon", () => {
   })
 
   it("inverts a black-ink logo so the dark canvas does not swallow it", () => {
-    const { container } = render(<ProviderIcon preset="bazaarlink" id="bazaarlink" />)
-    expect(container.querySelector("img")?.className).toContain("provider-asset-mono")
+    // The shipped set follows upstream and may hold no black-ink logo at all,
+    // so the entry is the test's own.
+    PROVIDER_ASSETS["ink-only"] = { file: "ink-only.svg", mono: true }
+    try {
+      const { container } = render(<ProviderIcon preset="ink-only" id="ink-only" />)
+      expect(container.querySelector("img")?.className).toContain("provider-asset-mono")
+    } finally {
+      delete PROVIDER_ASSETS["ink-only"]
+    }
   })
 
   it("prefers the brand mark over a file", () => {

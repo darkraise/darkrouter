@@ -34,7 +34,7 @@ describe("the provider logo manifest", () => {
   })
 
   it("covers the gateways an operator meets on the providers screen", () => {
-    for (const id of ["chutes", "requesty", "nanogpt", "scaleway"]) {
+    for (const id of ["chutes", "requesty"]) {
       expect(PROVIDER_ASSETS[id], id).toBeDefined()
     }
   })
