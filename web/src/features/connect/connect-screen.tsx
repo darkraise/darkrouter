@@ -152,11 +152,15 @@ export function publicUrlProblem(raw: string): string | undefined {
   // A bare domain is how the setting is written; the server prefixes https://
   // the same way, so "llm.example.com" is not a mistake.
   const candidate = typed.includes("://") || typed.startsWith("/") ? typed : `https://${typed}`
+  const notAURL = `"${typed}" is not a URL. Enter a domain such as llm.example.com or an address such as http://gateway:18080.`
+  // Whitespace first: Chromium's parser accepts "https://not a url" and
+  // percent-encodes the spaces into the host, which the server then refuses.
+  if (/\s/.test(typed)) return notAURL
   let url: URL
   try {
     url = new URL(candidate)
   } catch {
-    return `"${typed}" is not a URL. Enter a domain such as llm.example.com or an address such as http://gateway:18080.`
+    return notAURL
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return `"${typed}" uses ${url.protocol.slice(0, -1)}://. Clients reach the gateway over http:// or https:// only.`
