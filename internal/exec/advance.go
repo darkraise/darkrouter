@@ -16,9 +16,16 @@ const (
 	actionNext
 )
 
+// skipTargetFailed is the trace reason for a candidate passed over because
+// another credential for the same (provider, model) had just failed with a
+// non-429 provider error.
+const skipTargetFailed = "target_failed"
+
 // nextIndex applies master design §8.1's advance behavior.
 //
 // The returned index may be len(cands), which means the chain is exhausted.
+// Every candidate strictly between i and the returned index was passed over
+// without an attempt; advanceSkips names them for the trace.
 func nextIndex(cands []router.Candidate, i int, o adapter.Outcome, statusCode int) (int, advanceAction) {
 	switch o {
 	case adapter.OutcomeSuccess:
@@ -42,25 +49,43 @@ func nextIndex(cands []router.Candidate, i int, o adapter.Outcome, statusCode in
 			// Rate limits are per credential: the next key is worth trying.
 			return i + 1, actionNext
 		}
-		// The upstream is down. Every remaining credential on this provider
-		// will hit the same wall, so skip them all in one step.
-		return skipProvider(cands, i), actionNext
+		// The target is down. Its other credentials will hit the same wall, so
+		// skip them in one step — but only for this model. Breakers are scoped
+		// per (provider, key, model), and a 500 from one model on a
+		// self-hosted runtime or an aggregator says nothing about the next
+		// model on the same provider, which is exactly the fallback an alias
+		// like `lmstudio/a → lmstudio/b` promises.
+		return skipTarget(cands, i), actionNext
 
 	default:
 		return i + 1, actionNext
 	}
 }
 
-// skipProvider returns the index of the first candidate belonging to a
-// different provider than cands[i].
-func skipProvider(cands []router.Candidate, i int) int {
+// skipTarget returns the index of the first candidate after i that is not
+// another credential for the same (provider, model) as cands[i].
+func skipTarget(cands []router.Candidate, i int) int {
 	if i >= len(cands) {
 		return i
 	}
-	id := cands[i].ProviderID
+	c := cands[i]
 	j := i + 1
-	for j < len(cands) && cands[j].ProviderID == id {
+	for j < len(cands) && cands[j].ProviderID == c.ProviderID && cands[j].Model == c.Model {
 		j++
 	}
 	return j
+}
+
+// advanceSkips renders the candidates nextIndex jumped over, between the
+// attempted index i and next, as trace skips. Without them the trace lists a
+// candidate that was neither attempted nor skipped, and cannot say why.
+func advanceSkips(cands []router.Candidate, i, next int) []string {
+	if next > len(cands) {
+		next = len(cands)
+	}
+	var out []string
+	for j := i + 1; j < next; j++ {
+		out = append(out, traceSkipOf(cands[j], skipTargetFailed))
+	}
+	return out
 }

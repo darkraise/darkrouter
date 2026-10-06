@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ChainGraph, buildChainGraph } from "./chain-graph"
 import type { LadderRow, PredictiveMark } from "../ladder/ladder"
 
@@ -53,8 +53,31 @@ describe("buildChainGraph", () => {
     expect(nodes.map((n) => n.data.note)).toEqual([
       "would be tried in this order",
       "× 2 credentials",
-      "cooling",
+      "skipped — cooling",
     ])
+  })
+
+  it("draws a skipped target off the run, unranked and with nothing leading in", () => {
+    // Joined to the end of the run, a cooling target read as the next
+    // fallback after the last candidate -- which the router never tries.
+    const { nodes, edges } = buildChainGraph("errfb", [
+      row({ rank: 1, target: "lmstudio/mock-fast" }),
+      row({ rank: 2, target: "lmstudio/mock-error", reasonCode: "cooling", terminated: true, unranked: true }),
+    ])
+    const skip = nodes.find((n) => n.data.kind === "skip")
+    const fast = nodes.find((n) => n.data.title === "lmstudio/mock-fast")
+    expect(skip?.data.rank).toBeNull()
+    expect(edges.some((e) => e.target === skip?.id || e.source === skip?.id)).toBe(false)
+    expect(skip?.position.y).toBeGreaterThan(fast?.position.y ?? 0)
+    expect(edges.map((e) => [e.source, e.target])).toEqual([["origin", "row:1:lmstudio/mock-fast"]])
+  })
+
+  it("says there is nothing to try when every target was skipped", () => {
+    const { nodes, edges } = buildChainGraph("errfb", [
+      row({ rank: 1, target: "lmstudio/mock-error", reasonCode: "cooling", terminated: true }),
+    ])
+    expect(nodes[0]?.data.note).toBe("nothing to try")
+    expect(edges).toHaveLength(0)
   })
 
   it("still draws the request when nothing routed", () => {
@@ -84,5 +107,44 @@ describe("the chain graph on a canvas", () => {
     expect(screen.getByText("sonnet")).toBeInTheDocument()
     expect(screen.getByText("groq/a")).toBeInTheDocument()
     expect(screen.getByText("nebius/b")).toBeInTheDocument()
+  })
+
+  it("draws the run at its own size rather than shrinking it to fit", () => {
+    // fitView scaled a run wider than the card to half size: 14px text drawn
+    // at 7px on a phone, with both ends still clipped.
+    const { container } = render(
+      <ChainGraph request="sonnet" rows={[{ rank: 1, mark: "skipped", target: "groq/a" }]} />,
+    )
+    const viewport = container.querySelector<HTMLElement>(".react-flow__viewport")
+    expect(viewport?.style.transform).toMatch(/scale\(1\)/)
+  })
+})
+
+describe("the chain graph on a narrow card", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("stands the ladder in for a graph that would be one node and an edge", () => {
+    // At phone width the run did not fit, and the graph was the request and
+    // an edge running off the card. The ladder says the same and fits.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(target: Element) {
+          // Only the graph's own box: xyflow observes its nodes too, and a
+          // made-up entry for one of those is not what this test is about.
+          if (!target.classList.contains("cg-wrap")) return
+          this.cb([{ target, contentRect: { width: 320 } } as never], this as never)
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const { container } = render(
+      <ChainGraph request="sonnet" rows={[{ rank: 1, mark: "skipped", target: "groq/a" }]} />,
+    )
+    expect(container.querySelector(".ladder")).toBeInTheDocument()
+    expect(container.querySelector(".react-flow")).not.toBeInTheDocument()
+    expect(screen.getByText("groq/a")).toBeInTheDocument()
   })
 })

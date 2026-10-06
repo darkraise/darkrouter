@@ -101,7 +101,24 @@ describe("previewRows", () => {
       ["groq/m", "cooling", "× 2 credentials"],
       ["groq/m", "disabled", undefined],
     ])
-    expect(rows.map((r) => r.rank)).toEqual([1, 2])
+    expect(rows.map((r) => r.unranked)).toEqual([true, true])
+  })
+
+  it("leaves a skip out of the failover order rather than numbering it next", () => {
+    // Numbered after mock-fast, a cooling mock-error read as "tried if
+    // mock-fast fails". A skipped target is never tried.
+    const rows = previewRows(
+      preview({
+        candidates: [candidate("lmstudio", "", "mock-fast")],
+        skips: [{ provider_id: "lmstudio", key_id: "", model: "mock-error", reason: "cooling" }],
+      }),
+    )
+    expect(rows.map((r) => [r.target, r.unranked ?? false, r.terminated ?? false])).toEqual([
+      ["lmstudio/mock-fast", false, false],
+      ["lmstudio/mock-error", true, true],
+    ])
+    // The major tick marks where the order ends.
+    expect(rows[1]?.major).toBe(true)
   })
 
   it("keeps the inferred note beside the count", () => {

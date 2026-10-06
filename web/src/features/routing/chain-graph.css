@@ -60,9 +60,9 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-sm);
   line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wrapped, never cut: the target is what the node is for, and an id is one
+     unbroken word, so it may break anywhere. */
+  overflow-wrap: anywhere;
 }
 
 .cg-note {
@@ -71,9 +71,7 @@
   font-size: var(--text-sm);
   line-height: 1.3;
   color: var(--cg-legend);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .cg-rank {
