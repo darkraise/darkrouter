@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   Button,
   Dialog,
@@ -68,18 +68,32 @@ export function NewConversationDialog({
     if (open) setDraft(seed)
   }
 
+  // Set for the one Escape that a popup inside the pane owns. The close it
+  // triggers is swallowed rather than the event cancelled: every layer reads
+  // the same keydown, and preventDefault here would also stop the popup's own
+  // layer from closing it, leaving the list open over a dialog that ignored
+  // the key altogether.
+  const popupEscape = useRef(false)
+
   return (
     <Dialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => {
+        if (!next && popupEscape.current) return
+        onOpenChange(next)
+      }}
       closeOnEscape={!nested}
     >
       <DialogContent
         className="flex max-h-[85vh] max-w-2xl flex-col overflow-y-auto"
         // An Escape that closes the model suggestions or the Dialect list
         // must not close the dialog, and the draft, behind them.
-        onEscapeKeyDown={(event) => {
-          if (escapeBelongsToPopup()) event.preventDefault()
+        onEscapeKeyDown={() => {
+          popupEscape.current = escapeBelongsToPopup()
+          // Only this keystroke: a later overlay click must still close.
+          queueMicrotask(() => {
+            popupEscape.current = false
+          })
         }}
       >
         <DialogHeader>

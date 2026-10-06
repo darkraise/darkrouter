@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { describe, expect, it, vi } from "vitest"
@@ -207,5 +207,8 @@ describe("the new-conversation dialog", () => {
 
     await userEvent.keyboard("{Escape}")
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    // The list itself still closes: the dialog stands down without
+    // cancelling the keystroke the list's own layer needs.
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
   })
 })
