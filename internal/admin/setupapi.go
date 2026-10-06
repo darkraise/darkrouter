@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // maxUsernameChars bounds what a claim may store. Long enough for any name
@@ -23,14 +25,16 @@ const maxUsernameChars = 64
 // at handleSetup's call site: only the claim has a second password field.
 func validateCredentials(username, password string) (string, string, bool) {
 	username = strings.TrimSpace(username)
-	if username == "" || len([]rune(username)) > maxUsernameChars {
+	if username == "" {
 		return "", "a username is required", false
 	}
-	if len(password) < minPasswordChars {
-		return "", "the password must be at least 12 characters", false
+	// Its own message: one shared with the empty case told an operator whose
+	// field was visibly full that a username was required.
+	if utf8.RuneCountInString(username) > maxUsernameChars {
+		return "", fmt.Sprintf("a username can be at most %d characters", maxUsernameChars), false
 	}
-	if len(password) > maxPasswordBytes {
-		return "", "the password must be at most 72 bytes", false
+	if msg := passwordProblem("the password", password); msg != "" {
+		return "", msg, false
 	}
 	return username, "", true
 }

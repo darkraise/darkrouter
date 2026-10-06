@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -58,6 +59,78 @@ type Syncer struct {
 	// fallback. It is replaced wholesale and read without a lock, which is what
 	// makes a failed fetch a no-op rather than a window where it is empty.
 	doc atomic.Pointer[Doc]
+
+	// statusMu guards the run bookkeeping Status reports. A failed sync used
+	// to reach only the server log, so an operator who pressed "Sync catalog
+	// now" could not tell a run that worked from one that did not.
+	statusMu sync.Mutex
+	begun    uint64
+	running  int
+	last     SyncStatus
+}
+
+// SyncStatus is the outcome of the newest finished sync, scheduled or forced,
+// and whether one is under way now.
+type SyncStatus struct {
+	Running bool
+	// Run numbers the finished run this describes; zero before any has
+	// finished. Trigger hands back the number of the run it starts, so a
+	// caller waiting on that run knows it has landed once Run reaches it.
+	Run      uint64
+	Finished time.Time
+	// Err is empty when the run succeeded. A failed run left the previous
+	// metadata serving.
+	Err string
+}
+
+// Status reports the newest finished run and whether another is going.
+func (s *Syncer) Status() SyncStatus {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	out := s.last
+	out.Running = s.running > 0
+	return out
+}
+
+func (s *Syncer) begin() uint64 {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.begun++
+	s.running++
+	return s.begun
+}
+
+// finish records a run's outcome unless a newer run has already finished:
+// runs can overlap (a forced one beside the scheduled one), and the older of
+// two finishing last must not report its result as the current one.
+func (s *Syncer) finish(run uint64, err error) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.running--
+	if run <= s.last.Run {
+		return
+	}
+	s.last = SyncStatus{Run: run, Finished: time.Now()}
+	if err != nil {
+		s.last.Err = err.Error()
+	}
+}
+
+// Trigger starts a sync detached from the caller and returns its run number,
+// which Status reaches once the run has finished. Detached because the run
+// fetches from the network with its own timeout: a request held open for it
+// looked broken on a slow link, and its outcome must not depend on a client
+// that may have gone away.
+func (s *Syncer) Trigger() uint64 {
+	run := s.begin()
+	go func() {
+		err := s.syncOnce(context.Background())
+		s.finish(run, err)
+		if err != nil {
+			slog.Warn("catalog sync failed; serving the previous metadata", "err", err)
+		}
+	}()
+	return run
 }
 
 func NewSyncer(db *store.DB, src provider.Source, cat *Store, opts SyncOptions) *Syncer {
@@ -113,7 +186,16 @@ func (s *Syncer) Run(ctx context.Context) error {
 // contract from spec §4: a fetch error leaves the cache alone and logs a
 // warning, because a gateway that loses its prices when a CDN has a bad minute
 // is worse than one running on yesterday's numbers.
+//
+// Its outcome is recorded for Status whichever way it went.
 func (s *Syncer) SyncOnce(ctx context.Context) error {
+	run := s.begin()
+	err := s.syncOnce(ctx)
+	s.finish(run, err)
+	return err
+}
+
+func (s *Syncer) syncOnce(ctx context.Context) error {
 	doc, err := s.fetch(ctx)
 	if err != nil {
 		return err

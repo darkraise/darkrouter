@@ -34,7 +34,14 @@ type Patch struct {
 // RejectedError is a write refused for what it says rather than for a failure
 // to store it. The admin API answers 400 for it and 500 for everything else:
 // one is the operator's to fix, the other is not.
-type RejectedError struct{ Msg string }
+type RejectedError struct {
+	Msg string
+	// Keys are the settings the refusal is about, when it is about settings:
+	// the console puts the message on those rows. Read from here rather than
+	// out of Msg, so the sentence can be written for a person instead of
+	// carrying a key list for a parser.
+	Keys []string
+}
 
 func (e RejectedError) Error() string { return e.Msg }
 

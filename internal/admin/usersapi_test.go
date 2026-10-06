@@ -197,3 +197,27 @@ func TestCreateRefusesAShortPassword(t *testing.T) {
 		t.Error("an account was created with a short password")
 	}
 }
+
+// The create side of the two COORD findings: a long name is refused for its
+// length rather than as missing, and the password floor counts characters.
+func TestCreateNamesWhatIsWrongWithTheCredentials(t *testing.T) {
+	s, _, cookie := newServerWithSession(t)
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"a 65-character username",
+			`{"username":"` + strings.Repeat("x", maxUsernameChars+1) + `","password":"correct-horse-battery","role":"member"}`,
+			"a username can be at most 64 characters"},
+		{"a four-character CJK password",
+			`{"username":"bob","password":"密码密码","role":"member"}`,
+			"the password must be at least 12 characters"},
+	} {
+		rec := postJSONAs(t, s, "/api/users", tc.body, cookie)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s, want 400 %q", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+	if n, _ := s.deps.DB.UserCount(t.Context()); n != 1 {
+		t.Errorf("users = %d, want 1: a refused create stored an account", n)
+	}
+}

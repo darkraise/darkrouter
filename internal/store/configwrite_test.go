@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -140,6 +141,55 @@ func TestWriteConfigRefusesABrokenCrossKeyRule(t *testing.T) {
 	// has to work out what to set the value to.
 	if !strings.Contains(err.Error(), "must be at least connect + first_byte") {
 		t.Errorf("the refusal does not say by how much: %v", err)
+	}
+}
+
+// A refusal is read by a person at a form, not a log. It once quoted Go's
+// parser ("strconv.ParseInt: parsing ...") and printed a rule's keys as a Go
+// slice; it now says what the key expects, and carries the keys it is about
+// so the console can place it without reading them out of the sentence.
+func TestWriteConfigRefusalsAreWrittenForAPerson(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string
+		want       string
+		keys       []string
+	}{
+		{"capture.max_bytes", "2 TB", "capture.max_bytes must be a whole number of bytes", nil},
+		{"policy.retry.max_attempts", "abc", "policy.retry.max_attempts must be a whole number", nil},
+		{"policy.retry.max_attempts", "99999999999999999999", "policy.retry.max_attempts is too large", nil},
+		{"policy.timeout.idle", "10", "policy.timeout.idle must be a duration such as 30s, 5m or 2h", nil},
+		{"capture.bodies", "maybe", "capture.bodies must be true or false", nil},
+		{"policy.retry.max_attempts", "20", "policy.retry.max_attempts must be between 1 and 10", nil},
+		{"log.retention", "24h", "log.retention must be at least 48h", nil},
+		{"policy.timeout.total", "30s",
+			"policy.timeout.total (30s) must be at least connect + first_byte (1m10s)",
+			[]string{"policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"}},
+	} {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			db, ctx := migrated(t), context.Background()
+			_, err := WriteConfig(ctx, db, config.Bootstrap{}, config.Patch{
+				Set: map[string]string{tc.key: tc.value},
+			})
+			var rejected config.RejectedError
+			if !errors.As(err, &rejected) {
+				t.Fatalf("err = %v, want a RejectedError", err)
+			}
+			if !strings.HasPrefix(rejected.Msg, tc.want) {
+				t.Errorf("message = %q, want it to open %q", rejected.Msg, tc.want)
+			}
+			for _, jargon := range []string{"strconv", "time:", "unusable", "broke the", "["} {
+				if strings.Contains(rejected.Msg, jargon) {
+					t.Errorf("message = %q still carries %q", rejected.Msg, jargon)
+				}
+			}
+			keys := tc.keys
+			if keys == nil {
+				keys = []string{tc.key}
+			}
+			if !slices.Equal(rejected.Keys, keys) {
+				t.Errorf("keys = %v, want %v", rejected.Keys, keys)
+			}
+		})
 	}
 }
 

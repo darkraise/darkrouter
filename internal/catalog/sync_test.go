@@ -2,8 +2,10 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -143,6 +145,68 @@ func TestSyncSurvivesEveryFailureShape(t *testing.T) {
 				t.Errorf("%s: the cache was damaged; cheap price = %d", name, r.InputMicrosPerMTok)
 			}
 		}
+	}
+}
+
+// A forced sync answers at once, so its outcome has to be readable afterwards:
+// it once reached only the server log, and an operator could not tell a run
+// that worked from one that failed.
+func TestStatusReportsWhatTheTriggeredRunCameTo(t *testing.T) {
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(syncDoc))
+	}))
+	defer srv.Close()
+
+	db, src, cat := syncFixture(t)
+	s := NewSyncer(db, src, cat, SyncOptions{URL: srv.URL, Presets: testPresets()})
+	if got := s.Status(); got.Run != 0 || got.Running {
+		t.Fatalf("status before any run = %+v, want empty", got)
+	}
+
+	await := func(run uint64) SyncStatus {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if st := s.Status(); st.Run >= run && !st.Running {
+				return st
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("run %d never finished: %+v", run, s.Status())
+		return SyncStatus{}
+	}
+
+	ok := await(s.Trigger())
+	if ok.Err != "" || ok.Finished.IsZero() {
+		t.Errorf("a good run reported %+v", ok)
+	}
+
+	fail.Store(true)
+	run := s.Trigger()
+	if run <= ok.Run {
+		t.Fatalf("run numbers did not advance: %d after %d", run, ok.Run)
+	}
+	bad := await(run)
+	if !strings.Contains(bad.Err, "403") {
+		t.Errorf("a failed run reported %+v, want the fetch's 403", bad)
+	}
+}
+
+// Runs overlap -- a forced one beside the scheduled one -- and the older one
+// finishing last must not overwrite the newer one's outcome.
+func TestStatusKeepsTheNewestRunsOutcome(t *testing.T) {
+	db, src, cat := syncFixture(t)
+	s := NewSyncer(db, src, cat, SyncOptions{URL: "http://127.0.0.1:1", Presets: testPresets()})
+	older, newer := s.begin(), s.begin()
+	s.finish(newer, nil)
+	s.finish(older, errors.New("stale failure"))
+	if st := s.Status(); st.Run != newer || st.Err != "" || st.Running {
+		t.Errorf("status = %+v, want run %d's success with nothing running", st, newer)
 	}
 }
 

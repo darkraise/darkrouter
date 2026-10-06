@@ -3,6 +3,8 @@ import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
 import {
   SETTINGS,
   displayOf,
+  bytesProblem,
+  compactDuration,
   formatBytes,
   formatDuration,
   parseBytes,
@@ -213,6 +215,47 @@ describe("parseBytes", () => {
     expect(parseBytes("")).toBeUndefined()
     expect(parseBytes("many")).toBeUndefined()
     expect(parseBytes("-1")).toBeUndefined()
+  })
+  it("refuses a size past what a number holds exactly, rather than rounding it", () => {
+    // 9999999999 GB came out as 10737418238926258000, which nobody typed.
+    expect(parseBytes("9999999999 GB")).toBeUndefined()
+    expect(parseBytes("99999999999999999999")).toBeUndefined()
+    expect(parseBytes(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER)
+  })
+})
+
+describe("compactDuration", () => {
+  it("drops the zero units Go's String() adds", () => {
+    expect(compactDuration("720h0m0s")).toBe("720h")
+    expect(compactDuration("12h0m0s")).toBe("12h")
+    expect(compactDuration("2m0s")).toBe("2m")
+    expect(compactDuration("1h30m0s")).toBe("1h30m")
+    expect(compactDuration("1h0m0.5s")).toBe("1h0.5s")
+  })
+  it("leaves what it has nothing to drop from alone", () => {
+    expect(compactDuration("30s")).toBe("30s")
+    expect(compactDuration("0s")).toBe("0s")
+    expect(compactDuration("500ms")).toBe("500ms")
+    expect(compactDuration("not a duration")).toBe("not a duration")
+  })
+  it("stays the same setting, so seeding with it is not an edit", () => {
+    for (const raw of ["720h0m0s", "2m0s", "1h30m0s"]) {
+      expect(sameSetting(compactDuration(raw), raw, "duration")).toBe(true)
+    }
+  })
+})
+
+describe("bytesProblem", () => {
+  it("passes what the box can store", () => {
+    expect(bytesProblem("32 MB")).toBeNull()
+    expect(bytesProblem("33554432")).toBeNull()
+  })
+  it("names the units the box takes for text it cannot read", () => {
+    expect(bytesProblem("2 TB")).toBe("Use a size such as 512 KB, 32 MB or 1 GB.")
+    expect(bytesProblem("lots")).toBe("Use a size such as 512 KB, 32 MB or 1 GB.")
+  })
+  it("says a readable size is too large rather than unreadable", () => {
+    expect(bytesProblem("9999999999 GB")).toBe("That size is too large.")
   })
 })
 

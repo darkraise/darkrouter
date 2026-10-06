@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -296,6 +297,54 @@ func ConfigRowsFor(c *config.Config) map[string]string {
 // read-only container cannot be edited without the sqlite CLI.
 func ApplyConfigRows(c *config.Config, rows map[string]string) []string {
 	var warnings []string
+	for _, f := range applyConfigRows(c, rows) {
+		warnings = append(warnings, f.warning())
+	}
+	return warnings
+}
+
+// rowFailure is one stored row ApplyConfigRows could not use, kept as the
+// parts rather than the sentence. The loader's warning is written for a log
+// and quotes Go's own error; a save refused over the same row has a person
+// waiting, and needs a reason they can act on, which only the parts give.
+type rowFailure struct {
+	key  string
+	kind ConfigKind
+	// parse is true when the value did not parse at all, as opposed to
+	// parsing and failing the key's own bound.
+	parse bool
+	err   error
+}
+
+func (f rowFailure) warning() string {
+	return fmt.Sprintf("stored %s is unusable (%v); using the default", f.key, f.err)
+}
+
+// reason is the refusal a person reads. A bound already says what it wants in
+// words of its own; a parse failure says only what Go's parser tripped on, so
+// it is replaced by what the key expects.
+func (f rowFailure) reason() string {
+	if !f.parse {
+		return f.err.Error()
+	}
+	if errors.Is(f.err, strconv.ErrRange) {
+		return f.key + " is too large"
+	}
+	switch f.kind {
+	case KindInt:
+		return f.key + " must be a whole number"
+	case KindBytes:
+		return f.key + " must be a whole number of bytes"
+	case KindDuration:
+		return f.key + " must be a duration such as 30s, 5m or 2h"
+	case KindBool:
+		return f.key + " must be true or false"
+	}
+	return f.warning()
+}
+
+func applyConfigRows(c *config.Config, rows map[string]string) []rowFailure {
+	var failures []rowFailure
 	for _, f := range configRegistry {
 		v, ok := rows[f.key]
 		if !ok {
@@ -308,18 +357,16 @@ func ApplyConfigRows(c *config.Config, rows map[string]string) []string {
 		// allocated pointer, so it shares nothing with the original.
 		scratch := *c
 		if err := f.set(&scratch, v); err != nil {
-			warnings = append(warnings,
-				fmt.Sprintf("stored %s is unusable (%v); using the default", f.key, err))
+			failures = append(failures, rowFailure{key: f.key, kind: f.kind, parse: true, err: err})
 			continue
 		}
 		if f.validate != nil {
 			if err := f.validate(&scratch); err != nil {
-				warnings = append(warnings,
-					fmt.Sprintf("stored %s is unusable (%v); using the default", f.key, err))
+				failures = append(failures, rowFailure{key: f.key, kind: f.kind, err: err})
 				continue
 			}
 		}
 		*c = scratch
 	}
-	return warnings
+	return failures
 }
