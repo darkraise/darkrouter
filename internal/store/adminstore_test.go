@@ -777,6 +777,59 @@ func TestTheAttemptedProviderFilterMatchesAnyAttempt(t *testing.T) {
 	}
 }
 
+// The model filter finds a request by what the table shows for it -- the
+// model the client asked for -- as well as by what served it, and by any
+// model an attempt ran on, which is what usage credits a model with. A
+// failure has no served model, so a filter on that alone could never find one.
+func TestTheModelFilterMatchesRequestedServedAndAttemptedModels(t *testing.T) {
+	db := migrated(t)
+	ctx := context.Background()
+	db.WriteBatchForTest(t, []*RequestRecord{
+		{ID: "01FAILED", TS: time.UnixMilli(5), Dialect: "openai", Surface: "llm",
+			RequestedModel: "mock-error", Status: "error",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "lmstudio", Model: "mock-error", Outcome: "retryable_provider"},
+			}},
+		{ID: "01PREFIXED", TS: time.UnixMilli(4), Dialect: "openai", Surface: "llm",
+			RequestedModel: "lmstudio/mock-fast", FinalProviderID: "lmstudio",
+			FinalModel: "mock-fast", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "lmstudio", Model: "mock-fast", Outcome: "success"},
+			}},
+		{ID: "01ALIAS", TS: time.UnixMilli(3), Dialect: "openai", Surface: "llm",
+			RequestedModel: "failover", ResolvedAlias: "failover", FinalProviderID: "lmstudio",
+			FinalModel: "mock-fast", Status: "success",
+			Attempts: []AttemptRecord{
+				{Seq: 1, ProviderID: "vllm", Model: "flaky-1", Outcome: "retryable_provider"},
+				{Seq: 2, ProviderID: "lmstudio", Model: "mock-fast", Outcome: "success"},
+			}},
+	})
+
+	ids := func(model string) []string {
+		t.Helper()
+		got, err := db.ListRequests(ctx, RequestQuery{Limit: 10, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range got {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+	for model, want := range map[string][]string{
+		"mock-error":         {"01FAILED"},
+		"lmstudio/mock-fast": {"01PREFIXED"},
+		"mock-fast":          {"01PREFIXED", "01ALIAS"},
+		"flaky-1":            {"01ALIAS"},
+		"failover":           {"01ALIAS"},
+	} {
+		if got := ids(model); !slices.Equal(got, want) {
+			t.Errorf("model=%s = %v, want %v", model, got, want)
+		}
+	}
+}
+
 // usageNow is the clock the usage fixtures are dated against.
 var usageNow = time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 
