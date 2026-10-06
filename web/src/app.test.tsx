@@ -104,6 +104,19 @@ describe("a session that dies while the console is open", () => {
     expect(screen.queryByRole("link", { name: /Requests/i })).not.toBeInTheDocument()
   })
 
+  it("says the session ended, and names the tab for the sign-in form", async () => {
+    // An empty form with no reason, under a tab still reading "Requests ·
+    // Darkrouter", looked like a working page in the background.
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+
+    sessionGone()
+    await expect(api.get("/api/overview")).rejects.toThrow()
+
+    expect(await screen.findByText(/session has ended/i)).toHaveAttribute("role", "status")
+    expect(document.title).toBe("Sign in · Darkrouter")
+  })
+
   it("puts the shell back when the operator signs in again", async () => {
     render(<App />)
     await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
