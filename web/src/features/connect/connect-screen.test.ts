@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { copyToClipboard, liveSurfaces, originsFor } from "./connect-screen"
+import { copyToClipboard, gatewayAuth, liveSurfaces, originsFor, publicUrlProblem } from "./connect-screen"
 import type { Model } from "../../lib/api-types"
 
 const model = (id: string): Model => ({
@@ -131,5 +131,39 @@ describe("copyToClipboard", () => {
     })
     await expect(copyToClipboard("secret")).resolves.toBe(false)
     Object.assign(navigator, { clipboard: undefined })
+  })
+})
+
+describe("publicUrlProblem", () => {
+  it.each([
+    "",
+    "llm.example.com",
+    "llm.example.com:8443",
+    "http://gateway:18080",
+    "https://llm.example.com/gateway",
+    "https://llm.example.com/v1-proxy",
+  ])("accepts %j", (v) => {
+    expect(publicUrlProblem(v)).toBeUndefined()
+  })
+
+  it.each([
+    ["https://llm.example.com/v1", /ends in \/v1\./],
+    ["https://llm.example.com/prefix/v1beta/", /ends in \/prefix\/v1beta\./],
+    ["ftp://llm.example.com", /uses ftp:\/\//],
+    ["not a url", /is not a URL/],
+    ["https://llm.example.com?x=1", /query or fragment/],
+  ])("refuses %j, quoting it as typed", (v, reason) => {
+    expect(publicUrlProblem(v)).toMatch(reason)
+    expect(publicUrlProblem(v)).toContain(`"${v}"`)
+  })
+})
+
+describe("gatewayAuth", () => {
+  const token = { id: "t", name: "n", prefix: "p", created_at: "", last_used_at: null }
+  it("reads an empty list as open only when no token was ever issued", () => {
+    expect(gatewayAuth({ tokens: [], issued: false })).toBe("open")
+    expect(gatewayAuth({ tokens: [], issued: false, shared_secret: true })).toBe("shared")
+    expect(gatewayAuth({ tokens: [], issued: true })).toBe("revoked")
+    expect(gatewayAuth({ tokens: [token], issued: true })).toBe("tokens")
   })
 })
