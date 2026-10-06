@@ -4,6 +4,22 @@
  *  new password. */
 export const MIN_PASSWORD = 12
 
+/** The server's username limit (setupapi.go, `maxUsernameChars`), as the
+ *  username inputs' `maxLength`, so a name the server would refuse cannot be
+ *  typed at all. maxLength counts UTF-16 units where the server counts
+ *  characters, which only makes the field stricter, for names built from
+ *  characters outside the Basic Multilingual Plane. */
+export const MAX_USERNAME = 64
+
+/**
+ * A password's length as the server counts it: in characters, which in Go is
+ * runes and here is code points. `.length` counts UTF-16 units, so an emoji is
+ * two of them; the two sides must agree on what "12 characters" means.
+ */
+export function characterCount(text: string): number {
+  return [...text].length
+}
+
 /**
  * The one guard behind every password-confirmation pair in the console: the
  * same floor and the same match check, worded per screen. A claim ("The
@@ -16,7 +32,7 @@ export function passwordConfirmationProblem(
   confirm: string,
   wording: { tooShort: string; mismatch: string },
 ): string | null {
-  if (password.length < MIN_PASSWORD) return wording.tooShort
+  if (characterCount(password) < MIN_PASSWORD) return wording.tooShort
   if (password !== confirm) return wording.mismatch
   return null
 }

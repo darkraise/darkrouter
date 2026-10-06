@@ -212,6 +212,20 @@ func validate(c *Config) error {
 		if u.RawQuery != "" || u.Fragment != "" {
 			return fmt.Errorf("server.public_url must not carry a query or fragment, got %q", c.Server.PublicURL)
 		}
+		// The gateway speaks HTTP and nothing else, and Connect hands this
+		// value to every client as its base URL: an ftp:// address saved here
+		// became every snippet's ANTHROPIC_BASE_URL. url.Parse has already
+		// lowercased the scheme.
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("server.public_url must start with http:// or https://, got %q", c.Server.PublicURL)
+		}
+		// Connect appends /v1 and /v1beta itself, so a value already ending in
+		// one turned into .../v1/v1 in every snippet. Refused rather than
+		// trimmed: a prefix that really ends in /v1 is rare enough that
+		// guessing it away would surprise more people than it helps.
+		if p := strings.TrimRight(u.Path, "/"); strings.HasSuffix(p, "/v1") || strings.HasSuffix(p, "/v1beta") {
+			return fmt.Errorf("server.public_url must not end in /v1 or /v1beta; Connect adds those itself, got %q", c.Server.PublicURL)
+		}
 	}
 	t := c.Policy.Timeout
 	for _, d := range []struct {

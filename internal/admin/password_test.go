@@ -1,11 +1,38 @@
 package admin
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/darkraise/darkrouter/internal/store/storetest"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// The floor is characters, the ceiling bytes. Four CJK characters are twelve
+// UTF-8 bytes, which a byte floor took for a twelve-character password; and a
+// password of short characters that runs past 72 bytes is still one bcrypt
+// would silently truncate.
+func TestPasswordProblemCountsCharactersForTheFloorAndBytesForTheCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		name, password string
+		want           string
+	}{
+		{"four CJK characters", "密码密码", "at least 12 characters"},
+		{"eleven ASCII characters", strings.Repeat("a", 11), "at least 12 characters"},
+		{"twelve CJK characters", strings.Repeat("密", 12), ""},
+		{"twelve ASCII characters", strings.Repeat("a", 12), ""},
+		{"72 bytes exactly", strings.Repeat("a", 72), ""},
+		{"25 CJK characters, 75 bytes", strings.Repeat("密", 25), "at most 72 bytes"},
+	} {
+		got := passwordProblem("the password", tc.password)
+		if tc.want == "" && got != "" {
+			t.Errorf("%s: refused with %q, want accepted", tc.name, got)
+		}
+		if tc.want != "" && !strings.Contains(got, tc.want) {
+			t.Errorf("%s: got %q, want it to say %q", tc.name, got, tc.want)
+		}
+	}
+}
 
 func TestServerPasswordDefaultsUseProductionCost(t *testing.T) {
 	// Deliberately bypass testServer: its private overrides must never change
