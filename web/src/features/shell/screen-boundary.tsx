@@ -8,13 +8,23 @@ import { Component, type ReactNode } from "react"
  * fail for the same reason the screen it is reporting on did -- which is
  * exactly how this fallback was first written, and it threw.
  */
-export function ScreenError({ error, reset }: { error: unknown; reset?: () => void }) {
+export function ScreenError({
+  error,
+  reset,
+  subject = "screen",
+}: {
+  error: unknown
+  reset?: () => void
+  /** What failed, in the operator's words: a screen, or a piece of the
+   *  shell such as the search palette. */
+  subject?: string
+}) {
   const message = error instanceof Error ? error.message : String(error)
   return (
     <div className="p-6">
-      <h1 className="text-lg font-semibold">This screen could not render</h1>
+      <h1 className="text-lg font-semibold">This {subject} could not render</h1>
       <p className="mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-        The gateway is still running — only this screen failed.
+        The gateway is still running — only this {subject} failed.
       </p>
       <pre className="mt-4 overflow-x-auto rounded border border-[hsl(var(--border))] p-3 font-mono text-sm">
         {message}
@@ -45,7 +55,13 @@ export function ScreenError({ error, reset }: { error: unknown; reset?: () => vo
  * mounts a fresh boundary rather than carrying the error to the next one.
  */
 export class ScreenBoundary extends Component<
-  { children: ReactNode; onReset?: () => void },
+  {
+    children: ReactNode
+    onReset?: () => void
+    /** What to show instead of the in-page error, for a boundary around
+     *  something that is not a screen and has no page of its own to fill. */
+    fallback?: (error: Error, reset: () => void) => ReactNode
+  },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null }
@@ -61,6 +77,7 @@ export class ScreenBoundary extends Component<
 
   render() {
     if (!this.state.error) return this.props.children
+    if (this.props.fallback) return this.props.fallback(this.state.error, this.reset)
     return <ScreenError error={this.state.error} reset={this.reset} />
   }
 }

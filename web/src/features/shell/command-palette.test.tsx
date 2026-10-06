@@ -79,7 +79,44 @@ describe("the palette's matching", () => {
   })
 
   it("recognises a request id by shape", () => {
-    expect(paletteMatches("01abc9ff", {}).requestId).toBe("01abc9ff")
+    // A real id, as the gateway mints them: a ULID, which almost always
+    // carries letters past F. The hex-only pattern this replaces said
+    // "Nothing matches." to exactly this.
+    expect(paletteMatches("01M47PJFXTQNG6Z3WZ39X4QZM2", {}).requestId).toBe(
+      "01M47PJFXTQNG6Z3WZ39X4QZM2",
+    )
+    expect(paletteMatches("  01M47PJFXTQNG6Z3WZ39X4QZM2 ", {}).requestId).toBe(
+      "01M47PJFXTQNG6Z3WZ39X4QZM2",
+    )
     expect(paletteMatches("groq", {}).requestId).toBeNull()
+  })
+
+  it("opens a lower-cased id as the upper-case one the gateway stores", () => {
+    expect(paletteMatches("01m47pjfxtqng6z3wz39x4qzm2", {}).requestId).toBe(
+      "01M47PJFXTQNG6Z3WZ39X4QZM2",
+    )
+  })
+
+  it("does not take a word, a hex fragment or a near-ULID for an id", () => {
+    expect(paletteMatches("01abc9ff", {}).requestId).toBeNull()
+    // 25 and 27 characters, and one with a U, which Crockford base-32 omits.
+    expect(paletteMatches("01M47PJFXTQNG6Z3WZ39X4QZM", {}).requestId).toBeNull()
+    expect(paletteMatches("01M47PJFXTQNG6Z3WZ39X4QZM22", {}).requestId).toBeNull()
+    expect(paletteMatches("01M47PJFXTQNG6Z3WZ39X4QZMU", {}).requestId).toBeNull()
+  })
+
+  it("lists nothing from a response of the wrong shape, rather than throwing", () => {
+    // The palette is shell: a throw here took the rail and header down with
+    // it. These are what an older or broken gateway could put in the cache.
+    for (const data of [
+      { providers: 5, aliases: "x", models: { m: 1 } },
+      { providers: [null, 3, "groq"], aliases: [], models: [null, { model: "m", providers: 7 }] },
+    ]) {
+      const got = paletteMatches("m", data)
+      expect(got.providers).toEqual([])
+      expect(got.aliases).toEqual([])
+    }
+    const got = paletteMatches("m", { models: [{ model: "m", providers: 7 }] })
+    expect(got.models.map((m) => m.model)).toEqual(["m"])
   })
 })

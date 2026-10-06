@@ -3,6 +3,7 @@ import {
   Activity,
   Boxes,
   Cable,
+  FileQuestionMark,
   Gauge,
   ListTree,
   Server,
@@ -121,6 +122,20 @@ export function identityFor(pathname: string): PageIdentity | undefined {
   return best?.identity
 }
 
+/** What the header says at an address no route answers. The bar used to
+ *  render nothing there, which also took away what pushed the header's
+ *  actions to the right, and left the tab still named for the last page. */
+export const NOT_FOUND: PageIdentity = {
+  title: "Not found",
+  description: "There is no page at this address",
+  icon: FileQuestionMark,
+}
+
+/** The identity the chrome shows for a path: its section's, or NOT_FOUND. */
+export function pageIdentity(pathname: string): PageIdentity {
+  return identityFor(pathname) ?? NOT_FOUND
+}
+
 /**
  * The page's name, mark and purpose, in the app header.
  *
@@ -131,8 +146,7 @@ export function identityFor(pathname: string): PageIdentity | undefined {
  */
 export function PageIdentityBar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const page = identityFor(pathname)
-  if (page === undefined) return null
+  const page = pageIdentity(pathname)
   const Icon = page.icon
   return (
     <div className="mr-auto flex min-w-0 items-center gap-3">
