@@ -11,7 +11,7 @@ import (
 func TestLastUsedRoundTrip(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestLastUsedRoundTrip(t *testing.T) {
 func TestLoadLastUsedSkipsNeverUsedCredentials(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, _ := OpenKeyring(ctx, db, "master")
+	key, _ := OpenKeyringForTest(ctx, db, "master")
 	seededProvider(t, db, "groq")
 	if _, err := db.AddCredential(ctx, key, Credential{ProviderID: "groq", Secret: "a", Enabled: true}); err != nil {
 		t.Fatal(err)

@@ -1,6 +1,11 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/darkraise/darkrouter/internal/crypto"
+)
 
 // FailoverTraceFixture is the two-attempt trace the admin handler tests and
 // this package's own tests read. One definition rather than one per package,
@@ -30,4 +35,18 @@ func FailoverTraceFixture(id string) []*RequestRecord {
 				TokensIn: 10, TokensOut: 20, CostMicros: &attempt2Cost},
 		},
 	}}
+}
+
+// TestKDFIterations is the iteration count OpenKeyringForTest records. It is
+// low because a test derives a fresh keyring per database, and at
+// crypto.DefaultIterations that one derivation was most of the admin suite's
+// runtime.
+const TestKDFIterations = 1000
+
+// OpenKeyringForTest is OpenKeyring for a test database: a keyring it creates
+// is derived at TestKDFIterations rather than crypto.DefaultIterations. A
+// database that already has a keyring is opened at its stored count, exactly
+// as OpenKeyring would. Production code calls OpenKeyring.
+func OpenKeyringForTest(ctx context.Context, d *DB, master string) (*crypto.Key, error) {
+	return openKeyring(ctx, d, master, TestKDFIterations)
 }

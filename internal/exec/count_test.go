@@ -135,13 +135,17 @@ func countExecutorWith(t *testing.T, kind, upstreamURL, preset string, deps Deps
 var fakeCountKey = health.Key{ProviderID: "fake", KeyID: "", Model: "m"}
 
 func TestHandleCountGivesUpAtTheAttemptDeadline(t *testing.T) {
+	// The upstream never answers. Releasing it before up.Close is what keeps
+	// Close from waiting on the stalled handler.
+	release := make(chan struct{})
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
-		case <-time.After(3 * time.Second):
+		case <-release:
 		}
 	}))
 	defer up.Close()
+	defer close(release)
 
 	e := countExecutorWith(t, "anthropic", up.URL, "", Deps{}, func(c *config.Config) {
 		c.Policy.Timeout.Connect = 5 * time.Millisecond

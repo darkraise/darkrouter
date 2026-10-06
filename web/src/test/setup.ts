@@ -29,3 +29,15 @@ if (!globalThis.ResizeObserver) {
 // overwrite rather than fill a gap. Left alone it prints on every render that
 // scrolls and buries real warnings in the suite's output.
 window.scrollTo = (() => {}) as typeof window.scrollTo
+
+// Under the vmThreads pool each file's jsdom context lacks Node's WEB streams,
+// which the fetch Response and the SSE decoder both use.
+if (!globalThis.ReadableStream) {
+  const web = await import("node:stream/web")
+  Object.assign(globalThis, {
+    ReadableStream: web.ReadableStream,
+    WritableStream: web.WritableStream,
+    TransformStream: web.TransformStream,
+    TextDecoderStream: web.TextDecoderStream,
+  })
+}

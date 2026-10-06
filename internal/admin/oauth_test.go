@@ -104,7 +104,7 @@ func serverWithRedirectStyle(t *testing.T, redirect catalog.Redirect) (
 	t.Helper()
 	fake, srv := newFakeAuthServer(t)
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(context.Background(), db, "master")
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestCompleteGivesUpOnATokenEndpointThatNeverAnswers(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(context.Background(), db, "master")
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

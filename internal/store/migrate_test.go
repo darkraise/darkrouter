@@ -2,17 +2,53 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// migratedImage is storetest.Migrated's template, rebuilt here because this
+// package cannot import storetest. The migrations run for real once per test
+// binary; tests that exercise Migrate itself call it on openTest directly.
+var migratedImage = sync.OnceValues(func() ([]byte, error) {
+	dir, err := os.MkdirTemp("", "darkrouter-store-schema-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "template.db")
+	db, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := db.Close(); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+})
+
+// migrated opens an isolated copy of the fully migrated schema.
 func migrated(t *testing.T) *DB {
 	t.Helper()
-	db := openTest(t)
-	if err := db.Migrate(context.Background()); err != nil {
+	image, err := migratedImage()
+	if err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(t.TempDir(), "test.db")
+	if err := os.WriteFile(path, image, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

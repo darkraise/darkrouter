@@ -51,7 +51,7 @@ func TestInitSettingKeepsTheFirstValue(t *testing.T) {
 func TestRequestTraceJoinsTheCredentialLabel(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

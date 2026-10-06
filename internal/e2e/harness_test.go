@@ -100,7 +100,7 @@ func unclaimedGateway(t *testing.T, dbPath string, opts ...server.Option) *gatew
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	key, err := store.OpenKeyring(ctx, db, "e2e-master-key")
+	key, err := store.OpenKeyringForTest(ctx, db, "e2e-master-key")
 	if err != nil {
 		t.Fatal(err)
 	}

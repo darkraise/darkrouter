@@ -64,7 +64,7 @@ func TestProviderMutationsReportSentinels(t *testing.T) {
 func TestCredentialSummariesNeedNoKey(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestCredentialSummariesNeedNoKey(t *testing.T) {
 func TestReplaceProviderCredentialSecretIsScoped(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

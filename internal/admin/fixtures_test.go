@@ -139,7 +139,7 @@ func testServerFullWithConfig(t *testing.T, tune func(*config.Config)) (*Server,
 func testServerFullWith(t *testing.T, aliases map[string][]string, tune func(*config.Config)) (*Server, *store.DB) {
 	t.Helper()
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(context.Background(), db, "master")
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func testServerWithExecutor(t *testing.T, upstreamURL, model string) *Server {
 func testServerWithExecutorLog(t *testing.T, upstreamURL, model string, logger exec.Logger) *Server {
 	t.Helper()
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(context.Background(), db, "master")
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,7 @@ func credentialFixture(t *testing.T) (*DB, *crypto.Key) {
 	t.Helper()
 	ctx := context.Background()
 	db := migrated(t)
-	key, err := OpenKeyring(ctx, db, "test-master-key")
+	key, err := OpenKeyringForTest(ctx, db, "test-master-key")
 	if err != nil {
 		t.Fatal(err)
 	}

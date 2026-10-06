@@ -91,17 +91,21 @@ func TestCommittedStreamOutlivesTheTotalBudget(t *testing.T) {
 
 // A committed stream that goes silent is cut at idle.
 func TestCommittedStreamIsCutAtIdle(t *testing.T) {
+	// The upstream stays silent until the test ends, far past idle. Releasing it
+	// before up.Close is what keeps Close from waiting out a fixed sleep.
+	release := make(chan struct{})
 	sc := &scripted{by: map[string]http.HandlerFunc{
 		"g1": func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
 			w.(http.Flusher).Flush()
-			time.Sleep(3 * time.Second) // far past idle
+			<-release
 			_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		},
 	}}
 	up := httptest.NewServer(sc)
 	defer up.Close()
+	defer close(release)
 
 	e, _ := loopExecutor(t, up, twoKeyFleet(), &captureLogger{}, func(c *config.Config) {
 		c.Policy.Timeout.Connect = 5 * time.Millisecond

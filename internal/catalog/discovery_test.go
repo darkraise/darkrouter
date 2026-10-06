@@ -18,6 +18,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/health"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // fakeHealth records what discovery told the breaker, without a real one.
@@ -83,14 +84,7 @@ func (s *staticSource) Revision() uint64                                       {
 func discoveryDB(t *testing.T, ids ...string) *store.DB {
 	t.Helper()
 	ctx := context.Background()
-	db, err := store.Open(t.TempDir() + "/d.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db := storetest.Migrated(t)
 	for _, id := range ids {
 		if _, err := db.Write.ExecContext(ctx,
 			`INSERT INTO providers (id, kind, base_url, created_at) VALUES (?, 'openaicompat', 'http://x', 0)`,

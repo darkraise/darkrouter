@@ -265,7 +265,7 @@ func TestDeleteCascadesToCredentialsAndModels(t *testing.T) {
 	// makes real — this is the test that proves the pragma is actually set.
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestDeletingAnUnknownProviderIsAnError(t *testing.T) {
 func TestDeleteCredentialLeavesTheProvider(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

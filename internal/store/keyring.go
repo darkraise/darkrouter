@@ -63,6 +63,13 @@ func putSetting(ctx context.Context, e execer, key, value string) error {
 // a salt, records the iteration count, and stores a verifier. On every later
 // run it re-derives from the stored parameters and checks the verifier.
 func OpenKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error) {
+	return openKeyring(ctx, d, master, crypto.DefaultIterations)
+}
+
+// openKeyring is OpenKeyring with the iteration count a first run records. Only
+// tests pass anything but crypto.DefaultIterations; a later run always derives
+// at whatever count is stored.
+func openKeyring(ctx context.Context, d *DB, master string, iterations int) (*crypto.Key, error) {
 	if master == "" {
 		return nil, errors.New(
 			"DARKROUTER_MASTER_KEY is not set; it is required from phase 2 onward " +
@@ -74,7 +81,7 @@ func OpenKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error)
 		return nil, err
 	}
 	if !ok {
-		return initKeyring(ctx, d, master)
+		return initKeyring(ctx, d, master, iterations)
 	}
 
 	salt, err := hex.DecodeString(saltHex)
@@ -90,12 +97,12 @@ func OpenKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error)
 			"the kdf salt is present but the iteration count is missing; " +
 				"this database's keyring is incomplete and cannot be derived from")
 	}
-	iterations, err := strconv.Atoi(itersRaw)
+	stored, err := strconv.Atoi(itersRaw)
 	if err != nil {
 		return nil, fmt.Errorf("stored kdf iteration count is not a number: %w", err)
 	}
 
-	key, err := crypto.DeriveKey(master, salt, iterations)
+	key, err := crypto.DeriveKey(master, salt, stored)
 	if err != nil {
 		return nil, err
 	}
@@ -141,12 +148,12 @@ func checkVerifier(ctx context.Context, d *DB, key *crypto.Key) error {
 // initKeyring runs on first use. It writes the salt, the iteration count, and
 // the verifier in one transaction on the FULL-sync handle: a half-written
 // keyring would be indistinguishable from a wrong master key on the next start.
-func initKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error) {
+func initKeyring(ctx context.Context, d *DB, master string, iterations int) (*crypto.Key, error) {
 	salt, err := crypto.NewSalt()
 	if err != nil {
 		return nil, err
 	}
-	key, err := crypto.DeriveKey(master, salt, crypto.DefaultIterations)
+	key, err := crypto.DeriveKey(master, salt, iterations)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +170,7 @@ func initKeyring(ctx context.Context, d *DB, master string) (*crypto.Key, error)
 
 	for _, kv := range [][2]string{
 		{settingKDFSalt, hex.EncodeToString(salt)},
-		{settingKDFIterations, strconv.Itoa(crypto.DefaultIterations)},
+		{settingKDFIterations, strconv.Itoa(iterations)},
 		{settingKDFVerifierCiphertext, hex.EncodeToString(ciphertext)},
 		{settingKDFVerifierNonce, hex.EncodeToString(nonce)},
 	} {
