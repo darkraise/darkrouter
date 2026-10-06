@@ -2,11 +2,14 @@ package admin
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
+	"github.com/darkraise/darkrouter/internal/catalog"
 	"github.com/darkraise/darkrouter/internal/health"
 )
 
@@ -123,6 +126,56 @@ func TestForcedSweepsAreAccepted(t *testing.T) {
 		if w.Code != 202 && w.Code != 200 {
 			t.Errorf("POST %s = %d: %s", path, w.Code, w.Body.String())
 		}
+	}
+}
+
+// A forced sync answers before it runs, so what it came to is read back from
+// GET: the run the POST named, finished, with the failure's reason. It once
+// reached only the server log.
+func TestCatalogSyncStatusReportsTheTriggeredRun(t *testing.T) {
+	s, db := testServerFull(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	s.deps.Sync = catalog.NewSyncer(db, s.deps.Src, s.deps.Catalog, catalog.SyncOptions{URL: upstream.URL})
+	cookie, token := login(t, s)
+
+	w := do(t, s, cookie, token, "GET", "/api/catalog/sync", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"run":0`) || strings.Contains(w.Body.String(), "finished_at") {
+		t.Fatalf("status before any run = %d %s", w.Code, w.Body.String())
+	}
+
+	w = do(t, s, cookie, token, "POST", "/api/catalog/sync", "")
+	var started struct {
+		Run uint64 `json:"run"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &started); err != nil || w.Code != 202 || started.Run == 0 {
+		t.Fatalf("POST = %d %s, want 202 naming its run", w.Code, w.Body.String())
+	}
+
+	var status struct {
+		Running    bool   `json:"running"`
+		Run        uint64 `json:"run"`
+		FinishedAt string `json:"finished_at"`
+		Error      string `json:"error"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w = do(t, s, cookie, token, "GET", "/api/catalog/sync", "")
+		if err := json.Unmarshal(w.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Run >= started.Run && !status.Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %d never finished: %s", started.Run, w.Body.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status.FinishedAt == "" || !strings.Contains(status.Error, "403") {
+		t.Errorf("status = %+v, want the finished run's 403", status)
 	}
 }
 

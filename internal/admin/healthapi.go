@@ -89,17 +89,35 @@ func (s *Server) handleForceDiscover(w http.ResponseWriter, r *http.Request) {
 // for it made the button look broken on a slow link and tied the outcome to
 // a client that may have gone away. A failure is logged the way the
 // scheduled sync's is, and the previous metadata keeps serving.
+//
+// The answer names the run it started, and GET on the same path reports runs
+// as they finish, which is how the console says what this one came to: a
+// failure that reached only the log was one the operator never saw.
 func (s *Server) handleForceCatalogSync(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Sync == nil {
 		writeError(w, http.StatusServiceUnavailable, "the catalog syncer is not running")
 		return
 	}
-	go func() {
-		if err := s.deps.Sync.SyncOnce(context.Background()); err != nil {
-			slog.Warn("catalog sync failed; serving the previous metadata", "err", err)
+	run := s.deps.Sync.Trigger()
+	writeJSON(w, http.StatusAccepted, map[string]any{"triggered": true, "run": run})
+}
+
+// handleCatalogSyncStatus reports the newest finished sync, scheduled or
+// forced, and whether one is running. A gateway with no syncer has nothing
+// running and nothing finished, which is an answer rather than an error.
+func (s *Server) handleCatalogSyncStatus(w http.ResponseWriter, r *http.Request) {
+	body := map[string]any{"running": false, "run": 0}
+	if s.deps.Sync != nil {
+		st := s.deps.Sync.Status()
+		body["running"] = st.Running
+		body["run"] = st.Run
+		if !st.Finished.IsZero() {
+			body["finished_at"] = st.Finished.UTC().Format(time.RFC3339)
+			// Present only for a run that finished: "" is a success.
+			body["error"] = st.Err
 		}
-	}()
-	writeJSON(w, http.StatusAccepted, map[string]any{"triggered": true})
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // providerExists writes a 404 and reports false when the id names nothing.

@@ -539,6 +539,16 @@ export type ConfigResponse = {
   serving?: string
 }
 
+/** GET /api/catalog/sync: the newest finished models.dev sync, scheduled or
+ *  forced. `run` is 0, and `finished_at` absent, before any has finished. */
+export type CatalogSyncStatus = {
+  running: boolean
+  run: number
+  finished_at?: string
+  /** Present with `finished_at`; "" when that run succeeded. */
+  error?: string
+}
+
 // --- credentials for clients, and sessions ---
 
 export type ProxyToken = {

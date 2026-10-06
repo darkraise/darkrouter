@@ -258,6 +258,7 @@ func (s *Server) routeTable() []route {
 		{"POST", "/api/providers/{id}/breaker/reset", routeCSRF, s.handleBreakerReset},
 		{"POST", "/api/providers/{id}/discover", routeCSRF, s.handleForceDiscover},
 		{"POST", "/api/catalog/sync", routeCSRF, s.handleForceCatalogSync},
+		{"GET", "/api/catalog/sync", routeSession, s.handleCatalogSyncStatus},
 		{"POST", "/api/route/preview", routeCSRF, s.handleRoutePreview},
 
 		{"GET", "/api/aliases", routeSession, s.handleAliases},

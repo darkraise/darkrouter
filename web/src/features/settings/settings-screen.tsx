@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Badge, Banner, Button, Card, toast } from "darkraise-ui"
 import { AlertTriangle, Boxes, Clock, FileText, KeyRound, Server, ShieldAlert } from "lucide-react"
 import { ApiError, api } from "../../lib/api"
@@ -10,7 +10,7 @@ import { LoadError, LoadingRows } from "../shell/screen-state"
 import { usePurgeConversations } from "../playground/lib/conversations"
 import { keys, useConfig, useSessions, useUsers } from "../../lib/queries"
 import { dateTime, zoneLabel } from "../../lib/format"
-import type { ConfigResponse, Session } from "../../lib/api-types"
+import type { CatalogSyncStatus, ConfigResponse, Session } from "../../lib/api-types"
 import { AccountsCard } from "./accounts-card"
 import { ChangePasswordDialog } from "./change-password-dialog"
 import { SettingField } from "./setting-field"
@@ -19,7 +19,7 @@ import { bytesProblem, displayOf, sameSetting, settingGroups, type GroupId } fro
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
 type ReloadResult = { valid: boolean; error?: string; serving?: string }
-type SyncResult = { triggered: boolean }
+type SyncResult = { triggered: boolean; run?: number }
 
 export type ConfigPatch = { set?: Record<string, string>; reset?: string[] }
 
@@ -138,10 +138,65 @@ export function reloadMessage(res: ReloadResult): string {
     .join(" — ")
 }
 
-export function syncMessage(res: SyncResult): string {
-  // The gateway answers 202 and syncs in the background; the models list
-  // refetches on its own once the run has landed.
-  return res.triggered ? "Catalog sync started." : "Catalog sync was not started."
+/** What a forced sync came to, as far as the console waited to see. */
+export type SyncOutcome =
+  | { state: "done" }
+  | { state: "failed"; error: string }
+  /** Still going when the console stopped waiting; the notice on this screen
+   *  reports it if it fails. */
+  | { state: "running" }
+  | { state: "not-started" }
+
+/**
+ * The toast for a forced sync's outcome. "Started" alone was all it used to
+ * say, and a failure reached only the server log, so an operator who pressed
+ * the button to pick up new models could not tell a run that worked from one
+ * that did not.
+ */
+export function syncMessage(outcome: SyncOutcome): string {
+  switch (outcome.state) {
+    case "done":
+      return "Catalog synced."
+    case "failed":
+      return `Catalog sync failed: ${outcome.error}. The previous metadata is still serving.`
+    case "running":
+      return "Catalog sync is still running. This page says so if it fails."
+    case "not-started":
+      return "Catalog sync was not started."
+  }
+}
+
+const SYNC_STATUS_KEY = ["catalog-sync"] as const
+const SYNC_POLL_MS = 1000
+/** Past the default 30s fetch timeout, with room for the write and the
+ *  rebuild after it. A longer configured timeout ends as "still running",
+ *  and the failure notice picks the run up from there. */
+const SYNC_WAIT_MS = 90_000
+
+/**
+ * Starts a sync and waits for it. The gateway answers at once with the run it
+ * started, because holding a request open on a network fetch made the button
+ * look broken; GET on the same path says when that run has finished and how.
+ */
+export async function runCatalogSync(
+  pollMs = SYNC_POLL_MS,
+  waitMs = SYNC_WAIT_MS,
+): Promise<SyncOutcome> {
+  const started = await api.post<SyncResult>("/api/catalog/sync")
+  if (!started.triggered) return { state: "not-started" }
+  // An older gateway names no run, and has no status to wait on.
+  if (!started.run) return { state: "running" }
+  const deadline = Date.now() + waitMs
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs))
+    const status = await api.get<CatalogSyncStatus>("/api/catalog/sync")
+    // A newer run than ours finishing first also answers: it is the state
+    // the catalogue is now in.
+    if (status.run >= started.run) {
+      return status.error ? { state: "failed", error: status.error } : { state: "done" }
+    }
+  }
+  return { state: "running" }
 }
 
 /**
@@ -426,13 +481,24 @@ export function SettingsScreen() {
     },
   })
 
+  // The newest finished sync, scheduled or forced. Polled only while one is
+  // running, which is when its answer can change on its own.
+  const syncStatus = useQuery({
+    queryKey: SYNC_STATUS_KEY,
+    queryFn: ({ signal }) => api.get<CatalogSyncStatus>("/api/catalog/sync", { signal }),
+    refetchInterval: (query) => (query.state.data?.running ? 5000 : false),
+  })
+
   const sync = useApiMutation({
-    mutationFn: () => api.post<SyncResult>("/api/catalog/sync"),
-    onSuccess: (res) => {
-      toast.success(syncMessage(res))
+    mutationFn: () => runCatalogSync(),
+    onSuccess: (outcome) => {
+      if (outcome.state === "failed") toast.error(syncMessage(outcome))
+      else toast.success(syncMessage(outcome))
       void queryClient.invalidateQueries({ queryKey: keys.models })
+      void queryClient.invalidateQueries({ queryKey: SYNC_STATUS_KEY })
     },
   })
+  const lastSync = syncStatus.data
 
   const purgeConversations = usePurgeConversations()
 
@@ -463,7 +529,7 @@ export function SettingsScreen() {
           confirmLabel="Sync"
           onConfirm={() => sync.mutate()}
         >
-          Sync catalog now
+          {sync.isPending ? "Syncing catalog…" : "Sync catalog now"}
         </ConfirmButton>
         <ConfirmButton
           size="sm"
@@ -497,6 +563,22 @@ export function SettingsScreen() {
         <Banner className="mb-4">
           <p className="text-sm font-medium">Waiting for a restart</p>
           <p className="mt-1 text-sm">{pendingRestartMessage(pendingRestart)}</p>
+        </Banner>
+      )}
+
+      {lastSync?.error && !sync.isPending && (
+        // Kept on the screen rather than only toasted: the run that failed may
+        // be the scheduled one nobody was watching, and the toast for a forced
+        // one is gone before it is read.
+        <Banner variant="warning" className="mb-4">
+          <p className="text-sm font-medium">The last catalog sync failed</p>
+          <p className="mt-1 text-sm break-words">
+            {lastSync.finished_at ? `${dateTime(lastSync.finished_at)}: ` : ""}
+            {lastSync.error}
+          </p>
+          <p className="mt-1 text-sm">
+            The gateway is serving the metadata it had before. Sync catalog now tries again.
+          </p>
         </Banner>
       )}
 
