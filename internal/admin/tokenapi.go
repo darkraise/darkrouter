@@ -119,6 +119,20 @@ func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "secret must not be empty")
 		return
 	}
+	// A replacement is held to the shape a new credential is: a sigv4 or
+	// service-account secret that does not parse would be stored, and then
+	// fail on every request it signs instead of here, where it was typed.
+	if body.Secret != nil {
+		row, err := s.deps.DB.ProviderByID(r.Context(), providerID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		if err := credentialShapeError(row.AuthStyle, *body.Secret); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	if body.Enabled != nil {
 		found, err := s.deps.DB.SetCredentialEnabled(r.Context(), providerID, keyID, *body.Enabled)
