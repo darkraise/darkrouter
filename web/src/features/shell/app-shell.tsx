@@ -25,6 +25,7 @@ import { KeyRound, LogOut, Menu, PanelLeft, PanelLeftClose, Search, Settings } f
 import { IdentityMark } from "./identity-mark"
 import type { NavGroup, NavItem } from "./nav"
 import { ThemeDrawerRow, ThemeSwitcherButton } from "./theme-customizer"
+import { useClosingMenu } from "../../lib/menu"
 
 const SHORTCUT = /Mac|iPhone|iPad/i.test(navigator.platform) ? "⌘K" : "Ctrl K"
 
@@ -397,8 +398,9 @@ function AccountMenu({
   onSettings: () => void
   onLogout: () => void
 }) {
+  const { menu, pick } = useClosingMenu()
   return (
-    <DropdownMenu>
+    <DropdownMenu {...menu}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -419,17 +421,19 @@ function AccountMenu({
         {/* onSelect, not onClick: darkraise's item calls onClick only from
             the pointer, while Enter and Space go through onSelect alone, so
             a keyboard operator could highlight "Log out" and not run it.
-            The pointer reaches onSelect too, so one handler serves both. */}
-        <DropdownMenuItem onSelect={onChangePassword}>
+            The pointer reaches onSelect too, so one handler serves both.
+            `pick` closes the menu, which the library does only for the
+            pointer: a keyboard pick left it open over the page it opened. */}
+        <DropdownMenuItem onSelect={pick(onChangePassword)}>
           <KeyRound className="dr-user-menu-item-icon" />
           Change password
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onSettings}>
+        <DropdownMenuItem onSelect={pick(onSettings)}>
           <Settings className="dr-user-menu-item-icon" />
           Settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onLogout}>
+        <DropdownMenuItem onSelect={pick(onLogout)}>
           <LogOut className="dr-user-menu-item-icon" />
           Log out
         </DropdownMenuItem>

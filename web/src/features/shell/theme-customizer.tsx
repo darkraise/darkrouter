@@ -74,6 +74,17 @@ export function ThemeSwitcherButton() {
  */
 export function ThemeDrawerRow() {
   const [open, setOpen] = useState(false)
+  const panel = useRef<HTMLDivElement>(null)
+  // The row sits low in the drawer, so the panel opened below the fold: only
+  // the chevron moved, and Mode, Accent and Surface waited off-screen for an
+  // operator to guess that the nav scrolls. "nearest" scrolls only as far as
+  // it has to, and a panel taller than the drawer is brought in by its top.
+  useEffect(() => {
+    if (!open) return
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    // Optional: jsdom has no scrollIntoView, and nothing else lacks it.
+    panel.current?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" })
+  }, [open])
   return (
     <>
       <button
@@ -94,7 +105,7 @@ export function ThemeDrawerRow() {
         />
       </button>
       {open && (
-        <div id="app-drawer-theme" role="group" aria-label="Theme settings" className="app-drawer-theme">
+        <div ref={panel} id="app-drawer-theme" role="group" aria-label="Theme settings" className="app-drawer-theme">
           <ThemePanel />
         </div>
       )}
