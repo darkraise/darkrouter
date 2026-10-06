@@ -4,6 +4,7 @@ import { Badge, Banner, Button, Card, toast } from "darkraise-ui"
 import { AlertTriangle, Boxes, Clock, FileText, KeyRound, Server, ShieldAlert } from "lucide-react"
 import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
+import { useUnsavedChangesGuard } from "../../lib/unsaved-changes"
 import { ConfirmButton } from "../shell/confirm-button"
 import { LoadError, LoadingRows } from "../shell/screen-state"
 import { usePurgeConversations } from "../playground/lib/conversations"
@@ -287,6 +288,10 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
 
   const patch = settingsPatch(draft, reset, cfg)
   const dirty = Object.keys(patch).length > 0
+  // The draft lives in this component, so leaving the screen or reloading the
+  // tab throws it away; the sticky bar promises it is kept until Save or
+  // Discard, so an exit asks first.
+  useUnsavedChangesGuard(dirty)
 
   const submit = () => {
     const local = localFieldErrors(patch, cfg)

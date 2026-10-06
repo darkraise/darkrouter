@@ -19,6 +19,12 @@ import {
 } from "./settings-screen"
 import { ApiError } from "../../lib/api"
 import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
+import { useUnsavedChangesGuard } from "../../lib/unsaved-changes"
+
+// The guard is TanStack Router's useBlocker, which needs a router this mount
+// does not have; what this screen owes it is the right `dirty`, which is what
+// the mock records.
+vi.mock("../../lib/unsaved-changes", () => ({ useUnsavedChangesGuard: vi.fn() }))
 
 // PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
 // or tabs, so anything rendering it needs a provider — Settings never uses
@@ -535,6 +541,23 @@ describe("the settings form", () => {
     expect(
       screen.queryAllByRole("status").some((s) => /must be at least 48h/.test(s.textContent ?? "")),
     ).toBe(false)
+  })
+
+  it("asks before an exit throws an unsaved edit away, and not once it is discarded", async () => {
+    const guard = vi.mocked(useUnsavedChangesGuard)
+    guard.mockClear()
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    expect(guard).toHaveBeenLastCalledWith(false)
+    await user.clear(box)
+    await user.type(box, "96h")
+    expect(guard).toHaveBeenLastCalledWith(true)
+
+    await user.click(screen.getByRole("button", { name: /^discard$/i }))
+    expect(guard).toHaveBeenLastCalledWith(false)
   })
 
   it("refuses a size it cannot read on the row, before a round trip", async () => {
