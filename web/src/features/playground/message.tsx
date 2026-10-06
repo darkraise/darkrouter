@@ -72,6 +72,22 @@ export function routeFromTrace(trace: RequestTrace): TurnRoute {
   }
 }
 
+/**
+ * What the last attempt of a failed run got back, as "429 from lmstudio".
+ *
+ * The executor's error is one sentence for every upstream failure, so a rate
+ * limit and a server error read the same under the composer. The trace keeps
+ * the status each attempt received, and that is the difference an operator
+ * acts on. Undefined when the run ended in a success, or never reached a
+ * provider to get a status from.
+ */
+export function attemptFailure(trace: RequestTrace): string | undefined {
+  const attempts = trace.attempts ?? []
+  const last = attempts[attempts.length - 1]
+  if (!last || last.outcome === "success" || !last.status_code) return undefined
+  return last.provider ? `${last.status_code} from ${last.provider}` : `${last.status_code}`
+}
+
 /** A turn the operator typed. Right, tinted, and only as wide as it needs:
  *  the asymmetry is what lets someone scan who said what without reading.
  *
