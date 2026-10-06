@@ -31,6 +31,9 @@ import { ModelCombobox, modelCandidates } from "../shell/model-combobox"
  * list a real request would produce, and the endpoint already guarantees that
  * by sharing the executor's snapshot — sorting here for display would undo it
  * and misreport failover order.
+ *
+ * Skips follow the candidates, unranked: they are the account of what the
+ * router passed over, not further steps in the order.
  */
 export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
   const candidates = collapse(p.candidates, (c) => `${c.provider_id}/${c.model}`).map(
@@ -52,9 +55,22 @@ export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
       reasonCode: s.reason,
       reasonProse: prose(undefined, count),
       terminated: true,
+      // A skip is not a step in the order. Numbered after the candidates it
+      // read as the next fallback -- "if mock-fast fails, mock-error is tried"
+      // -- when a skipped target is never tried at all.
+      unranked: true,
     }),
   )
-  return [...candidates, ...skipped].map((row, i) => ({ ...row, rank: i + 1 }))
+  return [
+    ...candidates.map((row, i) => ({ ...row, rank: i + 1 })),
+    // Ranked past the candidates only so each row keeps a unique key; the
+    // major tick on the first marks where the order ends.
+    ...skipped.map((row, i) => ({
+      ...row,
+      rank: candidates.length + i + 1,
+      major: i === 0 && candidates.length > 0,
+    })),
+  ]
 }
 
 /**

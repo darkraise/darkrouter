@@ -151,4 +151,20 @@ describe("the ladder in a narrow panel or under a long reason", () => {
     expect(classRule(css, "reason")).toMatch(/min-width:\s*12rem/)
     expect(classRule(css, "reason-prose")).toMatch(/overflow-wrap:\s*anywhere/)
   })
+
+  it("draws a dash, not a number, for a row outside the order", () => {
+    // A skipped target is not a step in the failover order, and a number
+    // would say it was.
+    const { container } = render(
+      <Ladder
+        mode="predictive"
+        rows={[
+          { rank: 1, mark: "skipped", target: "groq/a" },
+          { rank: 2, mark: "cooling", target: "groq/b", terminated: true, unranked: true },
+        ]}
+      />,
+    )
+    const ranks = [...container.querySelectorAll(".rank")].map((r) => r.textContent)
+    expect(ranks).toEqual(["01", "–"])
+  })
 })
