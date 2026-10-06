@@ -240,6 +240,11 @@ export type Provider = {
    *  same veto, but only while that filter is on and only to a still-live
    *  grading. */
   allow_unsanctioned_free: boolean
+  /** Bedrock's region, and Vertex's project and location. Absent when unset,
+   *  and from a server that predates them. */
+  region?: string
+  project?: string
+  location?: string
 }
 
 export type Preset = {

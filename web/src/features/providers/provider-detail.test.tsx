@@ -669,6 +669,14 @@ describe("the cooling card", () => {
   })
 })
 
+describe("the connection card", () => {
+  it("shows the region a signed provider is reached in", async () => {
+    stub([{ ...configured, kind: "bedrock", auth_style: "sigv4", region: "us-east-1" }], [preset])
+    await renderProvider("groq")
+    expect(await screen.findByText("us-east-1")).toBeInTheDocument()
+  })
+})
+
 describe("a disabled provider", () => {
   it("has no usable credentials, whatever their own switches say", async () => {
     stub([{ ...configured, enabled: false, credentials: [cred] }], [preset])

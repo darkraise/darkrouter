@@ -658,6 +658,11 @@ export function ProviderDetail() {
               <Fact term="Preset">{provider.preset || "—"}</Fact>
               <Fact term="Auth style">{provider.auth_style}</Fact>
               <Fact term="Kind">{provider.kind}</Fact>
+              {/* Only where set: on a signed provider these are where the
+                  endpoint is, and on any other they are nothing at all. */}
+              {provider.region && <Fact term="Region">{provider.region}</Fact>}
+              {provider.project && <Fact term="Project">{provider.project}</Fact>}
+              {provider.location && <Fact term="Location">{provider.location}</Fact>}
             </dl>
           </Card>
 

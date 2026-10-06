@@ -6,6 +6,7 @@ import { afterEach, describe, it, expect, vi } from "vitest"
 import {
   ProviderSettingsDialog,
   draftOf,
+  priorityError,
   settingsPatch,
   type SettingsDraft,
 } from "./provider-settings-dialog"
@@ -44,16 +45,27 @@ describe("settingsPatch", () => {
     })
   })
 
-  it("sends region and project only once they have been touched", () => {
+  it("sends region and project only once they differ from what the provider holds", () => {
     // Both are pointer fields on the backend: a key present with value ""
-    // means "set this to empty", not "leave alone". GET /api/providers never
-    // returns either, so an untouched field has no current value to re-send
-    // and sending one anyway would wipe it.
+    // means "set this to empty", not "leave alone", so re-sending an untouched
+    // value is a write nobody asked for.
     const p = provider()
     expect(settingsPatch(draft(p, { region: "us-east1" }), p)).toEqual({ region: "us-east1" })
     expect(settingsPatch(draft(p, { project: "my-gcp-project" }), p)).toEqual({
       project: "my-gcp-project",
     })
+    const bedrock = provider({ kind: "bedrock", region: "us-east-1" })
+    expect(settingsPatch(draft(bedrock), bedrock)).toEqual({})
+  })
+
+  it("opens on the region the provider holds rather than calling it unset", () => {
+    // Bedrock with us-east-1 stored read "unset" in the one field it needs.
+    const bedrock = provider({ kind: "bedrock", region: "us-east-1" })
+    expect(draftOf(bedrock).region).toBe("us-east-1")
+    mount(<ProviderSettingsDialog provider={bedrock} open onOpenChange={() => {}} />)
+    expect(screen.getByLabelText("Region")).toHaveValue("us-east-1")
+    expect(screen.queryByDisplayValue("unset")).toBeNull()
+    expect(screen.queryByPlaceholderText("unset")).toBeNull()
   })
 
   it("sends location only once it has been touched", () => {
@@ -81,12 +93,44 @@ describe("settingsPatch", () => {
   })
 
   it("carries an intentional clear", () => {
-    // Once an operator has focused a field, an empty string is a deliberate
-    // clear rather than an unset value, and has to travel as one.
-    const p = provider()
+    // Emptying a box that held a value is a deliberate clear rather than an
+    // unset value, and has to travel as one.
+    const p = provider({ region: "us-east-1" })
     expect(settingsPatch(draft(p, { region: "", project: "keep" }), p)).toEqual({
       region: "", project: "keep",
     })
+  })
+
+  it("explains a priority it will not save, and holds Save", async () => {
+    // Save used to go grey on "abc" with no reason given -- or, with another
+    // field edited, stay live and drop the typed priority from the write.
+    expect(priorityError("abc")).toMatch(/whole number/)
+    expect(priorityError("10.5")).toMatch(/whole number/)
+    expect(priorityError("0x10")).toMatch(/whole number/)
+    expect(priorityError("")).toMatch(/whole number/)
+    expect(priorityError(" -3 ")).toBeNull()
+
+    mount(<ProviderSettingsDialog provider={provider()} open onOpenChange={() => {}} />)
+    await userEvent.clear(screen.getByLabelText("Priority"))
+    await userEvent.type(screen.getByLabelText("Priority"), "abc")
+    await userEvent.click(screen.getByLabelText("Import free models only"))
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Priority must be a whole number")
+    expect(screen.getByLabelText("Priority")).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+  })
+
+  it("offers only the endpoint fields the provider's kind reads", () => {
+    const { unmount } = mount(
+      <ProviderSettingsDialog provider={provider()} open onOpenChange={() => {}} />,
+    )
+    expect(screen.queryByLabelText("Region")).toBeNull()
+    expect(screen.queryByLabelText("Project")).toBeNull()
+    unmount()
+
+    mount(<ProviderSettingsDialog provider={provider({ kind: "bedrock" })} open onOpenChange={() => {}} />)
+    expect(screen.getByLabelText("Region")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Project")).toBeNull()
   })
 
   it("leaves out a priority that will not parse", () => {
