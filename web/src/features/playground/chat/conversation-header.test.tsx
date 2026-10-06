@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ConversationHeader } from "./conversation-header"
@@ -95,6 +95,34 @@ describe("the conversation header", () => {
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
     await userEvent.click(screen.getByRole("menuitem", { name: /request settings/i }))
     expect(onOpenSettings).toHaveBeenCalled()
+  })
+
+  it("closes the actions menu when an item is chosen with Enter", async () => {
+    // The library closes its menu only for the pointer, so a keyboard pick
+    // left it open over the dialog the item had just opened.
+    const onOpenSettings = vi.fn()
+    header({ onOpenSettings })
+    const user = userEvent.setup()
+    screen.getByRole("button", { name: "Conversation actions" }).focus()
+    await user.keyboard("{Enter}")
+    const item = await screen.findByRole("menuitem", { name: /request settings/i })
+    for (let i = 0; i < 3 && document.activeElement !== item; i++) {
+      await user.keyboard("{ArrowDown}")
+    }
+    expect(item).toHaveFocus()
+    await user.keyboard("{Enter}")
+    expect(onOpenSettings).toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+  })
+
+  it("gives the title a floor and wraps below it rather than squeezing it", () => {
+    // jsdom lays nothing out, so this pins the rule rather than measuring it.
+    // Without both halves the model pill kept its width on a phone and left
+    // the title about 60px: "narrov" of "narrow readings".
+    header()
+    const field = screen.getByLabelText("Conversation title")
+    expect(field.className).toMatch(/\bmin-w-\[10rem\]/)
+    expect(field.parentElement?.className).toMatch(/\bflex-wrap\b/)
   })
 
   it("refuses the request settings once a turn has been sent", async () => {
