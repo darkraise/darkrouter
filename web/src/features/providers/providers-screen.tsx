@@ -847,10 +847,12 @@ export function ProvidersScreen() {
         <NoMatch what="providers" onClear={clearFilters} />
       ) : view === "grid" ? (
         // One column until there is room for two names beside their marks and
-        // state badges. `grid-cols-1` is minmax(0, 1fr): with no template the
+        // state badges -- at a tablet's width the sidebar leaves about 500px,
+        // and two cards in it cut every name to four letters. `grid-cols-1`
+        // is minmax(0, 1fr): with no template the
         // implicit column was `auto` and grew to the card's max-content, which
         // pushed every card past the right edge of a phone.
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {list.map((r) => (
             <ProviderCard
               key={r.row.id}
