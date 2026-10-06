@@ -76,6 +76,49 @@ describe("stream", () => {
     expect(caught).toBeInstanceOf(ApiError)
     expect((caught as ApiError).message).toBe("invalid api key")
   })
+
+  it("hands over the request id of a refused run before it throws", async () => {
+    // A 429 every candidate answered is still a request with a trace; the
+    // turn that failed needs its id to link to it.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        new Response(
+          JSON.stringify({ error: { message: "rate limited", type: "rate_limit_error" } }),
+          {
+            status: 429,
+            headers: { "Content-Type": "application/json", "X-Darkrouter-Request": "01REQ" },
+          },
+        ),
+      ),
+    )
+    const started: string[] = []
+
+    await expect(
+      drain(stream("/api/playground", {}, (s) => started.push(s.requestId))),
+    ).rejects.toBeInstanceOf(ApiError)
+
+    expect(started).toEqual(["01REQ"])
+  })
+
+  it("starts nothing when a refusal carries no request id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        new Response(JSON.stringify({ error: "not authenticated" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    )
+    const started: string[] = []
+
+    await expect(
+      drain(stream("/api/playground", {}, (s) => started.push(s.requestId))),
+    ).rejects.toBeInstanceOf(ApiError)
+
+    expect(started).toEqual([])
+  })
 })
 
 describe("throwOnExecutorError", () => {
