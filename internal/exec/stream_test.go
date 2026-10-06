@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/darkrouter/internal/adapter"
 	"github.com/darkraise/darkrouter/internal/config"
@@ -226,5 +227,32 @@ func TestStreamRecordsTTFTAndUsage(t *testing.T) {
 	}
 	if r.TokensOut != 5 {
 		t.Errorf("TokensOut = %d, want 5", r.TokensOut)
+	}
+}
+
+// The attempt that served spans its body, not only its headers: a stream
+// that took a while to finish recorded a 0 ms attempt, and the trace's
+// waterfall, laid along the request's total, had nothing to draw.
+func TestTheServingAttemptsLatencyCoversItsStream(t *testing.T) {
+	const gap = 120 * time.Millisecond
+	sc := &scripted{by: map[string]http.HandlerFunc{"g1": func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		w.(http.Flusher).Flush()
+		time.Sleep(gap)
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n"))
+	}}}
+	up := httptest.NewServer(sc)
+	defer up.Close()
+
+	logger := &captureLogger{}
+	e, _ := loopExecutor(t, up, twoKeyFleet(), logger, nil)
+	post(t, e, `{"model":"m","stream":true,"messages":[{"role":"user","content":"ping"}]}`)
+
+	r := logger.only(t)
+	if len(r.Attempts) != 1 || r.Attempts[0].LatencyMs < gap.Milliseconds() {
+		t.Fatalf("attempts = %+v, want one attempt spanning the %v stream", r.Attempts, gap)
 	}
 }

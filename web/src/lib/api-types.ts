@@ -46,6 +46,9 @@ export type UsageResponse = {
   first_day: string
   last_day: string
   group_by?: UsageDimension
+  /** Present with group_by=provider: failover pairs over the same days, so
+   *  the routing graph's returns and volumes share one window. */
+  failover_edges?: FailoverEdge[]
 }
 
 // --- overview ---
@@ -87,6 +90,9 @@ export type Overview = {
   requests_per_min: number
   error_rate: number
   window_sec: number
+  /** Requests in the live window. Zero means latency and error rate were not
+   *  measured, not that they were 0. */
+  requests?: number
   today_spend: Spend
   latency: { p50_ms: number; p95_ms: number }
   series: UsageRow[]

@@ -97,7 +97,12 @@ export type AttemptSegment = {
 
 /** Attempts laid end to end along the request total. They ran in sequence,
  *  so each starts where the one before ended; the last is clamped so clock
- *  skew between the two measurements cannot draw past the track. */
+ *  skew between the two measurements cannot draw past the track.
+ *
+ *  The attempt that served runs to the end of the track. The request ended
+ *  when its body did, and a row logged before attempts were timed to the end
+ *  of their body recorded only the wait for headers: a streamed request drew
+ *  "0 ms" over an empty track under a 214 ms total. */
 export function attemptSegments(
   attempts: TraceAttempt[],
   totalMs: number | null,
@@ -106,7 +111,10 @@ export function attemptSegments(
   let start = 0
   const out: AttemptSegment[] = []
   for (const a of attempts) {
-    const fraction = Math.max(0, Math.min(1 - start, a.latency_ms / totalMs))
+    const fraction =
+      a.outcome === "success"
+        ? Math.max(0, 1 - start)
+        : Math.max(0, Math.min(1 - start, a.latency_ms / totalMs))
     out.push({
       seq: a.seq,
       label: `${a.provider}/${a.model}`,
@@ -117,6 +125,35 @@ export function attemptSegments(
     start += fraction
   }
   return out
+}
+
+/** Why the router passed a target over, in words. The codes are
+ *  router.SkipReason plus the executor's own two. */
+const SKIP_REASONS: Record<string, string> = {
+  disabled: "disabled",
+  cooling: "cooling down",
+  surface: "does not serve this surface",
+  capability: "lacks a required capability",
+  no_credential: "no usable credential",
+  removed_upstream: "removed upstream",
+  adapter_surface: "adapter cannot serve this surface",
+  unsanctioned: "not sanctioned for this use",
+  no_adapter: "no adapter",
+}
+
+/** A skip as the drawer prints it. The wire form is the router's own key,
+ *  `provider/key/model:reason`, with the key empty for a keyless provider, and
+ *  printed as it came that read `lmstudio//mock-error:cooling`. The reason is
+ *  after the last colon and the provider before the first slash; the model,
+ *  which may hold either, is what sits between the key and the reason. */
+export function skipLabel(s: string): string {
+  const colon = s.lastIndexOf(":")
+  const target = colon === -1 ? s : s.slice(0, colon)
+  const reason = colon === -1 ? "" : s.slice(colon + 1)
+  const [provider = "", key = "", ...model] = target.split("/")
+  if (model.length === 0) return s
+  const name = `${provider}/${model.join("/")}${key ? ` (key ${key})` : ""}`
+  return reason ? `${name} — ${SKIP_REASONS[reason] ?? reason}` : name
 }
 
 /** What to tell the operator when the trace did not load. A 404 is a request
@@ -244,6 +281,16 @@ function AttemptWaterfall({ trace }: { trace: RequestTrace }) {
   )
 }
 
+/** Why an empty ladder is empty: every candidate was passed over, or there
+ *  was none to pass over. An empty box under "Attempts" said neither. */
+export function noAttemptReason(trace: Pick<RequestTrace, "skips" | "candidates">): string {
+  if (trace.skips.length > 0) {
+    return "No attempt was made — every candidate was skipped, as listed below."
+  }
+  if (trace.candidates.length === 0) return "No attempt was made — nothing routes this model."
+  return "No attempt was made."
+}
+
 export function TraceDrawer({
   id,
   onClose,
@@ -270,7 +317,10 @@ export function TraceDrawer({
           <div className="mt-4 flex flex-col gap-6">
             <Link
               to="/playground"
-              search={{ mode: "chat", seed: trace.data.id }}
+              // Replayed where its surface is sent from: an embedding opened in
+              // chat mode offered a chat composer for a request that never was
+              // one.
+              search={{ mode: trace.data.surface === "llm" ? "chat" : "auxiliary", seed: trace.data.id }}
               className="w-fit text-sm underline underline-offset-2"
             >
               Open in playground
@@ -314,6 +364,14 @@ export function TraceDrawer({
                   {trace.data.status}
                 </Badge>
               </dd>
+              {trace.data.error_code && (
+                // The one statement of why it failed. Without it a request no
+                // candidate could serve read "error", "0 ms", and nothing else.
+                <>
+                  <dt className="text-[hsl(var(--legend))]">Error</dt>
+                  <dd className="font-mono">{trace.data.error_code}</dd>
+                </>
+              )}
               <dt className="text-[hsl(var(--legend))]">Cost</dt>
               <dd className="font-mono">{money(trace.data.cost_micros)}</dd>
               <dt className="text-[hsl(var(--legend))]">Tokens</dt>
@@ -338,10 +396,16 @@ export function TraceDrawer({
 
             <section>
               <h3 className="mb-2 text-sm font-medium">Attempts</h3>
-              <Ladder
-                mode="retrospective"
-                rows={ladderRows(trace.data.attempts, trace.data.total_ms)}
-              />
+              {trace.data.attempts.length > 0 ? (
+                <Ladder
+                  mode="retrospective"
+                  rows={ladderRows(trace.data.attempts, trace.data.total_ms)}
+                />
+              ) : (
+                <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                  {noAttemptReason(trace.data)}
+                </p>
+              )}
             </section>
 
             <AttemptWaterfall trace={trace.data} />
@@ -353,7 +417,7 @@ export function TraceDrawer({
                     them a first attempt at the third provider looks arbitrary. */}
                 <ul className="flex flex-col gap-1 font-mono text-sm text-[hsl(var(--legend))]">
                   {trace.data.skips.map((s) => (
-                    <li key={s}>{s}</li>
+                    <li key={s}>{skipLabel(s)}</li>
                   ))}
                 </ul>
               </section>

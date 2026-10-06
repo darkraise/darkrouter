@@ -687,6 +687,14 @@ func (e *Executor) attempt(w http.ResponseWriter, r *http.Request, op SurfaceOp,
 	default:
 		outcome, aerr = op.Respond(cw, resp, ac)
 	}
+	// The row was written when the headers arrived, so until here its latency
+	// was time to first byte: a two-second stream recorded a 0 ms attempt, and
+	// the trace's waterfall, which lays attempts along the request's total,
+	// drew an empty track. The attempt that answered spans its body, as an
+	// embedding batch's already spans every sub-batch.
+	if n := len(rec.Attempts); n > 0 {
+		rec.Attempts[n-1].LatencyMs = time.Since(ac.sent).Milliseconds()
+	}
 	demoteLastAttempt(rec, outcome, cw.Committed())
 	// The loop asks the writer, not the op. An op that reports a retryable
 	// outcome after bytes have gone out is describing a post-commit failure,

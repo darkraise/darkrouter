@@ -238,8 +238,16 @@ describe("row click-through", () => {
     // requestsSearch feeds a TanStack <Link search={...}>, not a URL string:
     // `to="/requests?..."` does not typecheck against the router's registered
     // route union, and no Link in this codebase builds a query that way.
+    const search = requestsSearch("model", "mock-error", "2026-08-20", 7)
+    expect(search.model).toBe("mock-error")
+  })
+
+  it("filters a provider on every request that tried it, not only the ones it served", () => {
+    // A provider's usage counts its failed attempts too, so a provider that
+    // only ever failed drilled down to "No results" on the served-by filter.
     const search = requestsSearch("provider", "groq", "2026-08-20", 7)
-    expect(search.provider).toBe("groq")
+    expect(search.attempted_provider).toBe("groq")
+    expect(search.provider).toBeUndefined()
   })
 
   it("starts where the chart's window starts, not a rolling span back from now", () => {

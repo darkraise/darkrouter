@@ -30,3 +30,13 @@
 .chart-scope .recharts-cartesian-axis-tick-value {
   font-size: var(--text-sm);
 }
+
+/* A legend that runs out of room wraps whole entries onto another line. The
+   library's row neither wraps nor keeps an entry together, so on a phone
+   every series name broke at its hyphens, "mock-" over "fast". */
+.chart-scope .dr-chart-legend {
+  flex-wrap: wrap;
+}
+.chart-scope .dr-chart-legend > * {
+  white-space: nowrap;
+}
