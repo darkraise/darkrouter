@@ -1,0 +1,37 @@
+/* Override stays in view while the rest of the catalogue scrolls sideways.
+
+   Eleven columns do not fit a laptop's content column at any text size, and
+   Override -- the one thing to do to a row -- was the column that went off the
+   right edge, 400px past it at 1440. The same treatment as the providers
+   list: DataTable renders its own cells, so the column is reached by
+   position, and the actions column cannot be hidden, so it is always last. */
+.models-table .dr-data-table-frame th:last-child,
+.models-table .dr-data-table-frame td:last-child {
+  position: sticky;
+  right: 0;
+  background: hsl(var(--card));
+  box-shadow: -1px 0 0 hsl(var(--border));
+}
+
+/* Pinned only while there is room for the model name beside it; narrower,
+   the pinned cell would sit on the name. A container query, because the
+   sidebar takes a different share of the same viewport open and shut. */
+.models-table {
+  container-type: inline-size;
+}
+
+@container (max-width: 36rem) {
+  .models-table .dr-data-table-frame th:last-child,
+  .models-table .dr-data-table-frame td:last-child {
+    right: auto;
+    box-shadow: none;
+  }
+}
+
+/* The row's hover wash is translucent, so it is laid over the card colour
+   rather than replacing the opaque ground the sticky cell needs. */
+.models-table .dr-data-table-frame tr:hover td:last-child {
+  background:
+    linear-gradient(hsl(var(--muted) / 0.5), hsl(var(--muted) / 0.5)),
+    hsl(var(--card));
+}

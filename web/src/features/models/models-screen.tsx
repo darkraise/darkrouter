@@ -13,6 +13,7 @@ import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
 import { OverrideEditor } from "./override-editor"
+import "./models-table.css"
 
 const FIELDS = ["model", "provider"] as const
 
@@ -429,12 +430,14 @@ export function ModelsScreen() {
           the same reason the table gives way to that card rather than
           standing empty above it. */}
       {catalog.isPending || models.length > 0 ? (
-        <DataTable
-          data={rows}
-          columns={columns}
-          facets={["surface_list", "state", "caps", "band", "merge_source"]}
-          isLoading={catalog.isPending}
-        />
+        <div className="models-table">
+          <DataTable
+            data={rows}
+            columns={columns}
+            facets={["surface_list", "state", "caps", "band", "merge_source"]}
+            isLoading={catalog.isPending}
+          />
+        </div>
       ) : (
         <div>
           {filtered ? (
