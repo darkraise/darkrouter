@@ -92,11 +92,37 @@
   }
 }
 
-.app-drawer-account {
+/* The drawer's own action rows: Search above the nav, and the theme and
+   account rows below it. They wear the nav items' classes, which were written
+   for `<a>`; a `<button>` keeps the UA's centred text, and these sit outside
+   the `.dr-sidebar-nav` whose `px-2` lines the links up, so both are
+   restated here. */
+.app-drawer-actions {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  padding-inline: 0.5rem;
+}
+
+.app-drawer-actions:not(:first-child),
+.app-drawer-actions + .dr-sidebar-nav {
   margin-top: 0.5rem;
+}
+
+.app-drawer-actions > button {
+  width: 100%;
+  text-align: start;
+}
+
+.app-drawer-theme {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The panel was laid out for a 34rem popover. In the drawer's width the Mode
+   row's three options clipped to "Ligh", "Dark", "Syste"; their icons go so
+   the words fit, since the words are what say which mode is which. */
+.app-drawer-theme .dr-theme-switcher-row-icon {
+  display: none;
 }
 
 /* No screen may be wider than the viewport. The content pane is a flex child
