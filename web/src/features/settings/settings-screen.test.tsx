@@ -892,22 +892,25 @@ describe("the settings form", () => {
 
     const box = await screen.findByLabelText("Keep request records for")
     await user.clear(box)
-    await user.type(box, "96h")
+    // A spelling the gateway answers differently, so the box's text says
+    // which answer it was seeded from.
+    await user.type(box, "5760m")
     await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
     const statuses = await screen.findAllByRole("status")
     expect(statuses.some((s) => s.textContent?.includes("Settings saved"))).toBe(true)
     // The refetch is still in flight: what the operator typed is still what
     // the box shows, rather than the value the save replaced.
-    expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+    expect(screen.getByLabelText("Keep request records for")).toHaveValue("5760m")
 
     held.open()
+    // 96h0m0s as the gateway reports it, shown without its zero units.
     await waitFor(() =>
-      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h"),
     )
   })
 
-  it("clears the Save bar and shows the stored spelling after a save", async () => {
+  it("clears the Save bar and shows the stored value after a save", async () => {
     stubSettingsFetch({
       configAfterSave: () => ({ ...cfg(), values: { ...cfg().values, "log.retention": "96h0m0s" } }),
     })
@@ -917,11 +920,11 @@ describe("the settings form", () => {
     const box = await screen.findByLabelText("Keep request records for")
     expect(box).toHaveValue("72h")
     await user.clear(box)
-    await user.type(box, "96h")
+    await user.type(box, "5760m")
     await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h"),
     )
     expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
   })
