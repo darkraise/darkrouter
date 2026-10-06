@@ -22,6 +22,14 @@ const context = {
   models: [],
 } as never
 
+/** Saving needs something to save: Save stays disabled on a clean draft. */
+function editFirstTarget(value: string) {
+  fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0] as HTMLElement)
+  fireEvent.change(screen.getAllByLabelText(/target 1$/)[0] as HTMLElement, {
+    target: { value },
+  })
+}
+
 function mount(aliases: Record<string, string[]>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -255,13 +263,20 @@ describe("a refetch that brings another admin's save", () => {
   it("takes the server's value for a chain the operator never touched", async () => {
     // PUT replaces the whole map. A stale copy of an untouched chain sent
     // with a fresh If-Match would overwrite the other admin's edit.
-    const refetch = mountRefetchable({ chain: ["groq/a"], gone: ["groq/g"] })
-    refetch({ chain: ["groq/theirs"] })
+    const refetch = mountRefetchable({ mine: ["groq/m"], chain: ["groq/a"], gone: ["groq/g"] })
+    refetch({ mine: ["groq/m"], chain: ["groq/theirs"] })
 
     expect(screen.getByText("groq/theirs")).toBeInTheDocument()
     expect(screen.queryByText("gone")).not.toBeInTheDocument()
+    // Nothing of the operator's differs from the server yet, so there is
+    // nothing to write.
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+
+    editFirstTarget("groq/m2")
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
-    await waitFor(() => expect(saveBody()).toEqual({ chain: ["groq/theirs"] }))
+    await waitFor(() =>
+      expect(saveBody()).toEqual({ mine: ["groq/m2"], chain: ["groq/theirs"] }),
+    )
   })
 
   it("keeps the operator's own additions, deletions and edits", async () => {
@@ -358,6 +373,7 @@ describe("saving", () => {
         <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
       </QueryClientProvider>,
     )
+    editFirstTarget("groq/b")
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => {
       const keys = invalidated.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
@@ -387,6 +403,7 @@ describe("saving", () => {
         <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
       </QueryClientProvider>,
     )
+    editFirstTarget("groq/b")
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => {
       expect(
@@ -420,6 +437,7 @@ describe("saving", () => {
         <AliasEditor aliases={{ chain: ["groq/a"] }} knownProviders={["groq"]} context={context} />
       </QueryClientProvider>,
     )
+    editFirstTarget("groq/b")
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => {
       expect(
@@ -452,12 +470,20 @@ describe("saving", () => {
         />
       </QueryClientProvider>,
     )
+    editFirstTarget("groq/b")
     await userEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => {
       expect(
-        screen.queryAllByRole("status").some((s) => /reload and try again/.test(s.textContent ?? "")),
+        screen.queryAllByRole("status").some((s) =>
+          /changed elsewhere.*kept on top of the new version/.test(s.textContent ?? ""),
+        ),
       ).toBe(true)
     })
+    // The server's own text says to reload, which is the one thing that would
+    // throw the rebased draft away.
+    expect(
+      screen.queryAllByRole("status").some((s) => /reload/.test(s.textContent ?? "")),
+    ).toBe(false)
     expect(
       invalidated.mock.calls.some(([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(["aliases"])),
     ).toBe(true)
@@ -474,5 +500,113 @@ describe("saving", () => {
     const save = screen.getByRole("button", { name: "Save" })
     expect(save).toBeDisabled()
     expect(save).toHaveAttribute("data-variant", "outline")
+  })
+})
+
+describe("a draft that differs from what is stored", () => {
+  it("leaves Save quiet and disabled while there is nothing to write", () => {
+    // A Save that is always filled says nothing about the draft, and a no-op
+    // press sent the whole map and toasted "Aliases saved" for nothing.
+    mount({ chain: ["groq/a"] })
+    const save = screen.getByRole("button", { name: "Save" })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAttribute("data-variant", "outline")
+    expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument()
+  })
+
+  it("marks an edited chain and counts the changes beside Save", () => {
+    mount({ chain: ["groq/a"], other: ["groq/o"] })
+    editFirstTarget("groq/b")
+
+    expect(screen.getByText("unsaved")).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    const save = screen.getByRole("button", { name: "Save" })
+    expect(save).toBeEnabled()
+    expect(save).toHaveAttribute("data-variant", "default")
+  })
+
+  it("counts a removed chain as a change", async () => {
+    mount({ chain: ["groq/a"], doomed: ["groq/d"] })
+    const user = userEvent.setup()
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[1] as HTMLElement)
+    await user.click(screen.getByRole("button", { name: "Remove chain" }))
+
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+  })
+
+  it("is clean again once an edit is put back by hand", () => {
+    mount({ chain: ["groq/a"] })
+    editFirstTarget("groq/b")
+    fireEvent.change(screen.getByLabelText("chain target 1"), { target: { value: "groq/a" } })
+
+    expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  it("tells the screen when it becomes dirty and clean, so it can guard a navigation", () => {
+    const seen: boolean[] = []
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor
+          aliases={{ chain: ["groq/a"] }}
+          knownProviders={["groq"]}
+          context={context}
+          onDirtyChange={(d) => seen.push(d)}
+        />
+      </QueryClientProvider>,
+    )
+    editFirstTarget("groq/b")
+    fireEvent.click(screen.getByRole("button", { name: "Revert" }))
+
+    expect(seen).toEqual([false, true, false])
+  })
+
+  it("does not offer to preview an alias that was never saved", async () => {
+    // The preview resolves what is stored. A chain that exists only in the
+    // draft previewed as a bare model name and reported that nothing offers it.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AliasEditor aliases={{}} knownProviders={["groq"]} context={context} onPreview={() => {}} />
+      </QueryClientProvider>,
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Add alias" }))
+    await user.type(screen.getByLabelText("Alias name"), "sonnet")
+    await user.type(screen.getByLabelText("New alias target 1"), "groq/a")
+    await user.click(screen.getByRole("button", { name: /create alias/i }))
+
+    expect(screen.getByRole("button", { name: "Preview (not saved yet)" })).toBeDisabled()
+    expect(screen.getByText("new · unsaved")).toBeInTheDocument()
+  })
+})
+
+describe("an alias name", () => {
+  it("is shown whole, never cut to a fixed column", () => {
+    // `qa-routing-errfb` and `qa-routing-errfb-copy` both read
+    // "qa-routing-err…" when the name was truncated to 8rem.
+    mount({ "qa-routing-errfb": ["groq/a"], "qa-routing-errfb-copy": ["groq/a"] })
+    const name = screen.getByText("qa-routing-errfb-copy")
+    expect(name).not.toHaveClass("truncate")
+    expect(name).not.toHaveClass("w-32")
+  })
+})
+
+describe("closing the Add alias dialog", () => {
+  it("hands focus back to the button that opened it", async () => {
+    // autoFocus on the name field ran before the focus trap recorded where
+    // focus came from, so the trap restored focus to the vanished input and
+    // the next Tab started again from the top of the page.
+    mount({})
+    const user = userEvent.setup()
+    const add = screen.getByRole("button", { name: "Add alias" })
+    await user.click(add)
+    expect(screen.getByLabelText("Alias name")).toHaveFocus()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(add).toHaveFocus())
   })
 })

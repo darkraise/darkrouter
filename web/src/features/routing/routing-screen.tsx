@@ -1,11 +1,19 @@
-import { useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, ChevronUp, Plus } from "lucide-react"
-import { Banner, Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
+import { Badge, Banner, Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useAliasesForEditing, useModels, usePolicy, useProviders } from "../../lib/queries"
+import {
+  keys,
+  useAliasesForEditing,
+  useModels,
+  usePolicy,
+  useProviderHealth,
+  useProviders,
+} from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
+import { useUnsavedChangesGuard } from "../../lib/unsaved-changes"
 import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { ConfirmButton } from "../shell/confirm-button"
@@ -24,6 +32,9 @@ import { ModelCombobox, modelCandidates } from "../shell/model-combobox"
  * list a real request would produce, and the endpoint already guarantees that
  * by sharing the executor's snapshot — sorting here for display would undo it
  * and misreport failover order.
+ *
+ * Skips follow the candidates, unranked: they are the account of what the
+ * router passed over, not further steps in the order.
  */
 export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
   const candidates = collapse(p.candidates, (c) => `${c.provider_id}/${c.model}`).map(
@@ -45,9 +56,22 @@ export function previewRows(p: RoutePreview): LadderRow<PredictiveMark>[] {
       reasonCode: s.reason,
       reasonProse: prose(undefined, count),
       terminated: true,
+      // A skip is not a step in the order. Numbered after the candidates it
+      // read as the next fallback -- "if mock-fast fails, mock-error is tried"
+      // -- when a skipped target is never tried at all.
+      unranked: true,
     }),
   )
-  return [...candidates, ...skipped].map((row, i) => ({ ...row, rank: i + 1 }))
+  return [
+    ...candidates.map((row, i) => ({ ...row, rank: i + 1 })),
+    // Ranked past the candidates only so each row keeps a unique key; the
+    // major tick on the first marks where the order ends.
+    ...skipped.map((row, i) => ({
+      ...row,
+      rank: candidates.length + i + 1,
+      major: i === 0 && candidates.length > 0,
+    })),
+  ]
 }
 
 /**
@@ -218,6 +242,10 @@ function rebaseDraft(
 
 const EMPTY_CONTEXT: ChainContext = { providers: [], models: [] }
 
+const CONFLICT_MESSAGE =
+  "Aliases changed elsewhere since you loaded them. Your edits are kept on top of " +
+  "the new version — review them and Save again."
+
 /** What PUT /api/aliases answers -- the same shape every commitConfig write
  *  answers with, since the alias endpoint is a view over one write path. */
 type AliasesSaveResult = {
@@ -234,6 +262,7 @@ export function AliasEditor({
   context = EMPTY_CONTEXT,
   candidates = [],
   onPreview,
+  onDirtyChange,
 }: {
   aliases: Aliases
   /** The ETag `aliases` was read against. Sent back as If-Match on Save, so
@@ -247,6 +276,11 @@ export function AliasEditor({
   context?: ChainContext
   candidates?: string[]
   onPreview?: (name: string) => void
+  /** Told whenever the draft starts or stops differing from `aliases`, so the
+   *  screen can hold a navigation that would throw the draft away. A callback
+   *  rather than the guard itself: the guard needs a router, and the editor
+   *  is mounted without one wherever it is tested on its own. */
+  onDirtyChange?: (dirty: boolean) => void
 }) {
   // The prefix is this editor's alone, so two editors on one page cannot
   // mint the same row id; the counter only has to be unique within it.
@@ -317,6 +351,10 @@ export function AliasEditor({
         // how the next Save gets one it can actually be pinned to.
         if (err instanceof ApiError && err.status === 409) {
           void queryClient.invalidateQueries({ queryKey: keys.aliases })
+          // Not the server's "reload and try again": the refetch rebases this
+          // draft onto the new table without a reload, and a reload is the
+          // one thing that would throw the operator's edits away.
+          throw new Error(CONFLICT_MESSAGE)
         }
         throw err
       }
@@ -343,6 +381,16 @@ export function AliasEditor({
     ]),
   )
   const hasProblems = Object.values(problemsByChain).some((p) => p.length > 0)
+  // Chains whose Save would write something different from what is stored:
+  // added, removed or edited. Judged on the cleaned map, so a blank row just
+  // added is not yet a change -- it would not be sent.
+  const changed = [...new Set([...Object.keys(cleaned), ...Object.keys(aliases)])].filter(
+    (name) => !sameChain(cleaned[name], aliases[name]),
+  )
+  const dirty = changed.length > 0
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   function updateTarget(name: string, id: string, value: string) {
     setDraft((d) => ({
@@ -402,21 +450,27 @@ export function AliasEditor({
           const rows = draft[name] ?? []
           const open = editing === name
           const problems = problemsByChain[name] ?? []
-          const saved = aliases[name]
-          const pending = cleaned[name] ?? []
-          const unsaved =
-            saved === undefined ||
-            saved.length !== pending.length ||
-            saved.some((t, i) => t !== pending[i])
+          const neverSaved = aliases[name] === undefined
+          const unsaved = changed.includes(name)
           return (
             <div key={name} className="rounded-[var(--radius)] border p-3">
               {/* The chain at rest: its name, and where it would go, in order.
                   This is the view an operator spends their time in — editing
                   is the exception, so it is the thing behind a click. */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="w-32 shrink-0 truncate font-mono text-sm" title={name}>
+                {/* The name is the row's identity, so it is never cut off:
+                    two aliases sharing a prefix read as one when both are
+                    truncated to the same width. It takes the width it needs,
+                    at least the old fixed column so short names still align,
+                    and breaks inside an id too long for the row. */}
+                <span className="min-w-32 max-w-full shrink-0 font-mono text-sm break-all">
                   {name}
                 </span>
+                {unsaved && (
+                  <Badge variant="outline" className="shrink-0">
+                    {neverSaved ? "new · unsaved" : "unsaved"}
+                  </Badge>
+                )}
                 {/* A real basis, not flex-1's zero: with no width of its own
                     to claim, the list never pushed the buttons onto the next
                     line and shrank to nothing under them instead. The buttons
@@ -443,16 +497,21 @@ export function AliasEditor({
                       size="sm"
                       variant="ghost"
                       onClick={() => onPreview(name)}
-                      // The endpoint resolves what is stored, so a chain with
-                      // unsaved edits would be previewed as it was, beside pills
-                      // drawn from the draft.
+                      // The endpoint resolves what is stored. A chain with
+                      // unsaved edits is previewed as it was, beside pills
+                      // drawn from the draft; one never saved has nothing
+                      // stored, and previewing its name would resolve it as a
+                      // bare model and report that nothing offers it.
+                      disabled={neverSaved}
                       title={
-                        unsaved
-                          ? "Previews the saved chain — this one has unsaved changes"
-                          : undefined
+                        neverSaved
+                          ? "Save first — the preview resolves what is stored"
+                          : unsaved
+                            ? "Previews the saved chain — this one has unsaved changes"
+                            : undefined
                       }
                     >
-                      Preview{unsaved ? " (saved)" : ""}
+                      Preview{neverSaved ? " (not saved yet)" : unsaved ? " (saved)" : ""}
                     </Button>
                   )}
                   <Button
@@ -603,14 +662,21 @@ export function AliasEditor({
             setEditing(name)
           }}
         />
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {dirty && (
+            <span className="text-sm text-[hsl(var(--legend))]">
+              {changed.length} unsaved {changed.length === 1 ? "change" : "changes"}
+            </span>
+          )}
           {/* Outline while it cannot act: a disabled filled button is still
               the loudest thing on the card, and reads as "press me" rather
-              than "not yet". */}
+              than "not yet". Nothing to write is a reason it cannot act too:
+              a Save that is always filled says nothing about the draft, and
+              pressing it with no change sent the whole map for nothing. */}
           <Button
             size="sm"
-            variant={hasProblems ? "outline" : "default"}
-            disabled={hasProblems}
+            variant={hasProblems || !dirty ? "outline" : "default"}
+            disabled={hasProblems || !dirty}
             onClick={() => save.mutate(cleaned)}
           >
             Save
@@ -642,11 +708,23 @@ export function RoutingScreen() {
   const providers = useProviders()
   const models = useModels()
   const policy = usePolicy()
+  // The per-model breakers. The provider rows carry a cooling flag per
+  // credential only, which cannot say that one model on a keyless runtime is
+  // cooling while the rest serve.
+  const health = useProviderHealth()
   // The request and its result move together. Kept apart, a preview that 404s
   // or one that arrives out of order leaves the graph labelling the previous
   // candidate list with the new request's name.
   const [preview, setPreview] = useState<{ request: string; result: RoutePreview } | null>(null)
   const [view, setView] = useState<"ladder" | "graph">("ladder")
+  // The draft lives in the editor's state and nowhere else; leaving the
+  // screen discards it, including a chain the Add-alias dialog said it had
+  // "added to the draft".
+  const [dirty, setDirty] = useState(false)
+  useUnsavedChangesGuard(
+    dirty,
+    "You have unsaved alias changes. Leave this page and discard them?",
+  )
 
   const run = useApiMutation({
     mutationFn: async (model: string) => ({
@@ -662,8 +740,8 @@ export function RoutingScreen() {
   const providerRows = useMemo(() => providers.data?.providers ?? [], [providers.data])
   const modelRows = useMemo(() => models.data?.models ?? [], [models.data])
   const context: ChainContext = useMemo(
-    () => ({ providers: providerRows, models: modelRows }),
-    [providerRows, modelRows],
+    () => ({ providers: providerRows, models: modelRows, breakers: health.data }),
+    [providerRows, modelRows, health.data],
   )
   // Two lists, because they are two different questions. Inside a chain the
   // router expands targets through rules 2 and 3 only, so an alias suggested
@@ -695,6 +773,7 @@ export function RoutingScreen() {
           context={context}
           candidates={chainCandidates}
           onPreview={previewChain}
+          onDirtyChange={setDirty}
         />
       )}
 
