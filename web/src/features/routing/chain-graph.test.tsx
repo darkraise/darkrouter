@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ChainGraph, buildChainGraph } from "./chain-graph"
 import type { LadderRow, PredictiveMark } from "../ladder/ladder"
 
@@ -117,5 +117,34 @@ describe("the chain graph on a canvas", () => {
     )
     const viewport = container.querySelector<HTMLElement>(".react-flow__viewport")
     expect(viewport?.style.transform).toMatch(/scale\(1\)/)
+  })
+})
+
+describe("the chain graph on a narrow card", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("stands the ladder in for a graph that would be one node and an edge", () => {
+    // At phone width the run did not fit, and the graph was the request and
+    // an edge running off the card. The ladder says the same and fits.
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(target: Element) {
+          // Only the graph's own box: xyflow observes its nodes too, and a
+          // made-up entry for one of those is not what this test is about.
+          if (!target.classList.contains("cg-wrap")) return
+          this.cb([{ target, contentRect: { width: 320 } } as never], this as never)
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+    const { container } = render(
+      <ChainGraph request="sonnet" rows={[{ rank: 1, mark: "skipped", target: "groq/a" }]} />,
+    )
+    expect(container.querySelector(".ladder")).toBeInTheDocument()
+    expect(container.querySelector(".react-flow")).not.toBeInTheDocument()
+    expect(screen.getByText("groq/a")).toBeInTheDocument()
   })
 })

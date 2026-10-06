@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -11,7 +11,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import "./chain-graph.css"
-import type { LadderRow, PredictiveMark } from "../ladder/ladder"
+import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 
 /**
  * Wide enough for a typical `provider/model` id on one line. A longer one
@@ -136,6 +136,25 @@ function ChainNode({ data }: NodeProps) {
 
 const NODE_TYPES = { chain: ChainNode }
 
+/** Narrower than the request and one candidate need, side by side. */
+const NARROW_BELOW = GEOM.inset + GEOM.gap + GEOM.nodeW
+
+/** Whether `el` is narrower than the graph can usefully draw in. Read from the
+ *  element rather than the viewport, since the card's width is what the graph
+ *  gets. False until measured, and wherever ResizeObserver is missing. */
+function useNarrow(el: HTMLElement | null): boolean {
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(([entry]) => {
+      if (entry) setNarrow(entry.contentRect.width < NARROW_BELOW)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el])
+  return narrow
+}
+
 export function ChainGraph({
   request,
   rows,
@@ -145,8 +164,29 @@ export function ChainGraph({
 }) {
   const { nodes, edges } = useMemo(() => buildChainGraph(request, rows), [request, rows])
   const hasSkips = rows.some((r) => r.terminated)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  const narrow = useNarrow(box)
+
+  // Too narrow to show the request and its first candidate side by side, the
+  // graph is one node and an edge running off the edge. The ladder says the
+  // same thing and is built for a phone, so it stands in.
+  if (narrow) {
+    return (
+      <div ref={setBox}>
+        <p className="mb-2 text-sm text-[hsl(var(--legend))]">
+          Shown as a ladder: the graph needs a wider screen.
+        </p>
+        <Ladder mode="predictive" rows={rows} />
+      </div>
+    )
+  }
+
   return (
-    <div className="cg-wrap" style={{ height: hasSkips ? GEOM.heightWithSkips : GEOM.height }}>
+    <div
+      ref={setBox}
+      className="cg-wrap"
+      style={{ height: hasSkips ? GEOM.heightWithSkips : GEOM.height }}
+    >
       {/* Drawn at its own size and never scaled. fitView shrank a run wider
           than the card to half size -- 14px text at 7px on a phone, and out
           of step with the font-size axis everywhere -- while still clipping
