@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Button } from "darkraise-ui/components/button"
 import { Card } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
@@ -21,17 +21,59 @@ import { PasswordToggle } from "../features/shell/password-toggle"
  *  wording that tells the three apart. */
 const REJECTED = "invalid username or password"
 
-export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+/** The tab's name while the form is up. Set here because the shell that
+ *  names every other screen is not mounted, and a tab left reading
+ *  "Requests · Darkrouter" over a sign-in form looks like a working page. */
+export const LOGIN_TITLE = "Sign in · Darkrouter"
+
+/**
+ * Counts down to the moment the server said sign-in reopens: the whole
+ * seconds left, zero once it has or when there is no wait, and a function
+ * that starts a new wait.
+ */
+function useCountdown(): [number, (secs: number | undefined) => void] {
+  const [wait, setWait] = useState<{ until: number; now: number } | null>(null)
+  useEffect(() => {
+    if (wait === null || wait.now >= wait.until) return
+    const id = setTimeout(() => setWait((w) => w && { ...w, now: Date.now() }), 1000)
+    return () => clearTimeout(id)
+  }, [wait])
+  const start = useCallback((secs: number | undefined) => {
+    const now = Date.now()
+    setWait(secs === undefined ? null : { until: now + secs * 1000, now })
+  }, [])
+  const left = wait === null ? 0 : Math.max(0, Math.ceil((wait.until - wait.now) / 1000))
+  return [left, start]
+}
+
+export function LoginScreen({
+  onAuthenticated,
+  reason,
+}: {
+  onAuthenticated: () => void
+  /** Why the operator is here, when it is not a fresh visit: "expired" when
+   *  a session that was in use stopped being accepted. */
+  reason?: "expired"
+}) {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  // A refusal of the attempt rather than of the credential: the password may
+  // well be right, so neither field is marked wrong.
+  const [limited, setLimited] = useState(false)
+  const [wait, startWait] = useCountdown()
   const [busy, setBusy] = useState(false)
   const field = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    document.title = LOGIN_TITLE
+  }, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError("")
+    setLimited(false)
     try {
       const res = await api.post<{ authenticated: boolean; csrf_token: string }>(
         "/api/auth/login",
@@ -41,6 +83,20 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
       setCsrfToken(res.csrf_token)
       onAuthenticated()
     } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        // The limiter's wait is what the operator needs, and the server
+        // sends it; "try again later" left them to guess, and retrying early
+        // only earns another 429. Sign in stays disabled until it passes.
+        const secs = err.retryAfter
+        setLimited(true)
+        startWait(secs)
+        setError(
+          secs === undefined
+            ? "Too many sign-in attempts. Wait a minute, then try again."
+            : `Too many sign-in attempts. Try again in ${secs} ${secs === 1 ? "second" : "seconds"}.`,
+        )
+        return
+      }
       const refused = err instanceof ApiError && err.status === 401 && err.message === REJECTED
       setError(refused ? REJECTED : (err as Error).message || "login failed")
       field.current?.focus()
@@ -67,7 +123,7 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
               id="login-username"
               autoFocus
               autoComplete="username"
-              aria-invalid={error !== "" || undefined}
+              aria-invalid={(error !== "" && !limited) || undefined}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
@@ -86,7 +142,7 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
                   id="login-password"
                   ref={field}
                   autoComplete="current-password"
-                  aria-invalid={error !== "" || undefined}
+                  aria-invalid={(error !== "" && !limited) || undefined}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -103,9 +159,17 @@ export function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }
             <p role="alert" className="text-destructive text-sm">
               {error}
             </p>
+          ) : reason === "expired" ? (
+            // Said, rather than dropping the operator onto a blank form with
+            // no clue why the screen they were on went away.
+            <p role="status" className="text-sm text-[hsl(var(--muted-foreground))]">
+              Your session has ended. Sign in again to carry on where you were.
+            </p>
           ) : null}
-          <Button type="submit" disabled={busy || username === "" || password === ""}>
-            {busy ? "Signing in…" : "Sign in"}
+          {/* The countdown is on the button rather than in the alert, so a
+              screen reader hears the wait once instead of every second. */}
+          <Button type="submit" disabled={busy || wait > 0 || username === "" || password === ""}>
+            {busy ? "Signing in…" : wait > 0 ? `Try again in ${wait} s` : "Sign in"}
           </Button>
         </form>
       </Card>
