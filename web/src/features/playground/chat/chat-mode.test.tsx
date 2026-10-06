@@ -897,6 +897,20 @@ describe("Chat mode", () => {
     expect(screen.getByLabelText("System prompt")).toBeDisabled()
   })
 
+  it("still saves locked settings as a preset, and only refuses loading one", async () => {
+    // The lock is about this conversation's settings. Saving them, or
+    // deleting some other preset, changes nothing here -- and "this worked,
+    // keep it" is the moment a preset is wanted.
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: /speculative decoding/ }))
+    await waitFor(() => expect(screen.getByText("in one line")).toBeInTheDocument())
+    expect(screen.getByText(/set by the first message/i)).toBeInTheDocument()
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Manage presets" })).toBeEnabled()
+    expect(screen.getByLabelText("Preset")).toBeDisabled()
+  })
+
   it("leaves the settings open after a first message that failed", async () => {
     // Nothing was answered and nothing stored, so no exchange was produced
     // under these settings; fixing them would leave the operator to start
