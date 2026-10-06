@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { ChevronDown } from "lucide-react"
 import {
   Combobox,
@@ -100,6 +100,38 @@ export function useModelCandidates({
 }
 
 /**
+ * Escape closes an open suggestion list before it closes anything around it.
+ *
+ * darkraise-ui's DismissableLayer listens for Escape on `document` in the
+ * capture phase, so a dialog hears the key before the input does and closes,
+ * taking everything typed into it along -- the combobox's own Escape handler
+ * runs too late to stop it. A capture listener on `window` runs earlier
+ * still. It marks the event handled, which every darkraise overlay checks
+ * before dismissing, and closes the list itself, since the combobox's handler
+ * also checks and now stands aside.
+ *
+ * Exported for a field built on the bare Combobox: anything inside a dialog
+ * needs the same ordering, and ModelCombobox already applies it.
+ */
+export function useEscapeClosesListFirst(
+  open: boolean,
+  inputRef: RefObject<HTMLElement | null>,
+  close: () => void,
+) {
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return
+      if (!inputRef.current || e.target !== inputRef.current) return
+      e.preventDefault()
+      close()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [open, inputRef, close])
+}
+
+/**
  * A field for naming something to route to: a text box that suggests, not a
  * menu that constrains.
  *
@@ -119,6 +151,7 @@ export function ModelCombobox({
   className,
   id,
   disabled = false,
+  inFlow = false,
 }: {
   value: string
   onChange: (next: string) => void
@@ -137,6 +170,11 @@ export function ModelCombobox({
   loading?: boolean
   className?: string
   disabled?: boolean
+  /** Lay the suggestion list in the flow, pushing what follows down, instead
+   *  of floating it. For a field inside a scrolling box -- a dialog, whose
+   *  content scrolls -- where a floating list is clipped at the box's edge
+   *  and covers the buttons under it. In the flow, the box scrolls to it. */
+  inFlow?: boolean
 }) {
   const items: ComboboxItemData[] = useMemo(
     () => filterCandidates(candidates, value).map((c) => ({ value: c, label: c })),
@@ -147,10 +185,24 @@ export function ModelCombobox({
   // suggestions the operator can already use.
   const waiting = loading && items.length === 0
 
+  const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const closeList = useCallback(() => setOpen(false), [])
+  useEscapeClosesListFirst(open, inputRef, closeList)
+  useEffect(() => {
+    if (!open || !inFlow) return
+    const listId = inputRef.current?.getAttribute("aria-controls")
+    const list = listId ? document.getElementById(listId) : null
+    // Optional: jsdom has no scrollIntoView, and nothing else lacks it.
+    list?.scrollIntoView?.({ block: "nearest" })
+  }, [open, inFlow])
+
   return (
     <Combobox
       className={className ?? "min-w-0 flex-1"}
       items={items}
+      open={open}
+      onOpenChange={setOpen}
       inputValue={value}
       onInputValueChange={(d) => onChange(d.value)}
       onValueChange={(d) => {
@@ -167,6 +219,7 @@ export function ModelCombobox({
     >
       <ComboboxControl className="relative">
         <ComboboxInput
+          ref={inputRef}
           id={id}
           aria-label={label}
           className="pr-8 font-mono text-sm"
@@ -199,7 +252,9 @@ export function ModelCombobox({
           )}
         </ComboboxTrigger>
       </ComboboxControl>
-      <ComboboxContent>
+      {/* `static` overrides the recipe's `absolute top-full`: the utility
+          layer wins over the library's component layer. */}
+      <ComboboxContent className={inFlow ? "static" : undefined}>
         <ComboboxList>
           {items.map((item) => (
             <ComboboxItem key={item.value} item={item}>
