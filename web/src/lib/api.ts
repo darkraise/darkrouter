@@ -277,14 +277,19 @@ export async function* stream(
     credentials: "same-origin",
     signal,
   })
+  const requestId = res.headers.get("X-Darkrouter-Request") ?? ""
   if (!res.ok || !res.body) {
+    // A refused run still has a trace — every attempt it made — so the
+    // caller gets its id before the error rather than only on success. A
+    // session that has expired answers without one, and starts nothing.
+    if (requestId) onStart?.({ requestId })
     // A 401 here is ambiguous in a way request() never sees: this path also
     // carries a live executor run, and a bad credential answers 401 too —
     // that is the playground's whole reason to exist. throwOnExecutorError
     // tells the two apart.
     return await throwOnExecutorError(res)
   }
-  onStart?.({ requestId: res.headers.get("X-Darkrouter-Request") ?? "" })
+  onStart?.({ requestId })
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
