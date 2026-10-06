@@ -49,6 +49,10 @@ export type UsageResponse = {
   /** Present with group_by=provider: failover pairs over the same days, so
    *  the routing graph's returns and volumes share one window. */
   failover_edges?: FailoverEdge[]
+  /** Present with group_by=provider: requests that failed over and were
+   *  served, counted once each — including a rescue by another model on the
+   *  same provider, which no edge carries. */
+  failed_over?: number
 }
 
 // --- overview ---

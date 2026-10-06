@@ -230,6 +230,17 @@ export function flowProviders(
     }))
 }
 
+/** The router's "failed over" reading: requests, as the server counts them.
+ *  The arcs summed are only the fallback for a server that predates the
+ *  count — they miss a same-provider rescue and count a request that failed
+ *  at two providers twice. */
+export function routerFailoverCount(
+  failedOver: number | undefined,
+  arcs: { count: number }[],
+): number {
+  return failedOver ?? arcs.reduce((n, e) => n + e.count, 0)
+}
+
 export function OverviewScreen() {
   const overview = useOverview()
   const byAlias = useUsage("alias")
@@ -420,10 +431,11 @@ export function OverviewScreen() {
                 aliases={graphAliases}
                 providers={graphProviders}
                 failovers={graphFailovers}
-                // Every return the graph draws, summed — not the five rows
-                // /api/overview caps its recent list at, which would report a
-                // busy window as five — over the same days as the volumes.
-                failoverCount={graphFailovers.reduce((n, e) => n + e.count, 0)}
+                // Requests that failed over, over the same days as the
+                // volumes — not the five rows /api/overview caps its recent
+                // list at, and not the arcs summed: a rescue by another model
+                // on the same provider draws no arc.
+                failoverCount={routerFailoverCount(byProvider.data?.failed_over, graphFailovers)}
               />
             ) : (
               // The heading and its explanation without a canvas beneath them

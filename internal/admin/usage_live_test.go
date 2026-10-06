@@ -112,3 +112,39 @@ func TestUsageByProviderIsLiveAndCarriesItsFailovers(t *testing.T) {
 		t.Errorf("7-day edges = %+v, want the one failover inside the week", week.Edges)
 	}
 }
+
+// The router's "failed over" count is requests, not edges. A rescue by
+// another model on the same provider draws no arc between two providers, and
+// before this count existed the graph summed its arcs and missed it.
+func TestUsageCountsSameProviderFailoversThatDrawNoEdge(t *testing.T) {
+	s, db := testServerFull(t)
+	seedFailover(t, db)
+	storetest.WriteBatch(t, db, []*store.RequestRecord{{
+		ID: "01SAMEPROV", TS: time.Now(), Dialect: "openai", Surface: "llm",
+		RequestedModel: "chain", FinalProviderID: "lmstudio", FinalModel: "fast",
+		Status: "success",
+		Attempts: []store.AttemptRecord{
+			{Seq: 1, ProviderID: "lmstudio", Model: "broken", Outcome: "retryable_provider"},
+			{Seq: 2, ProviderID: "lmstudio", Model: "fast", Outcome: "success"},
+		},
+	}})
+
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/usage?group_by=provider", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Edges      []json.RawMessage `json:"failover_edges"`
+		FailedOver *int64            `json:"failed_over"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Edges) != 1 {
+		t.Errorf("edges = %d, want 1: the same-provider rescue is no edge", len(got.Edges))
+	}
+	if got.FailedOver == nil || *got.FailedOver != 2 {
+		t.Errorf("failed_over = %v, want 2: %s", got.FailedOver, w.Body.String())
+	}
+}

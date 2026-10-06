@@ -241,7 +241,9 @@ function AliasNode({ data }: NodeProps) {
   const d = data as AliasData
   return (
     <div className="rf-node rf-alias" style={{ width: d.width }}>
-      <span className="rf-name">{d.name}</span>
+      <span className="rf-name" title={d.name}>
+        {d.name}
+      </span>
       <span className="rf-vol">{d.requests.toLocaleString()}</span>
       <Handle type="source" position={Position.Right} className="rf-handle" />
     </div>

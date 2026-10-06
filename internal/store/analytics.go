@@ -304,6 +304,29 @@ func (d *DB) FailoverEdges(ctx context.Context, window time.Duration) ([]Failove
 	return d.FailoverEdgesSince(ctx, time.Now().Add(-window))
 }
 
+// FailedOverSince counts the requests from since on that a failed attempt
+// handed to another candidate which then served them.
+//
+// Not the sum of FailoverEdgesSince: an edge is a pair of different
+// providers, so a request a provider's second model rescued is in no edge,
+// and a request that failed at two providers before a third served it is in
+// two.
+func (d *DB) FailedOverSince(ctx context.Context, sinceTime time.Time) (int64, error) {
+	var n int64
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT count(DISTINCT r.id)
+		   FROM requests r
+		   JOIN request_attempts failed
+		     ON failed.request_id = r.id AND failed.outcome <> 'success'
+		   JOIN request_attempts served
+		     ON served.request_id = r.id AND served.outcome = 'success'
+		  WHERE r.ts >= ?`, sinceTime.UnixMilli()).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed over: %w", err)
+	}
+	return n, nil
+}
+
 // FailoverEdgesSince is FailoverEdges over every request from since on, for a
 // caller whose window is calendar days -- the routing graph draws its returns
 // over the same days its usage volumes cover.
