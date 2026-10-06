@@ -243,7 +243,7 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 		internalError(w, r, err)
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": true, "restart_required": restartRequired(written),
+			"valid": true, "restart_required": restartRequired(written, s.deps.Config.PendingRestart()),
 		})
 	}
 }
@@ -252,12 +252,17 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 // are accepted rather than refused: the value belongs in the database either
 // way, and refusing it would leave an operator no way to set it at all.
 //
+// Only the ones now pending, which is measured against the value the process
+// booted with. A write that moves a restart-only key back to that value, or a
+// reset of a stored row equal to the default, changes nothing the process is
+// running, and naming it told the operator to restart for no reason.
+//
 // Never nil: a client cannot tell a JSON null from a field an older build did
 // not serve.
-func restartRequired(written []string) []string {
+func restartRequired(written, pending []string) []string {
 	out := []string{}
 	for _, k := range written {
-		if slices.Contains(config.RestartOnly, k) {
+		if slices.Contains(config.RestartOnly, k) && slices.Contains(pending, k) {
 			out = append(out, k)
 		}
 	}
