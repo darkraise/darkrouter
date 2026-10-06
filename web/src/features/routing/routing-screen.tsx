@@ -4,7 +4,14 @@ import { ChevronDown, ChevronUp, Plus } from "lucide-react"
 import { Banner, Button, Card, ToggleGroup, ToggleGroupItem } from "darkraise-ui"
 import { ApiError, api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { keys, useAliasesForEditing, useModels, usePolicy, useProviders } from "../../lib/queries"
+import {
+  keys,
+  useAliasesForEditing,
+  useModels,
+  usePolicy,
+  useProviderHealth,
+  useProviders,
+} from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import type { Aliases, RouteCandidate, RoutePreview, RouteSkip } from "../../lib/api-types"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
@@ -642,6 +649,10 @@ export function RoutingScreen() {
   const providers = useProviders()
   const models = useModels()
   const policy = usePolicy()
+  // The per-model breakers. The provider rows carry a cooling flag per
+  // credential only, which cannot say that one model on a keyless runtime is
+  // cooling while the rest serve.
+  const health = useProviderHealth()
   // The request and its result move together. Kept apart, a preview that 404s
   // or one that arrives out of order leaves the graph labelling the previous
   // candidate list with the new request's name.
@@ -662,8 +673,8 @@ export function RoutingScreen() {
   const providerRows = useMemo(() => providers.data?.providers ?? [], [providers.data])
   const modelRows = useMemo(() => models.data?.models ?? [], [models.data])
   const context: ChainContext = useMemo(
-    () => ({ providers: providerRows, models: modelRows }),
-    [providerRows, modelRows],
+    () => ({ providers: providerRows, models: modelRows, breakers: health.data }),
+    [providerRows, modelRows, health.data],
   )
   // Two lists, because they are two different questions. Inside a chain the
   // router expands targets through rules 2 and 3 only, so an alias suggested
