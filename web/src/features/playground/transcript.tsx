@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useLayoutEffect, useRef } from "react"
 import { Button } from "darkraise-ui"
 import { AssistantTurn, UserTurn, type TurnRoute } from "./message"
 import type { TurnThinking } from "./lib/use-chat-run"
@@ -30,44 +30,74 @@ export function Transcript({
   onChooseModel?: () => void
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
-  const foot = useRef<HTMLDivElement | null>(null)
+  const content = useRef<HTMLDivElement | null>(null)
+  // Whether the reader was at the bottom when they last scrolled. Recorded
+  // from scroll events rather than measured when content changes: by the
+  // time a change is seen the content has already grown, and the growth
+  // that matters most arrives later still -- Markdown renders on a throttle,
+  // and the final unthrottled pass lands after `busy` has gone false. A
+  // measurement taken after one growth larger than the slack read "scrolled
+  // up" and the follow detached for good.
+  const stick = useRef(true)
+  const turns = useRef(messages.length)
 
-  useEffect(() => {
-    if (!busy) return
+  // A new turn is the operator's own send (or a conversation being opened),
+  // and either way they want the bottom, wherever they had scrolled to.
+  useLayoutEffect(() => {
+    if (messages.length > turns.current) stick.current = true
+    turns.current = messages.length
+  }, [messages.length])
+
+  // Follows every change in the content's height, not every render: the
+  // growth is what moves the bottom, whatever caused it.
+  useLayoutEffect(() => {
     const el = scroller.current
-    if (!el) return
-    if (nearBottom(el)) foot.current?.scrollIntoView({ block: "end" })
-  }, [messages, busy])
+    const inner = content.current
+    if (!el || !inner) return
+    const follow = () => {
+      if (stick.current) el.scrollTop = el.scrollHeight
+    }
+    follow()
+    const observer = new ResizeObserver(follow)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [])
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-      {seedNote ? (
-        <p className="pb-4 text-sm text-[hsl(var(--muted-foreground))]">{seedNote}</p>
-      ) : null}
+    <div
+      ref={scroller}
+      onScroll={(e) => {
+        stick.current = nearBottom(e.currentTarget)
+      }}
+      className="min-h-0 flex-1 overflow-y-auto px-6 py-4"
+    >
+      <div ref={content} className="flex min-h-full flex-col">
+        {seedNote ? (
+          <p className="pb-4 text-sm text-[hsl(var(--muted-foreground))]">{seedNote}</p>
+        ) : null}
 
-      {messages.length === 0 ? (
-        <EmptyChat model={model} onChooseModel={onChooseModel} />
-      ) : (
-        <div className="flex flex-col gap-6">
-          {messages.map((m, i) =>
-            m.role === "user" ? (
-              <UserTurn key={`${epoch ?? 0}:${i}`} text={m.content} />
-            ) : (
-              <AssistantTurn
-                key={`${epoch ?? 0}:${i}`}
-                text={m.content}
-                route={routes[i]}
-                thinking={thinking[i]}
-                // Only the last turn can still be arriving.
-                streaming={busy && i === messages.length - 1}
-                quiet={quiet}
-              />
-            ),
-          )}
-        </div>
-      )}
-
-      <div ref={foot} aria-hidden="true" />
+        {messages.length === 0 ? (
+          <EmptyChat model={model} onChooseModel={onChooseModel} />
+        ) : (
+          <div className="flex flex-col gap-6">
+            {messages.map((m, i) =>
+              m.role === "user" ? (
+                <UserTurn key={`${epoch ?? 0}:${i}`} text={m.content} />
+              ) : (
+                <AssistantTurn
+                  key={`${epoch ?? 0}:${i}`}
+                  text={m.content}
+                  route={routes[i]}
+                  thinking={thinking[i]}
+                  // Only the last turn can still be arriving.
+                  streaming={busy && i === messages.length - 1}
+                  quiet={quiet}
+                />
+              ),
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -100,7 +130,7 @@ export function nearBottom(el: HTMLElement): boolean {
  */
 function EmptyChat({ model, onChooseModel }: { model: string; onChooseModel?: () => void }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
       <p className="text-base font-medium">
         {model === "" ? "Name a model to send to" : `Ready to send to ${model}`}
       </p>

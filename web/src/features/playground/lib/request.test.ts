@@ -102,6 +102,28 @@ describe("what stops a request from being sent", () => {
     expect(requestProblem({ ...base, dialect: "anthropic", schemaRaw: "{nope" })).toBeUndefined()
   })
 
+  const openaiTool = '[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]'
+  const anthropicTool = '[{"name":"f","input_schema":{"type":"object"}}]'
+
+  it("holds tools on gemini before Send, rather than after the server's 400", () => {
+    expect(requestProblem({ ...base, dialect: "gemini", toolsRaw: openaiTool })).toMatch(
+      /functionDeclarations.*openai or anthropic/,
+    )
+    // An empty array sends no tools, which the server accepts.
+    expect(requestProblem({ ...base, dialect: "gemini", toolsRaw: "[]" })).toBeUndefined()
+  })
+
+  it("names a tool written in the other dialect's shape, which its edge would drop", () => {
+    expect(requestProblem({ ...base, dialect: "anthropic", toolsRaw: openaiTool })).toMatch(
+      /tool 1 is in the OpenAI shape/,
+    )
+    expect(requestProblem({ ...base, dialect: "openai", toolsRaw: anthropicTool })).toMatch(
+      /tool 1 is not in the OpenAI shape/,
+    )
+    expect(requestProblem({ ...base, dialect: "anthropic", toolsRaw: anthropicTool })).toBeUndefined()
+    expect(requestProblem({ ...base, dialect: "openai", toolsRaw: openaiTool })).toBeUndefined()
+  })
+
   it("finds nothing wrong with a well-formed request", () => {
     expect(requestProblem({ ...base, toolsRaw: "[]", schemaRaw: '{"type":"object"}' })).toBeUndefined()
   })

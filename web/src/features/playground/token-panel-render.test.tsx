@@ -31,6 +31,15 @@ describe("conversation price coverage", () => {
     expect(screen.getByText(/cost includes only known prices/i)).toBeInTheDocument()
   })
 
+  it("says how many answers the token counts cover when some have no trace", () => {
+    render(
+      <TokenPanel consumption={consumption({ counted: 2, turns: 3 })} metrics={NO_METRICS} />,
+    )
+    expect(
+      screen.getByText(/token counts cover 2 of 3 answers; the rest have no trace in the request log/i),
+    ).toBeInTheDocument()
+  })
+
   it("shows an unknown cost when no turn has usable pricing", () => {
     render(
       <TokenPanel

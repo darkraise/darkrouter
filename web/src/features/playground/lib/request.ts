@@ -1,5 +1,5 @@
 import { DIALECTS, type PlaygroundConfig } from "../config"
-import { supports } from "../dialect-support"
+import { reasonFor, supports } from "../dialect-support"
 import type {
   PlaygroundChatBody,
   PlaygroundDialect,
@@ -62,10 +62,58 @@ export function parseSchema(raw: string): { schema?: unknown; error?: string } {
  * the pane has already said it will not be sent.
  */
 export function requestProblem(config: PlaygroundConfig): string | undefined {
-  const tools = parseTools(config.toolsRaw).error
+  const tools = toolsProblem(config)
   if (tools !== undefined) return tools
   if (supports(config.dialect, "schema")) return parseSchema(config.schemaRaw).error
   return undefined
+}
+
+/** Why the Tools field cannot be sent as it stands, if anything. Its own
+ *  export so the pane can say it under the field as well as beside Send. */
+export function toolsProblem(config: Pick<PlaygroundConfig, "toolsRaw" | "dialect">): string | undefined {
+  const { tools, error } = parseTools(config.toolsRaw)
+  if (error !== undefined) return error
+  if (tools === undefined || tools.length === 0) return undefined
+  // Unlike the sampling controls, tools are not dropped quietly: the gemini
+  // path refuses the whole request, so this says so before Send rather than
+  // after a 400.
+  const refused = reasonFor(config.dialect, "tools")
+  if (refused !== null) return refused
+  return toolShapeProblem(config.dialect, tools)
+}
+
+/**
+ * Why a tool written for one dialect would not survive another's edge.
+ *
+ * Each edge reads only its own shape. The OpenAI edge takes a tool's name and
+ * schema from `function`, so an Anthropic-shaped entry arrives nameless; the
+ * Anthropic edge reads a `type` it does not know as a provider-run tool and
+ * carries it whole, and an OpenAI target then drops it with a warning under
+ * the answer. Either way the request succeeds without the tool, which reads
+ * as the model ignoring it.
+ */
+function toolShapeProblem(
+  dialect: PlaygroundDialect,
+  tools: Record<string, unknown>[],
+): string | undefined {
+  const at = tools.findIndex((t) =>
+    dialect === "anthropic"
+      ? t.type === "function" || typeof t.function === "object"
+      : dialect === "openai"
+        ? typeof t.function !== "object" || t.function === null
+        : false,
+  )
+  if (at < 0) return undefined
+  return dialect === "anthropic"
+    ? `tool ${at + 1} is in the OpenAI shape; the anthropic dialect takes {"name": …, "input_schema": {…}} and would drop it`
+    : `tool ${at + 1} is not in the OpenAI shape; the openai dialect takes {"type": "function", "function": {"name": …, "parameters": {…}}}`
+}
+
+/** What the Tools field shows as an example, in the shape the dialect reads. */
+export const TOOLS_PLACEHOLDER: Record<PlaygroundDialect, string> = {
+  openai: 'JSON array, e.g. [{"type":"function","function":{"name":"lookup","parameters":{…}}}]',
+  anthropic: 'JSON array, e.g. [{"name":"lookup","input_schema":{"type":"object",…}}]',
+  gemini: "Not sent on the gemini dialect",
 }
 
 export function chatBody(state: ChatState): PlaygroundChatBody {

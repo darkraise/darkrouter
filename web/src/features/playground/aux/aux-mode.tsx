@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react"
-import { Card } from "darkraise-ui"
+import {
+  Card,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "darkraise-ui"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -7,7 +15,8 @@ import {
 } from "darkraise-ui/components/resizable"
 import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
 import { EmptyState } from "../../shell/empty-state"
-import { useModels, useProviders } from "../../../lib/queries"
+import { useSearch } from "@tanstack/react-router"
+import { useModels, useProviders, useTrace } from "../../../lib/queries"
 import { ToolRail } from "./tool-rail"
 import { ToolInputs } from "./tool-inputs"
 import { RunCard } from "./results"
@@ -15,6 +24,7 @@ import { RunReadings } from "./run-readings"
 import {
   AUX_SURFACES,
   auxBodyFor,
+  auxSurfaceOf,
   catalogSurfaceFor,
   countDialectFor,
   documentLines,
@@ -78,6 +88,38 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
     for (const controller of controllers.current.values()) controller.abort()
     controllers.current.clear()
   }, [isActive])
+
+  // The trace drawer's "Open in playground" sends a non-chat request here as
+  // ?seed=, the way Chat receives one: the tool it was and the model it
+  // asked for carry over. Its input does not -- capture.bodies has no writer,
+  // so the trace holds none to restore.
+  const search = useSearch({ strict: false })
+  const seed = search.seed
+  const trace = useTrace(seed ?? "", { enabled: seed !== undefined })
+  const [seededFrom, setSeededFrom] = useState<string | undefined>(undefined)
+  // A chat trace is Chat's to seed; every mode sees the same ?seed=.
+  const seedIsChat = trace.data !== undefined && (!trace.data.surface || trace.data.surface === "llm")
+  const seededTool = trace.data && !seedIsChat ? auxSurfaceOf(trace.data.surface) : undefined
+  // Once per seed, as an adjustment during render rather than an effect, so
+  // the screen never paints the first tool before switching.
+  if (trace.data && seed !== undefined && seededFrom !== seed) {
+    setSeededFrom(seed)
+    if (seededTool !== undefined) {
+      const model = trace.data.alias || trace.data.model
+      setActive(seededTool)
+      setForms((f) => ({ ...f, [seededTool]: { ...(f[seededTool] ?? {}), model } }))
+    }
+  }
+  const seedNote =
+    seed === undefined || seedIsChat
+      ? undefined
+      : trace.isError
+        ? `Trace ${seed} could not be loaded, so nothing was seeded.`
+        : seededFrom !== seed
+          ? `Loading trace ${seed}…`
+          : seededTool === undefined
+            ? `Trace ${seed} is not a request any tool here sends, so nothing was seeded.`
+            : `Seeded from trace ${seed}: the tool and model carried over. The original input was not retained and is not recoverable.`
 
   const info = surfaceInfo(active)
   const form = forms[active] ?? {}
@@ -185,13 +227,36 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
 
   return (
     <ResizablePanelGroup className="flex min-h-0 flex-1 gap-0 px-6 pb-6">
-      <ResizablePanel defaultSize={20} minSize={14} maxSize={40} className="flex min-h-0 flex-col">
+      {/* Off below lg, as Chat's rail is: at phone width the panel's share
+          left about seventy pixels, and seven names cut to "To…", "E…"
+          are no rail at all. The select below takes its place. */}
+      <ResizablePanel
+        defaultSize={20}
+        minSize={14}
+        maxSize={40}
+        className="!hidden min-h-0 flex-col lg:!flex"
+      >
         <ToolRail active={active} onSelect={setActive} runCounts={counts} />
       </ResizablePanel>
 
-      <ResizableHandle withHandle className="mx-2" />
+      <ResizableHandle withHandle className="mx-2 hidden lg:flex" />
 
       <ResizablePanel className="flex min-h-0 min-w-0 flex-col gap-4">
+        <div className="flex flex-col gap-1.5 lg:hidden">
+          <Label htmlFor="aux-tool">Tool</Label>
+          <Select value={active} onValueChange={(v) => setActive(v as AuxSurface)}>
+            <SelectTrigger id="aux-tool">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUX_SURFACES.map(({ surface, label, blurb }) => (
+                <SelectItem key={surface} value={surface}>
+                  {label} — {blurb.toLowerCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {/* The model this tool will send to, on its own island above the
             work — the same place Chat names the model answering. Narrowed to
             this surface: an embeddings box offering a chat model is offering
@@ -215,6 +280,9 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
         <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
           <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {seedNote ? (
+                <p className="pb-4 text-sm text-[hsl(var(--muted-foreground))]">{seedNote}</p>
+              ) : null}
               {errors[active] ? (
                 <p role="alert" className="pb-4 text-sm text-[hsl(var(--destructive))]">
                   {errors[active]}

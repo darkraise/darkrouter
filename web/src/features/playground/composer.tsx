@@ -62,6 +62,7 @@ export function Composer({
       <div className="relative">
         <Textarea
           aria-label="Message"
+          aria-describedby={problem || error ? "composer-error" : undefined}
           placeholder={model === "" ? "Choose a model first" : "Ask the router something"}
           value={draft}
           disabled={disabled}
@@ -111,7 +112,11 @@ export function Composer({
           not happened. Starting a new conversation used to live here too;
           it is the icon on the conversations panel's own header now. */}
       {(problem || error) && (
-        <p className="text-sm text-destructive">{problem || error}</p>
+        // An alert, so a failed send is heard as well as seen: after Enter
+        // the focus stays in the field, and nothing else announces it.
+        <p id="composer-error" role="alert" className="text-sm text-destructive">
+          {problem || error}
+        </p>
       )}
     </div>
   )

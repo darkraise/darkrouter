@@ -34,7 +34,26 @@ func (s *Server) handleListProxyTokens(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, view)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+	// Whether the gateway refuses unauthenticated clients is not readable off
+	// the list: the proxy switches authentication on when a token is first
+	// issued and never back off, so an empty list can mean either "open" or
+	// "every client refused". The console has to say which, so it is told.
+	issued, err := s.deps.DB.ProxyTokensIssued(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	shared := false
+	if s.deps.Config != nil {
+		shared = s.deps.Config.Current().Server.ProxyToken != ""
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tokens": out,
+		"issued": issued,
+		// Only whether one is set, never the value: the console has no use
+		// for the secret, and a listing is the wrong place to leak it.
+		"shared_secret": shared,
+	})
 }
 
 func (s *Server) handleCreateProxyToken(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +118,20 @@ func (s *Server) handlePatchCredential(w http.ResponseWriter, r *http.Request) {
 	if body.Secret != nil && *body.Secret == "" {
 		writeError(w, http.StatusBadRequest, "secret must not be empty")
 		return
+	}
+	// A replacement is held to the shape a new credential is: a sigv4 or
+	// service-account secret that does not parse would be stored, and then
+	// fail on every request it signs instead of here, where it was typed.
+	if body.Secret != nil {
+		row, err := s.deps.DB.ProviderByID(r.Context(), providerID)
+		if err != nil {
+			writeStoreError(w, r, err)
+			return
+		}
+		if err := credentialShapeError(row.AuthStyle, *body.Secret); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	if body.Enabled != nil {

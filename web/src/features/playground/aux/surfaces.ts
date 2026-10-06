@@ -73,6 +73,12 @@ export function catalogSurfaceFor(surface: AuxSurface): string {
   return AUX_SURFACES.find((s) => s.surface === surface)?.catalogSurface ?? surface
 }
 
+/** The tool that sends what a logged request was, by the trace's `ir.Surface`.
+ *  Undefined for one no tool here sends. */
+export function auxSurfaceOf(traceSurface: string): AuxSurface | undefined {
+  return AUX_SURFACES.find((s) => s.catalogSurface === traceSurface)?.surface
+}
+
 export function surfaceInfo(surface: AuxSurface) {
   return AUX_SURFACES.find((s) => s.surface === surface) ?? AUX_SURFACES[0]
 }

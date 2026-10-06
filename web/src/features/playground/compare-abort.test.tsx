@@ -109,14 +109,26 @@ describe("a Compare column that stops being watched", () => {
     // also the one a removed streaming column used to slip past: dropping out
     // of the busy count re-enabled Run while the orphan was still arriving.
     await startARun()
-    expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
+    // Stop stands where Run was, so there is no Run to press again.
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull()
 
     expect(screen.getByRole("button", { name: "Add model" })).toBeDisabled()
     expect(screen.getAllByRole("button", { name: /remove/i })
       .every((button) => button.hasAttribute("disabled"))).toBe(true)
-    expect(screen.getByRole("button", { name: /running/i })).toBeDisabled()
     expect(signals[0]!.aborted).toBe(false)
     expect(signals[1]!.aborted).toBe(false)
+  })
+
+  it("stops every column from the Stop that replaces Run", async () => {
+    // A run against a hung provider could only be abandoned by leaving the
+    // tab; the controllers were there and nothing called them.
+    await startARun()
+    expect(screen.getByText("Locked while this comparison runs.")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Stop" }))
+
+    await waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true))
+    await waitFor(() => expect(screen.getAllByRole("img", { name: "stopped" })).toHaveLength(2))
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled()
   })
 
   it("keeps the model labels fixed while their outputs are streaming", async () => {
