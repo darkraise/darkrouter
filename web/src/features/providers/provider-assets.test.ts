@@ -34,8 +34,15 @@ describe("the provider logo manifest", () => {
   })
 
   it("covers the gateways an operator meets on the providers screen", () => {
-    for (const id of ["chutes", "requesty", "nanogpt", "ovhcloud", "scaleway"]) {
+    for (const id of ["chutes", "requesty", "nanogpt", "scaleway"]) {
       expect(PROVIDER_ASSETS[id], id).toBeDefined()
     }
+  })
+
+  it("draws OVHcloud's glyph rather than its wordmark", () => {
+    // The shipped file was the horizontal wordmark in fixed navy: four
+    // pixels tall in a tile, and invisible on the dark canvas.
+    expect(BRAND_MARKS.ovhcloud).toBeDefined()
+    expect(PROVIDER_ASSETS.ovhcloud).toBeUndefined()
   })
 })
