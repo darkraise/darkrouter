@@ -194,9 +194,9 @@ func TestConcurrentReloadsPublishTheLatest(t *testing.T) {
 	}
 }
 
-// restartOnlyWarnings diffs consecutive snapshots, so the next unrelated write
-// clears the warning while the process is still running the old value. The
-// pending set has to be measured against boot, not against the last reload.
+// A diff of consecutive snapshots is cleared by the next unrelated write while
+// the process is still running the old value. The pending set has to be
+// measured against boot, not against the last reload.
 func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
 	// What the loader returns next. Mutated between reloads, the way an edit
 	// through the admin API changes what the database answers.
@@ -233,6 +233,64 @@ func TestPendingRestartSurvivesAnUnrelatedReload(t *testing.T) {
 	}
 	if got := s.PendingRestart(); len(got) != 1 || got[0] != "catalog.sync_interval" {
 		t.Fatalf("PendingRestart = %v after an unrelated write, want it still pending", got)
+	}
+}
+
+// restartWarned reports whether the current snapshot warns that field waits
+// for a restart.
+func restartWarned(s *Store, field string) bool {
+	for _, w := range s.Current().Warnings {
+		if strings.HasPrefix(w, field+" ") && strings.Contains(w, "restart") {
+			return true
+		}
+	}
+	return false
+}
+
+// Moving a restart-only key back to the value the process booted with leaves
+// nothing waiting for a restart. Diffing against the previous reload reported
+// the move back as one more edit to restart for, beside a PendingRestart that
+// correctly said nothing was pending, so the screen asked for a restart and
+// said none was needed at once.
+func TestRestartWarningFollowsTheBootSnapshot(t *testing.T) {
+	stored := &Config{}
+	applyDefaults(stored)
+	booted := stored.Catalog.SyncTimeout
+
+	s, err := NewStoreFrom(func() (*Config, error) {
+		next := *stored
+		return &next, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stored.Catalog.SyncTimeout = booted + time.Second
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if !restartWarned(s, "catalog.sync_timeout") {
+		t.Fatalf("warnings = %v, want catalog.sync_timeout waiting for a restart", s.Current().Warnings)
+	}
+
+	// An unrelated reload keeps it: the old value is still the one in force.
+	stored.Log.Retention = 100 * time.Hour
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if !restartWarned(s, "catalog.sync_timeout") {
+		t.Errorf("warnings = %v after an unrelated reload, want the restart notice kept", s.Current().Warnings)
+	}
+
+	stored.Catalog.SyncTimeout = booted
+	if err := s.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if restartWarned(s, "catalog.sync_timeout") {
+		t.Errorf("warnings = %v after reverting to the boot value, want no restart notice", s.Current().Warnings)
+	}
+	if got := s.PendingRestart(); len(got) != 0 {
+		t.Errorf("PendingRestart = %v after reverting to the boot value, want none", got)
 	}
 }
 

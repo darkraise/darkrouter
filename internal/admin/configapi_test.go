@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -347,6 +348,61 @@ func TestPutConfigAcceptsARestartOnlyFieldAndNamesIt(t *testing.T) {
 	}
 	if len(body.RestartRequired) != 1 || body.RestartRequired[0] != "policy.timeout.connect" {
 		t.Errorf("restart_required = %v", body.RestartRequired)
+	}
+}
+
+// Moving a restart-only key back to the value the process booted with leaves
+// nothing to restart for. The save's answer, the warnings and pending_restart
+// all have to say so: the screen once toasted "takes effect after a restart"
+// and kept a restart warning up beside a pending list that was empty.
+func TestPutConfigRevertingToTheBootValueRequiresNoRestart(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	booted := getConfig(t, s).Values["catalog.sync_timeout"]
+
+	put := func(body string) []string {
+		t.Helper()
+		w := do(t, s, cookie, token, "PUT", "/api/config", body)
+		if w.Code != 200 {
+			t.Fatalf("PUT %s = %d: %s", body, w.Code, w.Body.String())
+		}
+		var out struct {
+			RestartRequired []string `json:"restart_required"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.RestartRequired
+	}
+	restartWarned := func() bool {
+		for _, w := range getConfig(t, s).Warnings {
+			if strings.Contains(w, "catalog.sync_timeout") && strings.Contains(w, "restart") {
+				return true
+			}
+		}
+		return false
+	}
+
+	if got := put(`{"set":{"catalog.sync_timeout":"31s"}}`); !slices.Equal(got, []string{"catalog.sync_timeout"}) {
+		t.Fatalf("restart_required = %v after a change, want [catalog.sync_timeout]", got)
+	}
+	if !restartWarned() {
+		t.Fatal("no restart warning after a restart-only change")
+	}
+
+	if got := put(fmt.Sprintf(`{"set":{"catalog.sync_timeout":%q}}`, booted)); len(got) != 0 {
+		t.Errorf("restart_required = %v after reverting to the boot value, want none", got)
+	}
+	if restartWarned() {
+		t.Error("the restart warning outlived a revert to the boot value")
+	}
+	if got := getConfig(t, s).PendingRestart; len(got) != 0 {
+		t.Errorf("pending_restart = %v after reverting, want none", got)
+	}
+
+	// A reset of a stored row equal to the default changes nothing running.
+	if got := put(`{"reset":["catalog.sync_timeout"]}`); len(got) != 0 {
+		t.Errorf("restart_required = %v for a reset to the running value, want none", got)
 	}
 }
 

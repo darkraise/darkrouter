@@ -119,9 +119,8 @@ export function syncMessage(res: SyncResult): string {
  * What is stored but not yet running.
  *
  * Measured against the snapshot this process booted on, not against the
- * previous reload, so it survives the next unrelated save. The transient
- * warning in `warnings` does not, and that is why this is a separate notice
- * rather than one more line in that list.
+ * previous reload, so it survives the next unrelated save and clears when a
+ * key is moved back to the value the process is running.
  */
 export function pendingRestartMessage(fields: string[]): string {
   const list = fields.join(", ")
