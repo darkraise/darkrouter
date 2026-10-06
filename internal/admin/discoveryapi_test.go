@@ -48,6 +48,10 @@ type discoveryRollup struct {
 	RemovedUpstream  int    `json:"removed_upstream"`
 	MaxMissingStreak int    `json:"max_missing_streak"`
 	FilteredOut      int    `json:"filtered_out"`
+
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	LastError           string     `json:"last_error"`
+	LastSuccessAt       *time.Time `json:"last_success_at"`
 }
 
 func discoveryHealth(t *testing.T, s *Server) []discoveryRollup {
@@ -127,6 +131,50 @@ func TestAWhollyFilteredSweepIsNotSilence(t *testing.T) {
 	}
 	if got[0].ProviderID != "paid-only" || got[0].Total != 0 || got[0].FilteredOut != 12 {
 		t.Fatalf("rollup wrong: %+v", got[0])
+	}
+}
+
+func TestAFailingSweepIsReportedRatherThanReadAsEmpty(t *testing.T) {
+	// A keyless provider whose listing answers 403 on every sweep had no row
+	// in models and a provider_discovery row nobody read, so the console said
+	// "0 of 0 live" and "healthy" while the probe toast said Forbidden.
+	s, db := testServerFull(t)
+	ctx := context.Background()
+	if err := db.CreateProvider(ctx, store.ProviderRow{
+		ID: "aihorde", Kind: "openaicompat", BaseURL: "https://x.example",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := db.RecordDiscoveryFailure(ctx, "aihorde", time.Now(), "Forbidden"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := discoveryHealth(t, s)
+	if len(got) != 1 {
+		t.Fatalf("want one rollup for a provider that was swept, got %+v", got)
+	}
+	g := got[0]
+	if g.ConsecutiveFailures != 2 || g.LastError != "Forbidden" || g.LastSuccessAt != nil {
+		t.Fatalf("failure not reported: %+v", g)
+	}
+}
+
+func TestASuccessfulSweepClearsTheFailure(t *testing.T) {
+	s, db := testServerFull(t)
+	ctx := context.Background()
+	seedModelRow(t, db, "groq", "m1", "live", 0)
+	if err := db.RecordDiscoveryFailure(ctx, "groq", time.Now(), "timeout"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RecordDiscoverySuccess(ctx, "groq", nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got := discoveryHealth(t, s)
+	if len(got) != 1 || got[0].ConsecutiveFailures != 0 || got[0].LastError != "" ||
+		got[0].LastSuccessAt == nil {
+		t.Fatalf("a recovered provider still reads as failing: %+v", got)
 	}
 }
 
