@@ -34,7 +34,26 @@ func (s *Server) handleListProxyTokens(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, view)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
+	// Whether the gateway refuses unauthenticated clients is not readable off
+	// the list: the proxy switches authentication on when a token is first
+	// issued and never back off, so an empty list can mean either "open" or
+	// "every client refused". The console has to say which, so it is told.
+	issued, err := s.deps.DB.ProxyTokensIssued(r.Context())
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	shared := false
+	if s.deps.Config != nil {
+		shared = s.deps.Config.Current().Server.ProxyToken != ""
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tokens": out,
+		"issued": issued,
+		// Only whether one is set, never the value: the console has no use
+		// for the secret, and a listing is the wrong place to leak it.
+		"shared_secret": shared,
+	})
 }
 
 func (s *Server) handleCreateProxyToken(w http.ResponseWriter, r *http.Request) {
