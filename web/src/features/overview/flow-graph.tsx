@@ -302,9 +302,24 @@ function ProviderNode({ data }: NodeProps) {
 const nodeTypes = { alias: AliasNode, router: RouterNode, provider: ProviderNode }
 const edgeTypes = { failover: FailoverEdge }
 
+/** How the graph is fitted to its canvas, on mount and on every resize alike.
+ *
+ *  Asymmetric: the returns bow out past the right-hand column, and a uniform
+ *  padding that made room for them would leave the same gap on the left where
+ *  nothing is drawn. Edges are not in the bounds fitView measures, so the
+ *  returns' room is reserved here. Never above full size: the canvas is held
+ *  at the graph's natural width, so zooming in only pushed the returns off it. */
+const FIT_OPTIONS = {
+  padding: { top: "4%", right: `${RETURN_ROOM}px`, bottom: "4%", left: "2%" },
+  minZoom: 0.4,
+  maxZoom: 1,
+} as const
+
 /** Refits when the canvas changes size. The `fitView` prop fits once, on
  *  mount, so without this the graph keeps a width it no longer has — a
- *  narrowed window leaves the provider column off the right-hand edge. */
+ *  narrowed window leaves the provider column off the right-hand edge. It
+ *  refits with the mount's options: a bare fitView() fell back to xyflow's
+ *  defaults, zoomed past full size and dropped the room kept for returns. */
 function FitOnResize({ target }: { target: RefObject<HTMLDivElement | null> }) {
   const { fitView } = useReactFlow()
   useEffect(() => {
@@ -313,7 +328,7 @@ function FitOnResize({ target }: { target: RefObject<HTMLDivElement | null> }) {
     let frame = 0
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => void fitView())
+      frame = requestAnimationFrame(() => void fitView(FIT_OPTIONS))
     })
     observer.observe(el)
     return () => {
@@ -364,15 +379,7 @@ export function FlowGraph({
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          // Asymmetric: the returns bow out past the right-hand column, and a
-          // uniform padding that made room for them would leave the same gap on
-          // the left where nothing is drawn. Edges are not in the bounds
-          // fitView measures, so the returns' room is reserved here.
-          fitViewOptions={{
-            padding: { top: "4%", right: `${RETURN_ROOM}px`, bottom: "4%", left: "2%" },
-            minZoom: 0.4,
-            maxZoom: 1,
-          }}
+          fitViewOptions={FIT_OPTIONS}
           minZoom={0.4}
           maxZoom={1.5}
           nodesDraggable={false}
