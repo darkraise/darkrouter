@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "darkraise-ui"
 import { ConfigPane } from "../config-pane/config-pane"
-import { NestedDialogContext } from "../config-pane/nested-dialog"
+import { NestedDialogContext, escapeBelongsToPopup } from "../config-pane/nested-dialog"
 import type { PlaygroundConfig } from "../config"
 
 /**
@@ -74,7 +74,14 @@ export function NewConversationDialog({
       onOpenChange={onOpenChange}
       closeOnEscape={!nested}
     >
-      <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-y-auto">
+      <DialogContent
+        className="flex max-h-[85vh] max-w-2xl flex-col overflow-y-auto"
+        // An Escape that closes the model suggestions or the Dialect list
+        // must not close the dialog, and the draft, behind them.
+        onEscapeKeyDown={(event) => {
+          if (escapeBelongsToPopup()) event.preventDefault()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{amending ? "Request settings" : "New conversation"}</DialogTitle>
           <DialogDescription>

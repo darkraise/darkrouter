@@ -163,4 +163,34 @@ describe("the new-conversation dialog", () => {
     expect(screen.getByRole("dialog", { name: /new conversation/i })).toBeInTheDocument()
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
+
+  it("leaves itself open when Escape closes an open suggestion list", async () => {
+    // The model combobox's list portals to the body like a dialog does, so
+    // the dialog heard the same Escape and discarded the draft with it.
+    const onOpenChange = vi.fn()
+    dialog({ onOpenChange })
+    const field = screen.getByLabelText("Model or alias")
+    // The stub stands in for an open combobox, which marks itself so.
+    field.setAttribute("role", "combobox")
+    field.setAttribute("aria-expanded", "true")
+    field.focus()
+
+    await userEvent.keyboard("{Escape}")
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+    // And once the list is closed, Escape is the dialog's again.
+    field.setAttribute("aria-expanded", "false")
+    await userEvent.keyboard("{Escape}")
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("leaves itself open when Escape closes the Dialect list", async () => {
+    const onOpenChange = vi.fn()
+    dialog({ onOpenChange })
+    await userEvent.click(screen.getByLabelText(/dialect/i))
+    expect(await screen.findByRole("listbox")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
 })
