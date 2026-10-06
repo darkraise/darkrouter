@@ -61,6 +61,59 @@ export function providerState(p: Provider, discovery?: DiscoveryHealthRow): Prov
   return "healthy"
 }
 
+/**
+ * Where a provider's requests go, as the Connection card and Settings say it.
+ *
+ * Bedrock and Vertex store no base URL: their host is built per request from
+ * the region, or the project and location, so the row's own field is empty
+ * and printing it showed "Base URL" over nothing. These mirror the backend's
+ * `EndpointFor` in internal/adapter/bedrock and internal/adapter/vertex. A
+ * base URL the row does name wins there, and so it does here.
+ *
+ * `url` is empty when the parts it is built from are not set yet;
+ * `derivedFrom` says what it is built from whether or not they are.
+ */
+export function endpointOf(p: {
+  base_url: string
+  kind: string
+  region?: string
+  project?: string
+  location?: string
+}): { url: string; derivedFrom?: string } {
+  if (p.base_url) return { url: p.base_url }
+  if (p.kind === "bedrock") {
+    const derivedFrom = "the region"
+    return p.region
+      ? { url: `https://bedrock-runtime.${p.region}.amazonaws.com`, derivedFrom }
+      : { url: "", derivedFrom }
+  }
+  if (p.kind === "vertex") {
+    const derivedFrom = "the project and location"
+    const { project, location } = p
+    if (!project || !location) return { url: "", derivedFrom }
+    // The global endpoint's host carries no location, and the us and eu
+    // multi-regions answer only on representative hosts.
+    const host =
+      location === "global"
+        ? "aiplatform.googleapis.com"
+        : location === "us" || location === "eu"
+          ? `aiplatform.${location}.rep.googleapis.com`
+          : `${location}-aiplatform.googleapis.com`
+    return { url: `https://${host}/v1/projects/${project}/locations/${location}`, derivedFrom }
+  }
+  return { url: "" }
+}
+
+/** The Base URL fact's term and value, so a derived endpoint says it is one
+ *  and one that cannot be derived yet says what it waits on. */
+export function endpointFact(p: Parameters<typeof endpointOf>[0]): { term: string; value: string } {
+  const { url, derivedFrom } = endpointOf(p)
+  if (!derivedFrom) return { term: "Base URL", value: url || "—" }
+  return url
+    ? { term: `Base URL · from ${derivedFrom}`, value: url }
+    : { term: "Base URL", value: `derived from ${derivedFrom}` }
+}
+
 export const STATE_VARIANT = {
   healthy: "green",
   degraded: "amber",
@@ -129,6 +182,23 @@ export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
     parts.push(`missing for ${row.max_missing_streak} sweeps`)
   }
   return parts.join(" · ")
+}
+
+/** The same reading cut to what fits the list's cell, with `discoveryLine`
+ *  behind it in the tooltip and on the detail page.
+ *
+ *  The list is wider than its card at a laptop width, and Discovery is the
+ *  column the pinned actions cover. The full line -- a failing sweep quotes
+ *  its error, a URL and all -- was cut to "discove" there, which said nothing
+ *  at all; the count of failed sweeps says the part that matters at a glance. */
+export function discoveryBrief(row: DiscoveryHealthRow | undefined): string {
+  if (!row) return "never discovered"
+  if (discoveryFailing(row)) {
+    const n = row.consecutive_failures ?? 0
+    return n > 1 ? `failing · ${n} sweeps` : "failing"
+  }
+  if (row.total === 0 && row.filtered_out > 0) return "no free models"
+  return `${row.live} of ${row.total} live`
 }
 
 export type ProbeOutcome = { kind: "success" | "error"; message: string }

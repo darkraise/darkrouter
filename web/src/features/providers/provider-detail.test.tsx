@@ -149,6 +149,33 @@ describe("a provider nobody has configured", () => {
   })
 })
 
+describe("a provider whose endpoint is derived", () => {
+  // Bedrock stores no base URL: its host is built from the region per
+  // request. Printing the row's field showed "Base URL" over nothing.
+  const bedrock: Provider = {
+    ...configured, id: "bedrock", name: "Amazon Bedrock", preset: "bedrock",
+    kind: "bedrock", base_url: "", auth_style: "sigv4", region: "us-east-1",
+  }
+
+  it("shows the endpoint the region makes, and says it is derived", async () => {
+    stub([bedrock], [])
+    await renderProvider("bedrock")
+
+    expect(await screen.findByText("https://bedrock-runtime.us-east-1.amazonaws.com")).toBeInTheDocument()
+    expect(screen.getByText("Base URL · from the region")).toBeInTheDocument()
+  })
+
+  it("says what it waits on before a region is set", async () => {
+    const bedrockPreset: Preset = {
+      ...preset, id: "bedrock", name: "Amazon Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4",
+    }
+    stub([], [bedrockPreset])
+    await renderProvider("bedrock")
+
+    expect(await screen.findByText("derived from the region")).toBeInTheDocument()
+  })
+})
+
 describe("a provider list that did not load", () => {
   it("says so rather than rendering nothing", async () => {
     stub([configured], [preset])

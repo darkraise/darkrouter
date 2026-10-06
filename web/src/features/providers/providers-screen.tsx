@@ -65,6 +65,7 @@ import {
 import {
   breakersFor,
   coolingSubject,
+  discoveryBrief,
   discoveryFailing,
   discoveryLine,
   probeOutcome,
@@ -73,7 +74,7 @@ import {
 import { dateTime, zoneLabel } from "../../lib/format"
 import "./providers-table.css"
 
-export { breakersFor, discoveryLine, probeOutcome, providerState } from "./provider-state"
+export { breakersFor, discoveryBrief, discoveryLine, probeOutcome, providerState } from "./provider-state"
 
 export type ProviderView = "list" | "grid"
 
@@ -303,18 +304,6 @@ function buildColumns(actions: RowActions): Columns {
         ),
     },
     {
-      id: "traffic",
-      // The window is in the header because it is the one thing the meter
-      // cannot say about itself.
-      header: "Traffic · 30d",
-      cell: ({ row: { original: r } }) =>
-        r.share !== undefined ? (
-          <ShareMeter fraction={r.share} label={`${Math.round(r.share * 100)}%`} />
-        ) : (
-          <span className="text-[hsl(var(--legend))]">—</span>
-        ),
-    },
-    {
       id: "state",
       header: "State",
       // A mark, not the word: most of two hundred rows are unconfigured, and
@@ -331,8 +320,9 @@ function buildColumns(actions: RowActions): Columns {
         const warn =
           r.discovery !== undefined &&
           (r.discovery.max_missing_streak > 0 || discoveryFailing(r.discovery))
-        // A tooltip rather than a title: the line is longer than the cell as
-        // soon as a provider has anything to report, and a title never shows
+        // The cell says the gist and the tooltip the whole line: in full it
+        // is longer than the cell as soon as a provider has anything to
+        // report. A tooltip rather than a title, because a title never shows
         // on touch or on keyboard focus.
         return (
           <Tooltip>
@@ -341,11 +331,11 @@ function buildColumns(actions: RowActions): Columns {
                 tabIndex={0}
                 className={
                   warn
-                    ? "block max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
-                    : "block max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
+                    ? "block whitespace-nowrap text-sm text-[hsl(var(--warning))]"
+                    : "block whitespace-nowrap text-sm text-[hsl(var(--legend))]"
                 }
               >
-                {line}
+                {discoveryBrief(r.discovery)}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -354,6 +344,24 @@ function buildColumns(actions: RowActions): Columns {
           </Tooltip>
         )
       },
+    },
+    {
+      id: "traffic",
+      // The window is in the header because it is the one thing the meter
+      // cannot say about itself.
+      //
+      // Last before the actions, after State and Discovery. At a laptop
+      // width the table is wider than its card, and the pinned actions cover
+      // whichever column comes last: when that was Discovery, a failing
+      // sweep read "discove". A share of traffic half under the actions
+      // still reads as a bar; a warning half under them reads as nothing.
+      header: "Traffic · 30d",
+      cell: ({ row: { original: r } }) =>
+        r.share !== undefined ? (
+          <ShareMeter fraction={r.share} label={`${Math.round(r.share * 100)}%`} />
+        ) : (
+          <span className="text-[hsl(var(--legend))]">—</span>
+        ),
     },
     {
       id: "actions",

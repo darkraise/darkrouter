@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { breakersFor, discoveryLine, probeOutcome, providerState } from "./providers-screen"
+import { breakersFor, discoveryBrief, discoveryLine, probeOutcome, providerState } from "./providers-screen"
+import { endpointFact, endpointOf } from "./provider-state"
 import { filterProviderRows, mergeProviderRows } from "./provider-rows"
 import { coolingSubject, coolingTitle, discoveryFailing, takesCredential } from "./provider-state"
 import type { BreakerEntry, Credential, DiscoveryHealthRow, Provider } from "../../lib/api-types"
@@ -198,6 +199,16 @@ describe("a failing discovery sweep", () => {
     expect(discoveryLine(failing)).toBe("discovery failing · Forbidden")
   })
 
+  it("is cut to a count in the list's cell, with the error left to the tooltip", () => {
+    // The whole line quotes the error, URL and all, and the list's pinned
+    // actions covered all of it but "discove" at 1440.
+    expect(discoveryBrief(failing)).toBe("failing")
+    expect(discoveryBrief({ ...failing, consecutive_failures: 3 })).toBe("failing · 3 sweeps")
+    expect(discoveryBrief({ ...failing, total: 5, live: 5 })).toBe("5 of 5 live")
+    expect(discoveryBrief({ ...failing, consecutive_failures: 0, filtered_out: 12 })).toBe("no free models")
+    expect(discoveryBrief(undefined)).toBe("never discovered")
+  })
+
   it("degrades a keyless provider, whose sweep is the only evidence it works", () => {
     const aihorde = provider({ id: "aihorde", auth_style: "anonymous", credentials: [] })
     expect(providerState(aihorde, failing)).toBe("degraded")
@@ -251,5 +262,33 @@ describe("a breaker entry", () => {
     expect(coolingTitle([entry(), entry({ model: "mock-ratelimit" })])).toBe("2 models cooling")
     expect(coolingTitle([entry({ key_id: "a" })])).toBe("1 credential cooling")
     expect(coolingTitle([entry({ key_id: "a" }), entry()])).toBe("2 breakers cooling")
+  })
+})
+
+describe("endpointOf", () => {
+  // Mirrors EndpointFor in internal/adapter/bedrock and internal/adapter/vertex.
+  it("builds Bedrock's host from the region", () => {
+    expect(endpointOf({ kind: "bedrock", base_url: "", region: "us-east-1" })).toEqual({
+      url: "https://bedrock-runtime.us-east-1.amazonaws.com",
+      derivedFrom: "the region",
+    })
+    expect(endpointOf({ kind: "bedrock", base_url: "" })).toEqual({ url: "", derivedFrom: "the region" })
+  })
+
+  it("builds Vertex's host and path, with the global and multi-region exceptions", () => {
+    const v = (location: string) => endpointOf({ kind: "vertex", base_url: "", project: "p", location }).url
+    expect(v("us-central1")).toBe("https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1")
+    expect(v("global")).toBe("https://aiplatform.googleapis.com/v1/projects/p/locations/global")
+    expect(v("eu")).toBe("https://aiplatform.eu.rep.googleapis.com/v1/projects/p/locations/eu")
+  })
+
+  it("lets a base URL the row names win, as the backend does", () => {
+    expect(endpointOf({ kind: "bedrock", base_url: "https://vpce.example", region: "us-east-1" })).toEqual({
+      url: "https://vpce.example",
+    })
+  })
+
+  it("reads a dash for any other provider with nothing set, never an empty value", () => {
+    expect(endpointFact({ kind: "openaicompat", base_url: "" })).toEqual({ term: "Base URL", value: "—" })
   })
 })

@@ -244,17 +244,33 @@ describe("the providers list", () => {
     })
   })
 
-  it("puts the whole discovery line within reach of the truncated cell", async () => {
-    // The cell is eleven rems wide and the line is longer than that as soon
-    // as a provider has anything to report. A title only shows on hover with
-    // a mouse; the tooltip is reachable by keyboard too.
+  it("puts the whole discovery line within reach of the brief cell", async () => {
+    // The cell carries only the gist, because the full line is longer than
+    // any cell the list can spare. A title only shows on hover with a mouse;
+    // the tooltip is reachable by keyboard too.
     stub([groq])
     await renderScreen()
 
-    const trigger = await screen.findByText(/30 of 40 live/)
+    const trigger = await screen.findByText("30 of 40 live")
     await userEvent.hover(trigger)
     const tip = await screen.findByRole("tooltip")
     expect(tip).toHaveTextContent(/missing for 6 sweeps/)
+  })
+})
+
+describe("the column the pinned actions cover", () => {
+  it("is Traffic, not Discovery", async () => {
+    // At 1440 the table is wider than its card and the sticky actions sit
+    // over the last column before them. A failing sweep there read "discove".
+    stub([groq])
+    await renderScreen()
+    await screen.findByText("30 of 40 live")
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent ?? "")
+    const discovery = headers.findIndex((h) => h.includes("Discovery"))
+    const traffic = headers.findIndex((h) => h.includes("Traffic"))
+    expect(discovery).toBeGreaterThan(-1)
+    expect(traffic).toBe(headers.length - 2)
+    expect(discovery).toBeLessThan(traffic)
   })
 })
 
