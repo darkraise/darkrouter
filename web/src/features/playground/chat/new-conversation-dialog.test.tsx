@@ -184,6 +184,21 @@ describe("the new-conversation dialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("writes the Tools example in the dialect's own shape, and says gemini will not send them", async () => {
+    // One OpenAI-shaped example for every dialect led straight to tools the
+    // anthropic edge drops and the gemini path refuses with a 400.
+    const { unmount } = dialog({ seed: { ...emptyConfig(), dialect: "anthropic" } })
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByLabelText("Tools").getAttribute("placeholder")).toMatch(/input_schema/)
+    unmount()
+
+    dialog({ seed: { ...emptyConfig(), dialect: "gemini" } })
+    await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
+    expect(screen.getByText(/functionDeclarations/)).toBeInTheDocument()
+    // Not disabled: a value left here blocks Send, so it has to be clearable.
+    expect(screen.getByLabelText("Tools")).toBeEnabled()
+  })
+
   it("leaves itself open when Escape closes the Dialect list", async () => {
     const onOpenChange = vi.fn()
     dialog({ onOpenChange })

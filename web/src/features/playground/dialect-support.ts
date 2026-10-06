@@ -21,6 +21,7 @@ export type Control =
   | "schema"
   | "reasoningEffort"
   | "reasoningBudget"
+  | "tools"
 
 /** In the order the pane shows them. */
 export const CONTROLS: Control[] = [
@@ -32,6 +33,7 @@ export const CONTROLS: Control[] = [
   "schema",
   "reasoningEffort",
   "reasoningBudget",
+  "tools",
 ]
 
 /**
@@ -55,6 +57,7 @@ const REASONS: Record<PlaygroundDialect, Record<Control, string | null>> = {
     reasoningEffort: null,
     reasoningBudget:
       "OpenAI takes a reasoning effort tier rather than a token budget. Use Effort, or switch to anthropic or gemini to set a budget.",
+    tools: null,
   },
   anthropic: {
     temperature: null,
@@ -67,6 +70,7 @@ const REASONS: Record<PlaygroundDialect, Record<Control, string | null>> = {
     reasoningEffort:
       "Anthropic takes a thinking budget in tokens rather than an effort tier. Use Budget, or switch to openai to set an effort.",
     reasoningBudget: null,
+    tools: null,
   },
   gemini: {
     temperature: null,
@@ -78,6 +82,10 @@ const REASONS: Record<PlaygroundDialect, Record<Control, string | null>> = {
     reasoningEffort:
       "Gemini takes a thinking budget in tokens rather than an effort tier. Use Budget, or switch to openai to set an effort.",
     reasoningBudget: null,
+    // The server refuses the request outright rather than dropping the
+    // field, so this one blocks Send instead of being quietly left off.
+    tools:
+      "Gemini declares tools as functionDeclarations, which the playground does not send. Switch the dialect to openai or anthropic to send tools.",
   },
 }
 
