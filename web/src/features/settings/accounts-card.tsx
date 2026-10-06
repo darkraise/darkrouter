@@ -21,7 +21,7 @@ import {
 import { Users } from "lucide-react"
 import { api } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
-import { MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
+import { MAX_USERNAME, MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
 import { keys } from "../../lib/queries"
 import type { UserAccount } from "../../lib/api-types"
 import { ConfirmButton } from "../shell/confirm-button"
@@ -110,6 +110,7 @@ function AddAccountDialog({
             <Input
               id="new-account-username"
               autoComplete="username"
+              maxLength={MAX_USERNAME}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />

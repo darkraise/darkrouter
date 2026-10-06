@@ -68,6 +68,35 @@ export function useSearchFilters<K extends string>(
   return [filters, setFilter, clear]
 }
 
+/**
+ * The router's reading of a query string: every value a plain string.
+ *
+ * TanStack's default reads each value as JSON, and so writes a string that
+ * looks like a number with quotes around it to keep it a string on the way
+ * back — `since_ms="1788739200000"`. This console treats every search param as
+ * a string (the root route's validateSearch keeps nothing else), and several
+ * screens read the query string directly with URLSearchParams, as does the
+ * API those values are forwarded to. A quoted value was a 400 there. Plain
+ * query strings in both directions make the URL the router writes the same
+ * URL every other reader expects.
+ */
+export function parseSearch(searchStr: string): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(searchStr))
+}
+
+/** The inverse of parseSearch: `?a=1&b=x`, or "" when there is nothing to
+ *  write. An undefined value is a key being removed, not the word
+ *  "undefined"; a non-string one is written in its plain text form. */
+export function stringifySearch(search: Record<string, unknown>): string {
+  const params = new URLSearchParams()
+  for (const [k, v] of Object.entries(search)) {
+    if (v === undefined || v === null) continue
+    params.set(k, typeof v === "object" ? JSON.stringify(v) : String(v))
+  }
+  const str = params.toString()
+  return str ? `?${str}` : ""
+}
+
 /** The query string for a filter set, with empty values omitted. */
 export function filterQuery(filters: Record<string, string>): string {
   const params = new URLSearchParams(

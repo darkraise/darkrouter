@@ -84,6 +84,57 @@ func TestACursorFromDifferentFiltersIsRejected(t *testing.T) {
 	}
 }
 
+// window_ms is resolved against the clock at each read, so "the last hour"
+// stays an hour however long ago the window was chosen, and a cursor minted
+// under it keeps paging as the clock moves.
+func TestAWindowIsRelativeToEachRead(t *testing.T) {
+	s, db := testServerFull(t)
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	batch := []*store.RequestRecord{}
+	for i, ago := range []time.Duration{10 * time.Minute, 20 * time.Minute, 30 * time.Minute, 90 * time.Minute} {
+		batch = append(batch, &store.RequestRecord{
+			ID: "01WIN" + string(rune('A'+i)), TS: now.Add(-ago), Dialect: "openai", Surface: "llm",
+			RequestedModel: "m", FinalProviderID: "groq", FinalModel: "m", Status: "success",
+		})
+	}
+	storetest.WriteBatch(t, db, batch)
+	cookie, token := login(t, s)
+
+	type page struct {
+		Requests   []struct{ ID string } `json:"requests"`
+		NextCursor string                `json:"next_cursor"`
+	}
+	get := func(path string) page {
+		t.Helper()
+		w := do(t, s, cookie, token, "GET", path, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, w.Code, w.Body.String())
+		}
+		var p page
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	hour := "/api/requests?window_ms=3600000"
+	if got := get(hour); len(got.Requests) != 3 {
+		t.Fatalf("last hour = %+v, want the three requests inside it", got.Requests)
+	}
+	first := get(hour + "&limit=1")
+	// Forty-five minutes later only the newest is still inside the hour, and the
+	// cursor minted before still pages.
+	now = now.Add(45 * time.Minute)
+	next := get(hour + "&limit=1&cursor=" + first.NextCursor)
+	if len(next.Requests) != 0 {
+		t.Errorf("page after the clock moved = %+v, want nothing left inside the hour", next.Requests)
+	}
+	if got := get(hour); len(got.Requests) != 1 {
+		t.Errorf("last hour later = %+v, want only the newest request", got.Requests)
+	}
+}
+
 func TestAnOversizedLimitIsClampedNotRefused(t *testing.T) {
 	// Refusing would make a UI bug look like a server outage.
 	s, db := testServerFull(t)

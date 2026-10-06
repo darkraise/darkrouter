@@ -46,7 +46,14 @@
   flex: 1 1 auto;
 }
 
-/* The 14px floor, applied to the three library components that sit under it.
+/* The actions keep the right-hand end on their own rather than relying on
+   the identity's `mr-auto` to push them there: a header with no identity in
+   it -- the not-found page, before it had one -- left them beside the rail. */
+.app-header-actions {
+  margin-left: auto;
+}
+
+/* The 14px floor, applied to the library components that sit under it.
    CLAUDE.md's first typography rule is that `text-sm` is the floor and that
    hierarchy below body text comes from colour and weight rather than from a
    smaller size. Three of darkraise-ui's own components disagree: a default
@@ -67,13 +74,65 @@
    The badge's own `leading-4` is left alone at `data-size="sm"`: it is a
    line box, not a size, and the pill's height is set by its padding.
 
+   The theme customizer's section labels ("Mode", "Accent Color") and the
+   command palette's group headings ("Go to", "Providers") are the same
+   library default in two more places, and were 12px beside 16px and 14px
+   text.
+
    Unlayered on purpose: the library's rules live in `@layer components`, and
    an unlayered declaration wins over a layered one whatever the specificity. */
 .dr-badge[data-size="sm"],
 .dr-badge[data-size="md"],
 .dr-sidebar-nav-group-label,
-.dr-search-command-shortcut {
+.dr-search-command-shortcut,
+.dr-theme-switcher-section-label,
+.dr-command-group [cmdk-group-heading] {
   font-size: var(--text-sm);
+}
+
+/* The green badge's text. darkraise sets white on green-500 and says in its
+   own comment that the light-luminance hues (amber, yellow, lime) take a dark
+   on-colour instead -- but green-500 is one of them: white on it measures
+   2.2:1, under half of what 14px text needs. Dark text on the same fill is
+   6.7:1, and keeps the green every "success", "hot" and "enabled" chip is
+   recognised by. Fixed here once, for every green badge, rather than by
+   swapping variants at each call site.
+
+   Unlayered on purpose: the library's rules live in `@layer components`, and
+   an unlayered declaration wins over a layered one whatever the specificity. */
+.dr-badge[data-variant="green"] {
+  @apply text-green-950;
+}
+
+/* An off switch has to be visible as a control. darkraise draws its track in
+   `--input` with a transparent border and its thumb in `--background`, which
+   against a card is 1.2:1 in dark mode and 1.4:1 in light, with the thumb
+   darker than the track it sits in -- a smudge, not a switch. WCAG asks 3:1
+   of a component's boundary. The muted foreground is the theme's own
+   secondary-text colour, so it clears that in every mode and accent, and
+   it moves with the theme rather than being a colour picked here.
+
+   Only the unchecked state: a checked switch is filled with the accent and
+   already reads.
+
+   Unlayered on purpose: the library's rules live in `@layer components`, and
+   an unlayered declaration wins over a layered one whatever the specificity. */
+.dr-switch[data-state="unchecked"] {
+  border-color: hsl(var(--muted-foreground));
+}
+
+.dr-switch[data-state="unchecked"] .dr-switch-thumb {
+  background-color: hsl(var(--muted-foreground));
+}
+
+/* The pinned Settings group, in line with every group above it. The library
+   pads an aside section `px-3` and the nav inside it pads itself `px-2`; the
+   scrolling nav section has no padding of its own, so only the footer had
+   both, and Settings sat 12px further in with a narrower active pill. The
+   collapsed rail centres its icons, so it keeps the library's padding. */
+.dr-sidebar-layout-aside:not([data-collapsed="true"])
+  .dr-sidebar-layout-aside-section[data-position="footer"] {
+  padding-inline: 0;
 }
 
 /* The header's actions below 640px. The bar holds the page identity, the
@@ -92,11 +151,37 @@
   }
 }
 
-.app-drawer-account {
+/* The drawer's own action rows: Search above the nav, and the theme and
+   account rows below it. They wear the nav items' classes, which were written
+   for `<a>`; a `<button>` keeps the UA's centred text, and these sit outside
+   the `.dr-sidebar-nav` whose `px-2` lines the links up, so both are
+   restated here. */
+.app-drawer-actions {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  padding-inline: 0.5rem;
+}
+
+.app-drawer-actions:not(:first-child),
+.app-drawer-actions + .dr-sidebar-nav {
   margin-top: 0.5rem;
+}
+
+.app-drawer-actions > button {
+  width: 100%;
+  text-align: start;
+}
+
+.app-drawer-theme {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The panel was laid out for a 34rem popover. In the drawer's width the Mode
+   row's three options clipped to "Ligh", "Dark", "Syste"; their icons go so
+   the words fit, since the words are what say which mode is which. */
+.app-drawer-theme .dr-theme-switcher-row-icon {
+  display: none;
 }
 
 /* No screen may be wider than the viewport. The content pane is a flex child

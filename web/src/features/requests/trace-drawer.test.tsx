@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import {
   attemptSegments, ladderRows, waterfallRows, BodiesPanel, SurfaceMetaSection, metaValue,
-  TraceDrawer, traceErrorMessage,
+  TraceDrawer, traceErrorMessage, skipLabel, noAttemptReason,
 } from "./trace-drawer"
 import { ApiError } from "../../lib/api"
 import type { TraceAttempt } from "../../lib/api-types"
@@ -38,7 +38,7 @@ describe("trace navigation", () => {
         id: "01TRACE",
         ts_ms: 0,
         dialect: "openai",
-        surface: "chat",
+        surface: "llm",
         source: "console",
         alias: "",
         model: "m",
@@ -83,6 +83,59 @@ describe("trace navigation", () => {
     render(<TraceDrawer id="01TRACE" onClose={() => {}} />)
 
     expect(screen.getByText(/of which reasoning/i)).toHaveTextContent("20")
+  })
+})
+
+const failedTrace = (over: Record<string, unknown>) => ({
+  id: "01FAIL", ts_ms: 0, dialect: "openai", surface: "llm", source: "proxy",
+  alias: "", model: "no-such-model", final_model: "", provider: "", status: "error",
+  error_code: "not_found", cost_micros: null, tokens_in: 0, tokens_out: 0,
+  cache_read_tokens: 0, reasoning_tokens: 0, ttft_ms: null, total_ms: 0,
+  attempts: [], candidates: [], skips: [], warnings: [],
+  ...over,
+})
+
+describe("a request that failed", () => {
+  it("says why, and why the ladder is empty", () => {
+    traceMock.mockReturnValue({ data: failedTrace({}), isError: false })
+    render(<TraceDrawer id="01FAIL" onClose={() => {}} />)
+    expect(screen.getByText("not_found")).toBeInTheDocument()
+    expect(screen.getByText(/nothing routes this model/i)).toBeInTheDocument()
+  })
+
+  it("points at the skips when every candidate was passed over", () => {
+    expect(noAttemptReason({ skips: ["lmstudio//mock-error:cooling"], candidates: [] })).toMatch(
+      /every candidate was skipped/,
+    )
+  })
+
+  it("replays an embedding in the auxiliary playground, not in chat", () => {
+    traceMock.mockReturnValue({
+      data: failedTrace({ id: "01EMBED", surface: "embedding", status: "success" }),
+      isError: false,
+    })
+    render(<TraceDrawer id="01EMBED" onClose={() => {}} />)
+    expect(screen.getByRole("link", { name: /open in playground/i })).toHaveAttribute(
+      "data-search",
+      JSON.stringify({ mode: "auxiliary", seed: "01EMBED" }),
+    )
+  })
+})
+
+describe("a skipped candidate", () => {
+  it("reads as provider/model and a reason in words, not the router's key", () => {
+    expect(skipLabel("lmstudio//mock-error:cooling")).toBe("lmstudio/mock-error — cooling down")
+    expect(skipLabel("groq/k1/llama-3:no_adapter")).toBe("groq/llama-3 (key k1) — no adapter")
+  })
+
+  it("keeps a model id that holds slashes and colons whole", () => {
+    expect(skipLabel("hf//meta-llama/Llama-3:8b:surface")).toBe(
+      "hf/meta-llama/Llama-3:8b — does not serve this surface",
+    )
+  })
+
+  it("prints a shape it does not recognise as it came", () => {
+    expect(skipLabel("odd")).toBe("odd")
   })
 })
 
@@ -257,8 +310,16 @@ describe("the attempt waterfall", () => {
       ),
     ).toEqual([
       { seq: 0, label: "groq/m", start: 0, fraction: 0.25, served: false },
-      { seq: 1, label: "groq/m", start: 0.25, fraction: 0.5, served: true },
+      { seq: 1, label: "groq/m", start: 0.25, fraction: 0.75, served: true },
     ])
+  })
+
+  it("runs the attempt that served to the end of the track", () => {
+    // A streamed request logged before attempts were timed to the end of
+    // their body recorded 0 ms for the attempt under a 214 ms total.
+    expect(
+      attemptSegments([attempt({ seq: 0, latency_ms: 0, outcome: "success" })], 214),
+    ).toEqual([{ seq: 0, label: "groq/m", start: 0, fraction: 1, served: true }])
   })
 
   it("clamps attempts that overrun the total rather than drawing past the track", () => {

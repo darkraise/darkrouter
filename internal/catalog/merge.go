@@ -278,16 +278,79 @@ func state(s string) State {
 // discovered model — an embedding request against a provider whose discovery
 // works was skipped as SkipSurface and reported "no provider offers this".
 //
+// A preset's surfaces describe the upstream, not each model on it: LM Studio
+// can serve embeddings, but its chat models cannot. Copying every declared
+// surface onto every model labelled each chat model "embedding" and offered it
+// to embedding requests, so a preset only bounds what a model may serve and
+// the model's own id narrows it (modelSurfaces).
+//
 // The override still wins, and is the only per-model source that will ever
 // carry an operator's intent. A future writer that genuinely learns a model's
 // surfaces should write there rather than onto the row.
 func surfaces(row store.ModelRow, preset Preset, override store.ModelOverride) []ir.Surface {
-	for _, candidate := range [][]string{override.Surfaces, preset.Surfaces, row.Surfaces} {
-		if parsed := parseSurfaces(candidate); len(parsed) > 0 {
-			return parsed
-		}
+	if parsed := parseSurfaces(override.Surfaces); len(parsed) > 0 {
+		return parsed
+	}
+	if parsed := parseSurfaces(preset.Surfaces); len(parsed) > 0 {
+		return modelSurfaces(row.ModelID, parsed)
+	}
+	if parsed := parseSurfaces(row.Surfaces); len(parsed) > 0 {
+		return parsed
 	}
 	return []ir.Surface{ir.SurfaceLLM}
+}
+
+// surfaceHints are id fragments that name a model's surface when nothing else
+// does. Only unambiguous ones: a false "embedding" offers a chat model to
+// embedding requests, which then fail upstream, while a missed one is what the
+// per-model override is for.
+var surfaceHints = []struct {
+	surface   ir.Surface
+	fragments []string
+}{
+	{ir.SurfaceEmbedding, []string{"embed", "bge-", "e5-", "gte-", "minilm"}},
+	{ir.SurfaceRerank, []string{"rerank"}},
+	{ir.SurfaceImage, []string{"dall-e", "gpt-image", "flux", "stable-diffusion", "sdxl", "imagen"}},
+	{ir.SurfaceTTS, []string{"tts"}},
+	{ir.SurfaceSTT, []string{"whisper", "transcribe"}},
+	{ir.SurfaceModeration, []string{"moderation"}},
+}
+
+// modelSurfaces narrows a preset's declared surfaces to the ones a model's id
+// gives evidence for. A single-surface preset needs none — every model on an
+// embeddings-only upstream is an embedding model — and a model with no hint is
+// a chat model wherever the preset offers chat, which is what an unadorned id
+// on a local runtime almost always is.
+func modelSurfaces(modelID string, declared []ir.Surface) []ir.Surface {
+	if len(declared) == 1 {
+		return declared
+	}
+	has := make(map[ir.Surface]bool, len(declared))
+	for _, s := range declared {
+		has[s] = true
+	}
+	id := strings.ToLower(modelID)
+	var out []ir.Surface
+	for _, hint := range surfaceHints {
+		if !has[hint.surface] {
+			continue
+		}
+		for _, f := range hint.fragments {
+			if strings.Contains(id, f) {
+				out = append(out, hint.surface)
+				break
+			}
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	if has[ir.SurfaceLLM] {
+		return []ir.Surface{ir.SurfaceLLM}
+	}
+	// No chat surface to fall back on and no hint to choose by: the preset's
+	// whole set is the only claim left.
+	return declared
 }
 
 func parseSurfaces(raw []string) []ir.Surface {

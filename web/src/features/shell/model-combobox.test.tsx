@@ -1,7 +1,8 @@
 import { useState } from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
+import { Dialog, DialogContent, DialogTitle } from "darkraise-ui"
 import { ModelCombobox, filterCandidates, modelCandidates } from "./model-combobox"
 import type { Model } from "../../lib/api-types"
 
@@ -229,5 +230,85 @@ describe("while the catalogue is still loading", () => {
 
     expect(await screen.findByText(/nothing in the catalogue matches/i)).toBeInTheDocument()
     expect(screen.queryByText(/loading the catalogue/i)).not.toBeInTheDocument()
+  })
+})
+
+function InDialog() {
+  const [open, setOpen] = useState(true)
+  const [value, setValue] = useState("")
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogTitle>Add an alias</DialogTitle>
+        <ModelCombobox
+          label="Target"
+          value={value}
+          onChange={setValue}
+          candidates={["groq/llama", "groq/qwen"]}
+        />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+describe("Escape inside a dialog", () => {
+  it("closes the suggestion list and leaves the dialog open", async () => {
+    // The dialog's dismiss listener runs on document in the capture phase,
+    // ahead of the input. Without the window-level guard one Escape closed
+    // the whole dialog and threw away everything typed into it.
+    render(<InDialog />)
+    const box = screen.getByLabelText("Target")
+    await userEvent.type(box, "groq")
+    expect(await screen.findByText("groq/llama")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+
+    // Read off the input rather than the list: the list stays mounted for its
+    // exit animation, which never finishes in jsdom.
+    expect(box).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-state", "open")
+    expect(box).toHaveValue("groq")
+  })
+
+  it("closes the dialog on the next Escape, once no list is open", async () => {
+    render(<InDialog />)
+    await userEvent.click(screen.getByLabelText("Target"))
+    expect(await screen.findByText("groq/llama")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+    expect(screen.getByRole("dialog")).toHaveAttribute("data-state", "open")
+    await userEvent.keyboard("{Escape}")
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+  })
+
+  it("still closes the list on Escape outside any dialog", async () => {
+    render(<Field candidates={["groq/llama"]} />)
+    const box = screen.getByLabelText("Model or alias")
+    await userEvent.click(box)
+    expect(await screen.findByText("groq/llama")).toBeInTheDocument()
+
+    await userEvent.keyboard("{Escape}")
+
+    expect(box).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
+describe("a list laid in the flow", () => {
+  it("is not positioned over what follows it", async () => {
+    // Inside a scrolling dialog a floating list is clipped at the dialog's
+    // edge and covers its buttons; in the flow the dialog scrolls to it.
+    render(
+      <ModelCombobox
+        label="Target"
+        value=""
+        onChange={() => {}}
+        candidates={["groq/llama"]}
+        inFlow
+      />,
+    )
+    await userEvent.click(screen.getByLabelText("Target"))
+    const list = await screen.findByRole("listbox")
+    expect(list.parentElement).toHaveClass("static")
   })
 })

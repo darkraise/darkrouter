@@ -47,8 +47,19 @@ func LoadConfig(ctx context.Context, d *DB, boot config.Bootstrap) (*config.Conf
 // is a bug in the defaults rather than in anything an operator stored.
 func buildConfig(rows map[string]string, boot config.Bootstrap,
 	aliases map[string][]string) (*config.Config, []string, []string, error) {
+	c, warnings, skipped, _, err := buildConfigExplained(rows, boot, aliases)
+	return c, warnings, skipped, err
+}
 
-	build := func(skip map[string]bool) (*config.Config, []string) {
+// buildConfigExplained is buildConfig that also says, per reverted key, why,
+// as the refusal a save of that key answers with: a sentence for a person
+// rather than the warning written for a startup log, and every key the reason
+// is about, so a cross-key rule lands on each field that has to move for it.
+func buildConfigExplained(rows map[string]string, boot config.Bootstrap,
+	aliases map[string][]string) (*config.Config, []string, []string, map[string]config.RejectedError, error) {
+
+	refusals := map[string]config.RejectedError{}
+	build := func(skip map[string]bool) (*config.Config, []rowFailure) {
 		c := &config.Config{}
 		config.ApplyDefaults(c)
 		c.Server.ProxyListen = boot.ProxyListen
@@ -61,11 +72,16 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 				use[k] = v
 			}
 		}
-		return c, ApplyConfigRows(c, use)
+		return c, applyConfigRows(c, use)
 	}
 
 	skip := map[string]bool{}
-	c, warnings := build(skip)
+	c, failures := build(skip)
+	var warnings []string
+	for _, f := range failures {
+		warnings = append(warnings, f.warning())
+		refusals[f.key] = config.RejectedError{Msg: f.reason(), Keys: []string{f.key}}
+	}
 	// skipped names every key actually reverted, as distinct from warnings:
 	// a restart-pending notice lands in warnings too, and must not make the
 	// configuration report invalid the way a reverted key does.
@@ -98,7 +114,7 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 	for attempt := 0; attempt <= len(configRegistry); attempt++ {
 		err := config.Validate(c)
 		if err == nil {
-			return c, warnings, skipped, nil
+			return c, warnings, skipped, refusals, nil
 		}
 
 		var re config.RuleError
@@ -107,6 +123,9 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 				warnings = append(warnings,
 					fmt.Sprintf("stored %v broke the %s rule (%v); all of them reverted to their defaults",
 						re.Keys, re.Rule, re.Err))
+				for _, k := range added {
+					refusals[k] = config.RejectedError{Msg: re.Err.Error(), Keys: re.Keys}
+				}
 				skipped = append(skipped, added...)
 				c, _ = build(skip)
 				continue
@@ -120,6 +139,7 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 			skipped = append(skipped, k)
 			warnings = append(warnings,
 				fmt.Sprintf("stored %s is unusable (%v); using the default", k, err))
+			refusals[k] = config.RejectedError{Msg: err.Error(), Keys: []string{k}}
 			c, _ = build(skip)
 			continue
 		}
@@ -137,9 +157,9 @@ func buildConfig(rows map[string]string, boot config.Bootstrap,
 	// which is a bug in the defaults rather than in anything an operator
 	// stored. Only that is allowed to fail a start.
 	if err := config.Validate(c); err != nil {
-		return nil, nil, nil, fmt.Errorf("compiled defaults do not validate: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("compiled defaults do not validate: %w", err)
 	}
-	return c, warnings, skipped, nil
+	return c, warnings, skipped, refusals, nil
 }
 
 // addAny marks every key not already skipped, returning the ones that were

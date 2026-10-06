@@ -28,6 +28,15 @@ export function monogramText(id: string, name?: string): string {
   return (picked[0]![0]! + picked[1]![0]!).toUpperCase()
 }
 
+/** The monogram's step on the type scale, chosen by the tile it sits in.
+ *
+ *  A step, never a size computed from the tile: a pixel value opts out of the
+ *  font-size axis, and at 28px it came out at 11px, below the floor. Two
+ *  letters at text-sm fit the smallest tile the console draws. */
+export function monogramSize(tile: number): "text-sm" | "text-lg" {
+  return tile >= 40 ? "text-lg" : "text-sm"
+}
+
 /**
  * The mark for a provider or preset.
  *
@@ -102,12 +111,11 @@ export function ProviderIcon({
   return (
     <span
       aria-hidden="true"
-      className="provider-monogram inline-flex shrink-0 items-center justify-center rounded-[6px] font-semibold"
+      className={`provider-monogram inline-flex shrink-0 items-center justify-center rounded-[6px] font-semibold leading-none ${monogramSize(size)}`}
       style={
         {
           width: size,
           height: size,
-          fontSize: Math.round(size * 0.4),
           "--pi-hue": hue,
         } as CSSProperties
       }

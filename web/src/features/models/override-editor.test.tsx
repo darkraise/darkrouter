@@ -97,7 +97,7 @@ describe("the override editor", () => {
       const put = fetchMock.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PUT")
       expect(put).toBeDefined()
       const body = JSON.parse((put?.[1] as RequestInit).body as string)
-      expect(body).toEqual({ context_window: 32000, surfaces: [] })
+      expect(body).toEqual({ context_window: 32000 })
     })
   })
 })
@@ -140,7 +140,7 @@ describe("the override editor's capabilities without an override", () => {
     await waitFor(() => expect(screen.getByRole("switch", { name: /tools/i })).toBeChecked())
     await userEvent.type(screen.getByLabelText(/context window/i), "32000")
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
-    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000, surfaces: [] }))
+    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000 }))
   })
 
   it("carries the catalog's values for the capabilities left untouched", async () => {
@@ -153,7 +153,6 @@ describe("the override editor's capabilities without an override", () => {
     await waitFor(() =>
       expect(putBody(fetchMock)).toEqual({
         capabilities: { tools: true, vision: true, reasoning: true },
-        surfaces: [],
       }),
     )
   })
@@ -167,7 +166,7 @@ describe("the override editor's capabilities without an override", () => {
     await userEvent.click(tools)
     await userEvent.type(screen.getByLabelText(/context window/i), "32000")
     await userEvent.click(screen.getByRole("button", { name: /save/i }))
-    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000, surfaces: [] }))
+    await waitFor(() => expect(putBody(fetchMock)).toEqual({ context_window: 32000 }))
   })
 })
 
@@ -218,6 +217,50 @@ describe("the override editor's state", () => {
     await userEvent.click(save)
     await waitFor(() => expect(save).toBeDisabled())
     settle(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))
+    // Settled, it takes the next edit -- and only an edit, since there is
+    // nothing left to save until something changes.
+    await waitFor(() => expect(screen.getByLabelText(/context window/i)).toHaveValue(""))
+    await userEvent.type(screen.getByLabelText(/context window/i), "1")
     await waitFor(() => expect(save).toBeEnabled())
+  })
+})
+
+describe("saving an editor nobody touched", () => {
+  it("is not offered, so it cannot write an empty override", async () => {
+    // Save on an untouched editor PUT {"surfaces":[]}, toasted "Override
+    // saved", and left a row of NULLs the editor could neither show nor remove.
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("", { status: 404 }))
+    vi.stubGlobal("fetch", fetchMock)
+    mount(<OverrideEditor providers={["lmstudio"]} model="mock-slow" onClose={() => {}} />)
+    await screen.findByLabelText(/context window/i)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("is not offered on a loaded override left as it was", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ context_window: 64000, surfaces: ["llm"] }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      }),
+    ))
+    mount(<OverrideEditor providers={["groq"]} model="m" onClose={() => {}} />)
+    await waitFor(() => expect(screen.getByLabelText(/context window/i)).toHaveValue("64000"))
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+    await userEvent.clear(screen.getByLabelText(/surfaces/i))
+    expect(screen.getByRole("button", { name: /save/i })).toBeEnabled()
+  })
+
+  it("shows what the catalogue says in the blank fields", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })))
+    mount(
+      <OverrideEditor
+        providers={["lmstudio"]}
+        model="mock-embed"
+        catalog={{ surfaces: ["embedding"], contextWindow: 8192 }}
+        onClose={() => {}}
+      />,
+    )
+    expect(await screen.findByPlaceholderText("embedding from the catalogue")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("8192 from the catalogue")).toBeInTheDocument()
   })
 })

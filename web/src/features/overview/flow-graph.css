@@ -38,7 +38,17 @@
   border: 1px solid var(--rf-border);
   border-radius: var(--radius);
   background: hsl(var(--background));
-  overflow: hidden;
+  /* Sideways only: below the graph's natural width the canvas keeps that
+     width and this box scrolls, rather than the graph zooming out until its
+     text is unreadable. */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.rf-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 /* --- the canvas ------------------------------------------------------- */

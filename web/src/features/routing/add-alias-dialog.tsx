@@ -31,6 +31,41 @@ export function aliasNameProblem(name: string, existing: string[]): string | nul
   return null
 }
 
+/**
+ * What creating this name would quietly take over, or null.
+ *
+ * Rule 1 wins: an exact alias match is tried before `provider/model` or a bare
+ * name. So an alias named like a catalogue model, or like a pinned
+ * `provider/model`, redirects every request that was reaching that model —
+ * from the moment of Save, with nothing at the call site to show it. Neither
+ * blocks: the server accepts both, and pointing a model's name at a chain can
+ * be exactly what the operator means. The pinned form is said more strongly,
+ * because a client naming a provider explicitly is the one least expecting to
+ * be routed somewhere else.
+ */
+export function aliasNameWarning(
+  name: string,
+  candidates: string[],
+  providerIds: string[],
+): { text: string; strong: boolean } | null {
+  const trimmed = name.trim()
+  if (trimmed === "") return null
+  const slash = trimmed.indexOf("/")
+  if (slash > 0 && providerIds.includes(trimmed.slice(0, slash))) {
+    return {
+      text: `${trimmed} is how a request pins ${trimmed.slice(0, slash)}. Every request naming it will use this chain instead, even one that asked for that provider by name.`,
+      strong: true,
+    }
+  }
+  if (candidates.includes(trimmed)) {
+    return {
+      text: `${trimmed} is a model in the catalogue. Requests for it will use this chain instead of going to the model directly.`,
+      strong: false,
+    }
+  }
+  return null
+}
+
 type Row = { id: string; value: string }
 
 /** What the dialog would create: trimmed, with the rows nobody typed into
@@ -87,6 +122,14 @@ export function AddAliasDialog({
   }
 
   const problem = aliasNameProblem(name, existingNames)
+  const warning =
+    problem === null
+      ? aliasNameWarning(
+          name,
+          candidates,
+          context.providers.map((p) => p.id),
+        )
+      : null
   const targets = plannedTargets(rows)
   const canCreate = name.trim() !== "" && problem === null && targets.length > 0
 
@@ -116,10 +159,25 @@ export function AddAliasDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="sonnet"
               className="w-64 font-mono text-sm"
-              autoFocus
+              // No autoFocus: the focus trap already focuses the first
+              // tabbable, which is this field. autoFocus ran first, during
+              // commit, so the trap recorded this input as the element to
+              // hand focus back to -- and on close it was gone, leaving focus
+              // on <body> instead of on "Add alias".
             />
             {problem && (
               <span className="text-sm text-[hsl(var(--destructive))]">{problem}</span>
+            )}
+            {warning && (
+              <span
+                className={
+                  warning.strong
+                    ? "text-sm text-[hsl(var(--destructive))]"
+                    : "text-sm text-[hsl(var(--legend))]"
+                }
+              >
+                {warning.text}
+              </span>
             )}
           </div>
 
@@ -130,7 +188,10 @@ export function AddAliasDialog({
                 const facts = targetFacts(row.value, context)
                 return (
                   <li key={row.id} className="flex flex-col gap-0.5">
-                    <div className="flex items-center gap-2">
+                    {/* Baseline, not centre: the suggestion list opens in the
+                        flow under the field, and centring would slide the
+                        number and Remove halfway down beside it. */}
+                    <div className="flex items-baseline gap-2">
                       <span className="w-5 shrink-0 text-right font-mono text-sm text-[hsl(var(--legend))]">
                         {index + 1}
                       </span>
@@ -145,6 +206,10 @@ export function AddAliasDialog({
                         }
                         candidates={candidates}
                         placeholder="provider/model, or a model name"
+                        // The dialog scrolls, and a floating list was clipped
+                        // at its bottom edge -- three of fourteen options
+                        // showing -- while covering Create.
+                        inFlow
                       />
                       <Button
                         size="sm"

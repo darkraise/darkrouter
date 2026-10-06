@@ -36,6 +36,9 @@ function plotted(data: Cell[], keys: string[], labels: string[]) {
   return { ids, config, rows }
 }
 
+/** The least the cost axis spans, in micro-dollars: one cent. */
+export const COST_AXIS_FLOOR = 10_000
+
 // Axis text takes its size from chart-scope.css (`--text-sm`), never from a
 // number here: a numeric fontSize opts the ticks out of the font-size axis.
 
@@ -104,6 +107,11 @@ export function CostLineChart({
             tickLine={false}
             axisLine={false}
             width={64}
+            // Micro-dollars are whole, and a floor of one cent keeps a window
+            // of tiny costs from spreading [0, 1] micro-dollar over five ticks
+            // that all read "<$0.0001".
+            allowDecimals={false}
+            domain={[0, (max: number) => Math.max(max, COST_AXIS_FLOOR)]}
             tickFormatter={(v: number) => formatValue(v)}
           />
           <ChartTooltip

@@ -1,7 +1,14 @@
 import { useState, type ChangeEvent } from "react"
 import { Badge, Button, Input, Label, Switch } from "darkraise-ui"
 import { NumberBox } from "../shell/number-box"
-import { SOURCE_LABEL, SOURCE_NOTE, parseBytes, type SettingRow } from "./settings-catalog"
+import {
+  SOURCE_LABEL,
+  SOURCE_NOTE,
+  compactDuration,
+  formatDuration,
+  parseBytes,
+  type SettingRow,
+} from "./settings-catalog"
 
 /**
  * One setting, with the editor its kind calls for.
@@ -48,7 +55,10 @@ export function SettingField({
   const willReset = resetting || (row.editable && row.source === "database" && value.trim() === "")
   return (
     <div className="flex flex-wrap items-start gap-4 border-t py-3 first:border-t-0 first:pt-0">
-      <div className="min-w-0 flex-1">
+      {/* A basis, not just flex-1: with none the label shrank to a column a
+          word or two wide on a phone instead of letting the value wrap onto
+          a line of its own. */}
+      <div className="min-w-0 grow basis-64">
         {row.editable ? (
           <Label htmlFor={row.field} className="font-medium">
             {row.meta.name}
@@ -61,7 +71,7 @@ export function SettingField({
         )}
         <p className="font-mono text-sm text-[hsl(var(--legend))]">{row.field}</p>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex max-w-full shrink-0 flex-col items-end gap-1">
         {row.editable ? (
           <Editor
             row={row}
@@ -73,7 +83,8 @@ export function SettingField({
         ) : (
           <span className="font-mono text-base font-medium tabular-nums">{row.display}</span>
         )}
-        <span className="flex items-center gap-1">
+        {row.editable && row.kind === "duration" && <DurationHint value={value} />}
+        <span className="flex flex-wrap items-center justify-end gap-1">
           <Badge variant="outline" title={SOURCE_NOTE[row.source]}>
             {SOURCE_LABEL[row.source]}
           </Badge>
@@ -82,7 +93,13 @@ export function SettingField({
               process, so "hot" would promise a live edit that is impossible;
               the env chip already says the whole story. */}
           {row.source === "env" ? (
-            <Badge variant="secondary" title="Read from the environment at startup">
+            // A long variable name breaks rather than pushing the row off a
+            // phone's screen.
+            <Badge
+              variant="secondary"
+              title="Read from the environment at startup"
+              className="max-w-full break-all whitespace-normal"
+            >
               env {row.env}
             </Badge>
           ) : row.hotReloadable ? (
@@ -189,8 +206,13 @@ function Editor({
           onChange={onChange}
           disabled={disabled}
           describedBy={describedBy}
-          seed={(v) => v}
+          // `720h0m0s` is what Go prints and nobody writes; `720h` is the same
+          // setting in the same syntax, so the box can show it and send it.
+          seed={row.kind === "duration" ? compactDuration : (v) => v}
           emit={(text) => text}
+          // A source URL is the point of its row, and 160px showed
+          // "https://models.c" of it.
+          className={row.kind === "url" ? "w-96 max-w-full" : "w-40"}
           placeholder={
             row.kind === "url"
               ? row.field === "server.public_url"
@@ -232,6 +254,7 @@ function DraftBox({
   seed,
   emit,
   placeholder,
+  className = "w-40",
 }: {
   row: SettingRow
   value: string
@@ -243,6 +266,8 @@ function DraftBox({
   /** The typed text as the store spells it. */
   emit: (text: string) => string
   placeholder?: string
+  /** The box's width. */
+  className?: string
 }) {
   const [state, setState] = useState({ prop: value, emitted: value, text: seed(value, row) })
   let text = state.text
@@ -258,13 +283,26 @@ function DraftBox({
       aria-describedby={describedBy}
       disabled={disabled}
       placeholder={placeholder}
+      // The whole value on hover, for one still longer than the box.
+      title={text}
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         const next = e.target.value
         const emitted = emit(next)
         setState({ prop: value, emitted, text: next })
         onChange(emitted)
       }}
-      className="w-40 shrink-0 font-mono"
+      className={`${className} shrink-0 font-mono`}
     />
   )
+}
+
+/**
+ * A duration of a day or more, as a person says it: the box holds `720h`,
+ * which is thirty days only after arithmetic. Shorter ones read fine as typed,
+ * and repeating "15m" as "15 min" under them would be noise.
+ */
+function DurationHint({ value }: { value: string }) {
+  const said = formatDuration(value.trim())
+  if (!/day/.test(said)) return null
+  return <span className="text-sm text-[hsl(var(--legend))]">{said}</span>
 }

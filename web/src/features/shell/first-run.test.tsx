@@ -158,6 +158,18 @@ describe("claimProblem", () => {
   it("passes a password that satisfies both", () => {
     expect(claimProblem("a long enough password", "a long enough password")).toBeNull()
   })
+
+  it("counts code points, as the server counts runes", () => {
+    const six = "😀".repeat(6)
+    expect(claimProblem(six, six)).toMatch(/at least 12/i)
+  })
+})
+
+describe("the claim username", () => {
+  it("is capped at the server's 64-character limit", () => {
+    render(<FirstRun onClaimed={() => {}} />)
+    expect(screen.getByLabelText(/username/i)).toHaveAttribute("maxLength", "64")
+  })
 })
 
 describe("the empty state", () => {

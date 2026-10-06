@@ -30,9 +30,12 @@ export function SavedViewsBar({
     onApply(merged)
   }
 
+  // Trimmed, so "  " is not a name and "errors " does not sit beside "errors".
+  const name = savingName?.trim() ?? ""
+
   function confirmSave() {
-    if (!savingName) return
-    setViews(saveView(savingName, filters))
+    if (!name) return
+    setViews(saveView(name, filters))
     setSavingName(null)
   }
 
@@ -58,21 +61,34 @@ export function SavedViewsBar({
           Save this view
         </Button>
       ) : (
-        <>
+        // A form, so Enter saves the way it does in every other name field;
+        // Save is disabled until there is a name rather than ignoring the
+        // click without a word.
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            confirmSave()
+          }}
+        >
           <Input
             autoFocus
+            aria-label="View name"
             placeholder="View name"
             value={savingName}
             onChange={(e) => setSavingName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSavingName(null)
+            }}
             className="w-40"
           />
-          <Button size="sm" onClick={confirmSave}>
+          <Button type="submit" size="sm" disabled={!name}>
             Save
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setSavingName(null)}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setSavingName(null)}>
             Cancel
           </Button>
-        </>
+        </form>
       )}
     </div>
   )

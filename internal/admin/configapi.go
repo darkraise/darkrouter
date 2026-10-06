@@ -225,7 +225,14 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 	var publish config.PublishError
 	switch {
 	case errors.As(err, &rejected):
-		writeError(w, http.StatusBadRequest, rejected.Error())
+		body := map[string]any{"error": rejected.Error()}
+		// The keys the refusal is about, for a client that puts it on their
+		// fields. Omitted rather than empty when it names none -- an unknown
+		// key, an alias problem -- so that client falls back to a toast.
+		if len(rejected.Keys) > 0 {
+			body["keys"] = rejected.Keys
+		}
+		writeJSON(w, http.StatusBadRequest, body)
 	case errors.As(err, &conflict):
 		// 409, not 400: the save itself is fine, it was computed against a
 		// table that has since moved. A retry that reloads first can succeed
@@ -243,7 +250,7 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 		internalError(w, r, err)
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": true, "restart_required": restartRequired(written),
+			"valid": true, "restart_required": restartRequired(written, s.deps.Config.PendingRestart()),
 		})
 	}
 }
@@ -252,12 +259,17 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 // are accepted rather than refused: the value belongs in the database either
 // way, and refusing it would leave an operator no way to set it at all.
 //
+// Only the ones now pending, which is measured against the value the process
+// booted with. A write that moves a restart-only key back to that value, or a
+// reset of a stored row equal to the default, changes nothing the process is
+// running, and naming it told the operator to restart for no reason.
+//
 // Never nil: a client cannot tell a JSON null from a field an older build did
 // not serve.
-func restartRequired(written []string) []string {
+func restartRequired(written, pending []string) []string {
 	out := []string{}
 	for _, k := range written {
-		if slices.Contains(config.RestartOnly, k) {
+		if slices.Contains(config.RestartOnly, k) && slices.Contains(pending, k) {
 			out = append(out, k)
 		}
 	}

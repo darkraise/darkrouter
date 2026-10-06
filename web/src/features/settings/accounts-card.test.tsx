@@ -78,6 +78,26 @@ describe("addAccountPasswordProblem", () => {
   it("passes a password that satisfies both", () => {
     expect(addAccountPasswordProblem("correct horse battery", "correct horse battery")).toBeNull()
   })
+
+  it("counts characters the way the server does, not UTF-16 units", () => {
+    // Six emoji are twelve UTF-16 units and six characters: the server refuses
+    // them, so the screen must too rather than spend a round trip on it.
+    const six = "😀".repeat(6)
+    expect(addAccountPasswordProblem(six, six)).toMatch(/12 characters/)
+    const twelve = "😀".repeat(12)
+    expect(addAccountPasswordProblem(twelve, twelve)).toBeNull()
+  })
+})
+
+describe("the add-account username", () => {
+  it("is capped at the server's limit, so a name it would refuse cannot be typed", async () => {
+    const user = userEvent.setup()
+    mount(<AccountsCard users={[ADMIN, MEMBER]} me="u1" />)
+
+    await user.click(screen.getByRole("button", { name: /add an account/i }))
+    const field = screen.getByLabelText(/username/i)
+    expect(field).toHaveAttribute("maxLength", "64")
+  })
 })
 
 describe("adding an account", () => {
