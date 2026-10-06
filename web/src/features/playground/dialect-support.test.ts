@@ -46,13 +46,19 @@ describe("what each dialect can carry", () => {
     }
   })
 
+  it("refuses tools on gemini only, whose playground path rejects them", () => {
+    expect(supports("openai", "tools")).toBe(true)
+    expect(supports("anthropic", "tools")).toBe(true)
+    expect(reasonFor("gemini", "tools")).toMatch(/openai or anthropic/)
+  })
+
   it("names the dialect that can send it, so the reason is actionable", () => {
     expect(reasonFor("openai", "topK")).toMatch(/anthropic|gemini/i)
     expect(reasonFor("anthropic", "schema")).toMatch(/openai|gemini/i)
   })
 
   it("covers every control for every dialect, with no gaps", () => {
-    expect(CONTROLS).toHaveLength(8)
+    expect(CONTROLS).toHaveLength(9)
     for (const d of DIALECTS) {
       for (const c of CONTROLS) {
         expect(() => reasonFor(d, c)).not.toThrow()

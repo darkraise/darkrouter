@@ -69,21 +69,19 @@ export function CompareColumn({
 }) {
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-4">
+      {/* The status and the remove control get a row of their own, and the
+          model field the column's full width under them. Sharing one row,
+          the dot, the gaps and a default-size button took ninety pixels
+          from the field, and a fourth column cut "lmstudio/mock-fast" to
+          "lmstudio". */}
       <div className="flex items-center gap-2">
         <StatusDot status={column.status} />
-        <div className="min-w-0 flex-1">
-          <ModelCombobox
-            label={`Column ${index + 1} model or alias`}
-            value={column.model}
-            onChange={onModel}
-            candidates={candidates}
-            loading={loading}
-            disabled={disabled}
-            className="w-full"
-          />
-        </div>
+        <span className="min-w-0 flex-1 text-sm text-[hsl(var(--legend))]">
+          Column {index + 1}
+        </span>
         <Button
           variant="ghost"
+          size="icon"
           aria-label={`Remove column ${index + 1}`}
           disabled={disabled || !removable}
           onClick={onRemove}
@@ -91,11 +89,26 @@ export function CompareColumn({
           <X className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
         </Button>
       </div>
+      <ModelCombobox
+        label={`Column ${index + 1} model or alias`}
+        value={column.model}
+        onChange={onModel}
+        candidates={candidates}
+        loading={loading}
+        disabled={disabled}
+        className="w-full"
+      />
 
       <div className="min-h-24 rounded border p-3 font-mono text-sm whitespace-pre-wrap">
         {column.text}
       </div>
-      {column.error ? <p className="text-destructive text-sm">{column.error}</p> : null}
+      {/* An alert, so a column that failed is announced and not only drawn
+          red; the composer's error in Chat is the same. */}
+      {column.error ? (
+        <p role="alert" className="text-destructive text-sm">
+          {column.error}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
         {column.latencyMs !== undefined ? <span>{duration(column.latencyMs)}</span> : null}
         {column.tokensIn !== null && column.tokensOut !== null ? (

@@ -580,7 +580,16 @@ export type ProxyToken = {
   secret?: string
 }
 
-export type ProxyTokensResponse = { tokens: ProxyToken[] }
+export type ProxyTokensResponse = {
+  tokens: ProxyToken[]
+  /** Whether a client token was ever created. The proxy switches
+   *  authentication on at the first one and never back off, so an empty
+   *  `tokens` with `issued` set means every unauthenticated client is
+   *  refused. Optional for a server older than the field. */
+  issued?: boolean
+  /** Whether the shared server.proxy_token is set. Never its value. */
+  shared_secret?: boolean
+}
 
 export type Session = {
   id: string

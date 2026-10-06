@@ -1,5 +1,20 @@
 import { useEffect, useRef, useState } from "react"
-import { Button, Card, Sheet, SheetContent, SheetHeader, SheetTitle } from "darkraise-ui"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Button,
+  Card,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "darkraise-ui"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "darkraise-ui/components/resizable"
 import { useSearch } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
@@ -31,7 +46,7 @@ import type {
   PlaygroundConversationDetail,
   RequestTrace,
 } from "../../../lib/api-types"
-import { PanelLeft } from "lucide-react"
+import { Gauge, PanelLeft } from "lucide-react"
 
 /**
  * A conversation that is still there tomorrow.
@@ -114,6 +129,11 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // case the actions menu exists to serve — a thread set up and not yet sent.
   const [settingsAmending, setSettingsAmending] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  // The conversation a delete is waiting on the operator's answer for. Both
+  // entry points -- the rail's trash and the header's menu -- come through
+  // here, so neither can delete on a single click.
+  const [pendingDelete, setPendingDelete] = useState<PlaygroundConversation | null>(null)
 
   const queryClient = useQueryClient()
   const { data: conversations } = usePlaygroundConversations()
@@ -373,13 +393,16 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // from the rail would rewrite what its answers were produced under.
   // `seededFrom` is what makes it once: the guard is false on the render the
   // adjustment itself causes.
-  if (trace.data && seed !== undefined && seededFrom !== seed && run.messages.length === 0) {
+  // A trace of an embeddings or other non-chat request is Auxiliary's to
+  // seed, which every mode sees the same ?seed= for; Chat leaves it alone.
+  const seedIsChat = !trace.data?.surface || trace.data.surface === "llm"
+  if (trace.data && seedIsChat && seed !== undefined && seededFrom !== seed && run.messages.length === 0) {
     setConfig((prev) => ({ ...prev, ...seedFromTrace(trace.data as RequestTrace) }))
     setSeededFrom(seed)
   }
 
   const seedNote =
-    seed !== undefined && run.messages.length === 0
+    seed !== undefined && seedIsChat && run.messages.length === 0
       ? // capture.bodies has a retention sweep and no writer, so a trace
         // carries no prompt text — the model and dialect are all a seeded
         // run can restore. Stated here rather than left for the operator to
@@ -484,6 +507,19 @@ export function ChatMode({ active = true }: { active?: boolean }) {
     if (c.id === conversationRef.current) startNew()
   }
 
+  // Only the answers the conversation keeps. A failed turn carries a route
+  // for its trace link, but it is not part of the conversation -- it is
+  // never sent on and never stored -- so it is neither an answer to count
+  // nor one whose missing counts need explaining. `history` filters
+  // `messages` without copying, so identity says which rows survived.
+  const kept = new Set(run.history)
+  const consumption = consumptionOf(
+    Object.fromEntries(
+      Object.entries(run.routes).filter(([i]) => kept.has(run.messages[Number(i)]!)),
+    ),
+    run.history.filter((m) => m.role === "assistant").length,
+  )
+
   return (
     <>
     <ResizablePanelGroup className="flex min-h-0 flex-1 gap-0 px-6 pb-6">
@@ -503,17 +539,25 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           activeId={activeId}
           onSelect={select}
           onNew={startNew}
-          onDelete={removeConversation}
+          onDelete={setPendingDelete}
         />
       </ResizablePanel>
 
       <ResizableHandle withHandle className="mx-2 hidden lg:flex" />
 
       <ResizablePanel className="flex min-h-0 min-w-0 flex-col gap-4">
-        <div className="lg:hidden">
+        {/* Below lg both side columns fold away, so each gets a way back.
+            The readings are what the right column holds that nothing else
+            on a narrow screen shows; the settings are already one click
+            away in the header's dialog. */}
+        <div className="flex flex-wrap gap-2 lg:hidden">
           <Button variant="outline" size="sm" onClick={() => setHistoryOpen(true)}>
             <PanelLeft className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
             Show conversations
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setDetailsOpen(true)}>
+            <Gauge className="size-[var(--icon-size,1rem)]" aria-hidden="true" />
+            Show consumption
           </Button>
         </div>
         {selectionFailed ? (
@@ -535,7 +579,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           onTitleChange={retitle}
           onDelete={() => {
             const current = (conversations ?? []).find((c) => c.id === activeId)
-            if (current) removeConversation(current)
+            if (current) setPendingDelete(current)
           }}
           canDelete={activeId !== "" && !selectionPending}
           locked={locked}
@@ -590,13 +634,7 @@ export function ChatMode({ active = true }: { active?: boolean }) {
           {/* The readings and the settings share the right-hand column: what
               this request is, and what it has cost. */}
           <div className="hidden w-80 shrink-0 flex-col gap-4 overflow-y-auto lg:flex">
-            <TokenPanel
-              consumption={consumptionOf(
-                run.routes,
-                run.messages.filter((m) => m.role === "assistant").length,
-              )}
-              metrics={metrics}
-            />
+            <TokenPanel consumption={consumption} metrics={metrics} />
             {/* A card, like the readings above it. The pane used to draw
                 itself as a bare column with a hairline down its left edge,
                 which put two different kinds of object in one stack and made
@@ -645,11 +683,53 @@ export function ChatMode({ active = true }: { active?: boolean }) {
                 startNew()
                 setHistoryOpen(false)
               }}
-              onDelete={removeConversation}
+              onDelete={setPendingDelete}
             />
           </div>
         </SheetContent>
       </Sheet>
+      <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <SheetContent side="right" className="flex w-full max-w-sm flex-col gap-0 overflow-y-auto p-4">
+          <SheetHeader>
+            {/* Named for a screen reader only: the panel inside carries the
+                same heading visibly. */}
+            <SheetTitle className="sr-only">Consumption</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4">
+            <TokenPanel consumption={consumption} metrics={metrics} />
+          </div>
+        </SheetContent>
+      </Sheet>
+      {/* Controlled and drawn once here, so the rail's trash, the sheet's
+          copy of the rail and the header's menu all ask the same question.
+          The DELETE is unrecoverable: the store keeps no tombstone. */}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {pendingDelete?.title}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The transcript is removed from the server and cannot be recovered.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] hover:bg-[hsl(var(--destructive))]/90"
+              onClick={() => {
+                if (pendingDelete) removeConversation(pendingDelete)
+                setPendingDelete(null)
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

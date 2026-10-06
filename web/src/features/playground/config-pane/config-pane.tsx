@@ -11,7 +11,9 @@ import {
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "darkraise-ui"
 import { ModelCombobox, useModelCandidates } from "../../shell/model-combobox"
 import { DIALECTS, type PlaygroundConfig } from "../config"
-import { parseTools } from "../lib/request"
+import { TOOLS_PLACEHOLDER, toolsProblem } from "../lib/request"
+import { reasonFor } from "../dialect-support"
+import { GatedField } from "./gated-field"
 import type { PlaygroundDialect } from "../../../lib/api-types"
 import { Lock } from "lucide-react"
 import { PresetPicker } from "./preset-picker"
@@ -73,7 +75,8 @@ export function ConfigPane({
   const { candidates, loading } = useModelCandidates()
   const set = <K extends keyof PlaygroundConfig>(key: K, value: PlaygroundConfig[K]) =>
     onChange({ ...config, [key]: value })
-  const toolsError = parseTools(config.toolsRaw).error
+  const toolsError = toolsProblem(config)
+  const toolsWhy = reasonFor(config.dialect, "tools")
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -109,9 +112,13 @@ export function ConfigPane({
         </p>
       ) : null}
 
-      <Fieldset locked={locked}>
-        <PresetPicker config={config} onChange={onChange} />
+      {/* Outside the lock: the fieldset would disable Save and Manage too,
+          and neither changes these settings. Only loading does, and the
+          picker locks that itself. */}
+      <PresetPicker config={config} onChange={onChange} loadDisabled={locked} />
 
+      {showModel || showDialect ? (
+      <Fieldset locked={locked}>
         {showModel ? (
           // Labelled visibly, not only for a screen reader. It sits between
           // Preset and Dialect, and a bare field between two labelled ones
@@ -151,6 +158,7 @@ export function ConfigPane({
           </div>
         ) : null}
       </Fieldset>
+      ) : null}
 
       <Accordion type="multiple" defaultValue={[]} className="flex flex-col">
       <AccordionItem value="sampling">
@@ -188,18 +196,25 @@ export function ConfigPane({
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
+      {/* Gated by reason but never disabled: gemini refuses the request
+          rather than dropping the field, so a value left here blocks Send,
+          and a disabled field would leave no way to clear it. The example
+          follows the dialect, because each edge reads only its own shape. */}
+      <GatedField reason={toolsWhy}>
         <Label htmlFor="pg-tools">Tools</Label>
         <Textarea
           id="pg-tools"
           rows={4}
-          placeholder='JSON array, e.g. [{"type":"function",…}]'
+          placeholder={TOOLS_PLACEHOLDER[config.dialect]}
           value={config.toolsRaw}
           onChange={(e) => set("toolsRaw", e.target.value)}
+          aria-invalid={toolsError ? true : undefined}
           className="font-mono text-sm"
         />
-        {toolsError && <p className="text-sm text-[hsl(var(--destructive))]">{toolsError}</p>}
-      </div>
+        {toolsError && toolsError !== toolsWhy && (
+          <p className="text-sm text-[hsl(var(--destructive))]">{toolsError}</p>
+        )}
+      </GatedField>
       </Fieldset>
       </AccordionContent>
       </AccordionItem>

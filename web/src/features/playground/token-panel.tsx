@@ -124,8 +124,9 @@ export function TokenPanel({
           // A reopened conversation refetches each turn's trace, and one the
           // log has already swept can never contribute its counts again.
           <p className="pt-1 text-sm text-[hsl(var(--legend))]">
-            {consumption.counted} of {consumption.turns} answers still have a trace to
-            count.
+            Token counts cover {consumption.counted} of {consumption.turns}{" "}
+            {consumption.turns === 1 ? "answer" : "answers"}; the rest have no trace in
+            the request log yet.
           </p>
         ) : null}
       </div>
