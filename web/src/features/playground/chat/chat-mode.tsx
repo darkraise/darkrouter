@@ -393,13 +393,16 @@ export function ChatMode({ active = true }: { active?: boolean }) {
   // from the rail would rewrite what its answers were produced under.
   // `seededFrom` is what makes it once: the guard is false on the render the
   // adjustment itself causes.
-  if (trace.data && seed !== undefined && seededFrom !== seed && run.messages.length === 0) {
+  // A trace of an embeddings or other non-chat request is Auxiliary's to
+  // seed, which every mode sees the same ?seed= for; Chat leaves it alone.
+  const seedIsChat = !trace.data?.surface || trace.data.surface === "llm"
+  if (trace.data && seedIsChat && seed !== undefined && seededFrom !== seed && run.messages.length === 0) {
     setConfig((prev) => ({ ...prev, ...seedFromTrace(trace.data as RequestTrace) }))
     setSeededFrom(seed)
   }
 
   const seedNote =
-    seed !== undefined && run.messages.length === 0
+    seed !== undefined && seedIsChat && run.messages.length === 0
       ? // capture.bodies has a retention sweep and no writer, so a trace
         // carries no prompt text — the model and dialect are all a seeded
         // run can restore. Stated here rather than left for the operator to
