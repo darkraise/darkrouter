@@ -86,6 +86,16 @@ describe("Auxiliary visibility", () => {
     expect(screen.getByText("Token Count")).toBeInTheDocument()
   })
 
+  it("offers the tools as a select where the rail is folded away", async () => {
+    // Below lg the rail panel is hidden; at phone width it had squeezed the
+    // names to "To…", "E…". The select carries the same seven, with their
+    // blurbs.
+    render(<AuxMode active />)
+    await userEvent.click(screen.getByLabelText("Tool"))
+    await userEvent.click(await screen.findByRole("option", { name: /^Embeddings — turn text into a vector/ }))
+    expect(screen.getByText("Embeddings")).toBeInTheDocument()
+  })
+
   it("defaults the counting dialect to the model's provider", async () => {
     render(<AuxMode active />)
     await userEvent.click(screen.getByRole("button", { name: "Choose model" }))

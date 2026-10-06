@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react"
-import { Card } from "darkraise-ui"
+import {
+  Card,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "darkraise-ui"
 import {
   ResizableHandle,
   ResizablePanel,
@@ -185,13 +193,36 @@ export function AuxMode({ active: isActive = true }: { active?: boolean }) {
 
   return (
     <ResizablePanelGroup className="flex min-h-0 flex-1 gap-0 px-6 pb-6">
-      <ResizablePanel defaultSize={20} minSize={14} maxSize={40} className="flex min-h-0 flex-col">
+      {/* Off below lg, as Chat's rail is: at phone width the panel's share
+          left about seventy pixels, and seven names cut to "To…", "E…"
+          are no rail at all. The select below takes its place. */}
+      <ResizablePanel
+        defaultSize={20}
+        minSize={14}
+        maxSize={40}
+        className="!hidden min-h-0 flex-col lg:!flex"
+      >
         <ToolRail active={active} onSelect={setActive} runCounts={counts} />
       </ResizablePanel>
 
-      <ResizableHandle withHandle className="mx-2" />
+      <ResizableHandle withHandle className="mx-2 hidden lg:flex" />
 
       <ResizablePanel className="flex min-h-0 min-w-0 flex-col gap-4">
+        <div className="flex flex-col gap-1.5 lg:hidden">
+          <Label htmlFor="aux-tool">Tool</Label>
+          <Select value={active} onValueChange={(v) => setActive(v as AuxSurface)}>
+            <SelectTrigger id="aux-tool">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUX_SURFACES.map(({ surface, label, blurb }) => (
+                <SelectItem key={surface} value={surface}>
+                  {label} — {blurb.toLowerCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {/* The model this tool will send to, on its own island above the
             work — the same place Chat names the model answering. Narrowed to
             this surface: an embeddings box offering a chat model is offering
