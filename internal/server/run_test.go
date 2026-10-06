@@ -528,9 +528,10 @@ func TestDiscoveryCanBeDisabled(t *testing.T) {
 }
 
 // A restart-only edit stays on /healthz until the process is restarted.
-// restartOnlyWarnings, the consecutive-reload diff, is cleared by the next
-// unrelated save while the old value is still the one in force -- which is an
-// operator told to restart and then quietly told they need not.
+// Judged against the boot snapshot rather than the previous reload, so the
+// next unrelated save cannot clear it while the old value is still the one in
+// force -- which would be an operator told to restart and then quietly told
+// they need not.
 func TestHealthzReportsPendingRestartAcrossAnUnrelatedReload(t *testing.T) {
 	var mu sync.Mutex
 	live := testConfigOf(t, nil)

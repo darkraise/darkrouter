@@ -94,7 +94,7 @@ Set this in **Connect → Public base URL → Save address**, or in Settings as
 `server.public_url`. It is stored in the database and applies immediately.
 For a Docker mapping of `18080:8080`, enter `http://your-host:18080`.
 For a reverse proxy domain, enter `https://llm.example.com`. Include any
-proxy path prefix, but omit dialect suffixes such as `/v1` and `/v1beta`.
+proxy path prefix, but omit dialect suffixes such as `/v1` and `/v1beta`: a value ending in one is refused.
 
 The Connect page lists the configured address first and uses it for client
 snippets by default. It also shows an estimated address built from the console
@@ -144,7 +144,7 @@ Providers and Routing screens rather than in Settings.
 
 | Key | Default | Notes |
 |---|---|---|
-| `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. No query or fragment. Empty means the console shows only the LAN address. |
+| `server.public_url` | *empty* | The public domain clients reach the gateway at. A bare domain is assumed https. http or https only; no query or fragment, and no trailing `/v1` or `/v1beta`. Empty means the console shows only the LAN address. |
 | `server.max_body_bytes` | 33554432 | Applies on reload. For a multipart upload it bounds the part values; boundaries, part headers and a 1 KiB charge per part get a further 64 KiB. |
 | `server.shutdown_grace` | `10s` | Applies on reload. The shipped compose files stop the container with SIGKILL 30s after SIGTERM (`stop_grace_period`), and shutdown needs a few seconds past this grace to close streams and flush the request log, so a value above 25s raises a configuration warning. Raise `stop_grace_period` to at least this value plus 5s before going past it. |
 | `server.sse.max_line_bytes` | 1048576 | |
