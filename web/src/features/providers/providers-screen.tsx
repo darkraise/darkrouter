@@ -264,22 +264,28 @@ function buildColumns(actions: RowActions): Columns {
         <span className="flex min-w-[14rem] items-center gap-3">
           <ProviderIcon preset={r.row.preset} id={r.row.id} name={r.row.name} size={36} />
           <span className="flex min-w-0 flex-col">
-            <Link
-              to="/providers/$id"
-              params={{ id: r.row.id }}
-              className="truncate font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
-            >
-              {r.row.name}
-            </Link>
+            {/* The badge rides on the name's line rather than beside the
+                two-line block: there it widened the column by its own width,
+                and at a laptop width that is what pushed the table past its
+                card and put a column under the pinned actions. */}
+            <span className="flex min-w-0 items-center gap-2">
+              <Link
+                to="/providers/$id"
+                params={{ id: r.row.id }}
+                className="truncate font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
+              >
+                {r.row.name}
+              </Link>
+              {r.row.freeTier && (
+                <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                  Free tier
+                </Badge>
+              )}
+            </span>
             <span className="truncate font-mono text-sm text-[hsl(var(--legend))]">
               {r.row.id} · {r.row.kind}
             </span>
           </span>
-          {r.row.freeTier && (
-            <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
-              Free tier
-            </Badge>
-          )}
         </span>
       ),
     },
