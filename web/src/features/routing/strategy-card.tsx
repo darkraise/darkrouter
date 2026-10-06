@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { Card } from "darkraise-ui"
 import type { PolicyBlock, Provider } from "../../lib/api-types"
+import { isKeyless } from "../providers/provider-state"
 
 /**
  * Providers in the order rule 3 walks them: highest priority first.
@@ -15,11 +16,12 @@ import type { PolicyBlock, Provider } from "../../lib/api-types"
  *
  * A provider with no enabled credential is left out because the provider set
  * drops it: `sqlsource` skips any whose `enabledOnly(creds)` is empty, so it
- * is not a step in the order at all.
+ * is not a step in the order at all -- unless it is keyless, which sqlsource
+ * exempts and the router walks with no credential.
  */
 export function priorityOrder(providers: Provider[]): Provider[] {
   return [...providers]
-    .filter((p) => p.enabled && p.credentials.some((c) => c.enabled))
+    .filter((p) => p.enabled && (isKeyless(p) || p.credentials.some((c) => c.enabled)))
     .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))
 }
 

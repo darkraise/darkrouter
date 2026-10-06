@@ -133,3 +133,82 @@ describe("an empty catalogue", () => {
     expect(facts.problem).toMatch(/no provider named ghost is configured/)
   })
 })
+
+describe("a keyless provider", () => {
+  // lmstudio, vllm and every other `auth_style: none` runtime hold no
+  // credential at all. sqlsource keeps them and the router walks them with
+  // one attempt keyed on the empty id; a judgement that demanded a credential
+  // drew every one of them amber while they served traffic.
+  const lmstudio = provider("lmstudio", { auth_style: "none", credentials: [] })
+  const keyless = ctx({
+    providers: [lmstudio],
+    models: [model("mock-fast", ["lmstudio"]), model("mock-error", ["lmstudio"])],
+  })
+  const breaker = (model: string, until: string | undefined, key_id = "") => ({
+    provider_id: "lmstudio", key_id, model, cooling_until: until,
+  })
+  const NOW = Date.parse("2026-10-06T12:00:00Z")
+  const LATER = "2026-10-06T12:05:00Z"
+  const EARLIER = "2026-10-06T11:55:00Z"
+
+  it("is routable with no credentials, pinned or by bare name", () => {
+    expect(targetFacts("lmstudio/mock-fast", keyless).state).toBe("routable")
+    expect(targetFacts("mock-fast", keyless).state).toBe("any-provider")
+  })
+
+  it("is still unconfigured when it is keyed and holds none", () => {
+    const keyed = ctx({ providers: [provider("groq", { credentials: [] })] })
+    expect(targetFacts("groq/llama", keyed).state).toBe("provider-unconfigured")
+  })
+
+  it("is cooling for the one model its breaker holds, and only that one", () => {
+    // Breakers are per (provider, key, model). mock-error cooling says
+    // nothing about mock-fast on the same runtime.
+    const c = { ...keyless, now: NOW, breakers: [breaker("mock-error", LATER)] }
+    const facts = targetFacts("lmstudio/mock-error", c)
+    expect(facts.state).toBe("cooling")
+    expect(facts.problem).toBe("lmstudio is cooling for mock-error after recent failures")
+    expect(targetFacts("lmstudio/mock-fast", c).state).toBe("routable")
+    expect(targetFacts("mock-error", c).state).toBe("cooling")
+  })
+
+  it("ignores a breaker whose cooldown has run out", () => {
+    const c = { ...keyless, now: NOW, breakers: [breaker("mock-error", EARLIER)] }
+    expect(targetFacts("lmstudio/mock-error", c).state).toBe("routable")
+  })
+
+  it("ignores a breaker entry that is tracked but not cooling", () => {
+    const c = { ...keyless, now: NOW, breakers: [breaker("mock-error", undefined)] }
+    expect(targetFacts("lmstudio/mock-error", c).state).toBe("routable")
+  })
+})
+
+describe("per-model breakers on a keyed provider", () => {
+  const NOW = Date.parse("2026-10-06T12:00:00Z")
+  const LATER = "2026-10-06T12:05:00Z"
+
+  it("cools a model only when every credential is cooling for it", () => {
+    const groq = provider("groq", { credentials: [cred({ id: "k1" }), cred({ id: "k2" })] })
+    const one = ctx({
+      providers: [groq], now: NOW,
+      breakers: [{ provider_id: "groq", key_id: "k1", model: "llama", cooling_until: LATER }],
+    })
+    expect(targetFacts("groq/llama", one).state).toBe("routable")
+    const both = {
+      ...one,
+      breakers: [
+        { provider_id: "groq", key_id: "k1", model: "llama", cooling_until: LATER },
+        { provider_id: "groq", key_id: "k2", model: "llama", cooling_until: LATER },
+      ],
+    }
+    expect(targetFacts("groq/llama", both).state).toBe("cooling")
+  })
+
+  it("lets a credential-wide breaker gate every model the key serves", () => {
+    const c = ctx({
+      now: NOW,
+      breakers: [{ provider_id: "groq", key_id: "k1", model: "", cooling_until: LATER }],
+    })
+    expect(targetFacts("groq/llama", c).state).toBe("cooling")
+  })
+})
