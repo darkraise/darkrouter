@@ -437,7 +437,8 @@ describe("the wizard opened from an unconfigured preset", () => {
   it("does not create the provider again when retrying keys it could not add", async () => {
     // The provider list still predates the row this run created, which is
     // what it looks like until the refetch lands. A second POST would 409 and
-    // abandon the keys the retry was for.
+    // abandon the keys the retry was for. Two keys, one stored: a row that
+    // holds none of its keys is removed again, which the next test covers.
     const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
     const inner = fetchMock.getMockImplementation()!
     let keyPosts = 0
@@ -458,11 +459,74 @@ describe("the wizard opened from an unconfigured preset", () => {
       />,
     )
 
-    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
-    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    await userEvent.click(await screen.findByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-retry\nspare|sk-kept")
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
     expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
+    await waitFor(() => expect(keyPosts).toBe(3))
+    const creates = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
+    )
+    expect(creates).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit)?.method === "DELETE")).toBe(false)
+  })
+
+  it("removes the row it created when every key sent with it is refused", async () => {
+    // A malformed AWS key is refused with a 400 after the bedrock row exists,
+    // and the row stayed behind as an "unconfigured" provider nobody had
+    // configured. It goes again; the key stays in the form, and sending it
+    // again creates the row afresh.
+    const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
+    const fetchMock = stub([bedrock])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) {
+        return new Response(JSON.stringify({ error: "not an AWS credential" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      return inner(url, init)
+    })
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={bedrock} />)
+
+    await userEvent.type(await screen.findByLabelText(/aws access key/i), "not-json")
+    await userEvent.type(screen.getByLabelText(/region/i), "us-east-1")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/not an AWS credential/i)).toBeInTheDocument()
+
+    const calls = () => fetchMock.mock.calls.map(([url, init]) => `${(init as RequestInit)?.method ?? "GET"} ${String(url)}`)
+    await waitFor(() => expect(calls()).toContain("DELETE /api/providers/bedrock"))
+    // Asked for again, because the row it would have gone into is gone.
+    expect(screen.getByLabelText(/region/i)).toHaveValue("us-east-1")
+
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    await waitFor(() => expect(keyPosts).toBe(2))
+    expect(calls().filter((c) => c === "POST /api/providers")).toHaveLength(2)
+  })
+
+  it("says the row is still there when removing it fails, and does not create it again", async () => {
+    const fetchMock = stub([preset({ id: "groq", name: "Groq" })])
+    const inner = fetchMock.getMockImplementation()!
+    let keyPosts = 0
+    fetchMock.mockImplementation(async (url, init) => {
+      const method = (init as RequestInit)?.method
+      const fail = (error: string, status: number) =>
+        new Response(JSON.stringify({ error }), { status, headers: { "Content-Type": "application/json" } })
+      if (String(url).endsWith("/keys") && keyPosts++ === 0) return fail("database is locked", 503)
+      if (method === "DELETE") return fail("database is locked", 503)
+      return inner(url, init)
+    })
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={preset({ id: "groq", name: "Groq" })} />)
+
+    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    expect(await screen.findByText(/groq is still configured; removing it failed/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
     await waitFor(() => expect(keyPosts).toBe(2))
     const creates = fetchMock.mock.calls.filter(
       ([url, init]) => url === "/api/providers" && (init as RequestInit)?.method === "POST",
@@ -489,13 +553,15 @@ describe("the wizard opened from an unconfigured preset", () => {
       <AddAccountsDialog open onOpenChange={() => {}} preset={preset({ id: "groq", name: "Groq" })} />,
     )
 
-    await userEvent.type(await screen.findByLabelText(/api key/i), "sk-retry")
-    await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
+    // Two keys, one stored, so the row stays for the retry.
+    await userEvent.click(await screen.findByRole("radio", { name: /bulk import/i }))
+    await userEvent.type(screen.getByLabelText(/one per line/i), "work|sk-retry\nspare|sk-kept")
+    await userEvent.click(screen.getByRole("button", { name: /add 2 credentials/i }))
     expect(await screen.findByText(/database is locked/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("checkbox", { name: /free models only/i }))
     await userEvent.click(screen.getByRole("button", { name: /add credential/i }))
 
-    await waitFor(() => expect(keyPosts).toBe(2))
+    await waitFor(() => expect(keyPosts).toBe(3))
     const patches = fetchMock.mock.calls.filter(
       ([url, init]) => url === "/api/providers/groq" && (init as RequestInit)?.method === "PATCH",
     )
@@ -526,6 +592,16 @@ describe("the wizard opened from an unconfigured preset", () => {
         region: "us-east-1",
       })
     })
+  })
+
+  it("names the endpoint a Bedrock region makes in place of a base URL it has none of", async () => {
+    const bedrock = preset({ id: "bedrock", name: "Bedrock", kind: "bedrock", base_url: "", auth_kind: "sigv4" })
+    stub([bedrock])
+    mount(<AddAccountsDialog open onOpenChange={() => {}} preset={bedrock} />)
+
+    expect(await screen.findByText("bedrock · derived from the region")).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText(/region/i), "us-east-1")
+    expect(screen.getByText("bedrock · https://bedrock-runtime.us-east-1.amazonaws.com")).toBeInTheDocument()
   })
 
   it("asks a Vertex provider it creates for its project and location", async () => {

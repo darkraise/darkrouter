@@ -74,19 +74,30 @@ async function probe(api: ProviderApi, id: string): Promise<LocalOutcome> {
     : { ok: false, error: result.error ?? "the provider did not answer" }
 }
 
-/** Removes the row, answering what is left behind if that did not fully
- *  work. Never throws: a failed rollback must not replace the reason the
- *  caller is rolling back, which is the fact the operator needs. */
-async function remove(api: ProviderApi, id: string): Promise<string | undefined> {
+/** Removes a provider row, saying whether it is gone and, when that did not
+ *  fully work, what is left behind. Never throws: a failed rollback must not
+ *  replace the reason the caller is rolling back, which is the fact the
+ *  operator needs. */
+export async function removeProvider(
+  api: Pick<ProviderApi, "del">,
+  id: string,
+): Promise<{ gone: boolean; leftBehind?: string }> {
   try {
     await api.del(`/api/providers/${id}`)
-    return undefined
+    return { gone: true }
   } catch (err) {
     if (committedButNotRouted(err)) {
-      return `${id} was removed, but the gateway is still routing to it until it reloads: ${messageOf(err)}`
+      return {
+        gone: true,
+        leftBehind: `${id} was removed, but the gateway is still routing to it until it reloads: ${messageOf(err)}`,
+      }
     }
-    return `${id} is still configured; removing it failed: ${messageOf(err)}`
+    return { gone: false, leftBehind: `${id} is still configured; removing it failed: ${messageOf(err)}` }
   }
+}
+
+async function remove(api: ProviderApi, id: string): Promise<string | undefined> {
+  return (await removeProvider(api, id)).leftBehind
 }
 
 function withLeftBehind(outcome: LocalOutcome, leftBehind: string | undefined): LocalOutcome {
