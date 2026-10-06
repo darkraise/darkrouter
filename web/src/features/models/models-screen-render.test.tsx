@@ -253,6 +253,19 @@ describe("the models table", () => {
     expect(screen.getByText("chat")).toHaveClass("whitespace-nowrap")
   })
 
+  it("wraps its facet toolbar rather than pushing the page sideways", async () => {
+    // jsdom lays nothing out, so this pins the rule rather than measuring
+    // it. Unwrapped, the facets and Columns made a 587px row that scrolled
+    // the whole pane sideways at 768 and 375.
+    mockCatalog()
+    await renderAt("/")
+    await screen.findByText("openai/gpt-5")
+    const box = document.querySelector(".models-table")
+    expect(box?.className).toContain("[&_.dr-data-table-toolbar]:flex-wrap")
+    expect(box?.className).toContain("[&_.dr-data-table-toolbar-filters]:flex-wrap")
+    expect(box?.querySelector(".dr-data-table-toolbar-filters")).not.toBeNull()
+  })
+
   it("opens the override editor with every provider the row serves through", async () => {
     mockCatalog()
     await renderAt("/")

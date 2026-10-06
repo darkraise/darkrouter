@@ -428,9 +428,13 @@ export function ModelsScreen() {
           narrowed the same rows, survived "Clear filters", and with no match
           put the table's own empty row and pager over the card below. For
           the same reason the table gives way to that card rather than
-          standing empty above it. */}
+          standing empty above it.
+
+          The toolbar and the pager wrap, as the requests table's do. Five
+          facets and Columns make a row 587px wide, and unwrapped it pushed
+          the whole pane sideways on a phone and a tablet alike. */}
       {catalog.isPending || models.length > 0 ? (
-        <div className="models-table">
+        <div className="models-table [&_.dr-data-table-toolbar]:flex-wrap [&_.dr-data-table-toolbar-filters]:flex-wrap [&_.dr-data-table-pagination-controls]:flex-wrap">
           <DataTable
             data={rows}
             columns={columns}
