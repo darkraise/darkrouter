@@ -276,7 +276,7 @@ export function Compare({
             they ran is worse than one on two rows. */}
         <div
           className="grid gap-4"
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(16rem, 100%), 1fr))" }}
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(18rem, 100%), 1fr))" }}
         >
           {columns.map((column, index) => (
             <CompareColumn
