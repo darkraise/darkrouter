@@ -32,6 +32,45 @@ describe("SettingField", () => {
     expect(onChange).toHaveBeenLastCalledWith("48h")
   })
 
+  it("shows a duration without Go's zero units, and a long one in days", () => {
+    // 720h0m0s is what Go prints and nobody writes; 720h is the same setting
+    // in a syntax the save still parses, and "30 days" is what it means.
+    render(<SettingField row={row()} value="720h0m0s" onChange={vi.fn()} onReset={null} />)
+    expect(screen.getByLabelText("Keep request records for")).toHaveValue("720h")
+    expect(screen.getByText("30 days")).toBeInTheDocument()
+  })
+
+  it("adds no reading of a short duration that already reads fine", () => {
+    render(
+      <SettingField
+        row={row({ field: "policy.timeout.idle", value: "2m0s", display: "2 min",
+          meta: { name: "Idle stream timeout", description: "", group: "requests" } })}
+        value="2m0s"
+        onChange={vi.fn()}
+        onReset={null}
+      />,
+    )
+    expect(screen.getByLabelText("Idle stream timeout")).toHaveValue("2m")
+    expect(screen.queryByText("2 min")).toBeNull()
+  })
+
+  it("gives a URL a box wide enough to read, and the whole value on hover", () => {
+    const url = "https://raw.githubusercontent.com/example/free-models/main/free.json"
+    render(
+      <SettingField
+        row={row({ field: "catalog.free_catalog_url", kind: "url", value: url, display: url,
+          meta: { name: "Free-tier catalogue source", description: "", group: "catalogue" } })}
+        value={url}
+        onChange={vi.fn()}
+        onReset={null}
+      />,
+    )
+    const box = screen.getByLabelText("Free-tier catalogue source")
+    expect(box.className).toContain("w-96")
+    expect(box.className).not.toContain("w-40")
+    expect(box).toHaveAttribute("title", url)
+  })
+
   it("renders a boolean as a switch and emits a parseable bool", async () => {
     const onChange = vi.fn()
     render(

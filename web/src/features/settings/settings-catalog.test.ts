@@ -4,6 +4,7 @@ import {
   SETTINGS,
   displayOf,
   bytesProblem,
+  compactDuration,
   formatBytes,
   formatDuration,
   parseBytes,
@@ -220,6 +221,27 @@ describe("parseBytes", () => {
     expect(parseBytes("9999999999 GB")).toBeUndefined()
     expect(parseBytes("99999999999999999999")).toBeUndefined()
     expect(parseBytes(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER)
+  })
+})
+
+describe("compactDuration", () => {
+  it("drops the zero units Go's String() adds", () => {
+    expect(compactDuration("720h0m0s")).toBe("720h")
+    expect(compactDuration("12h0m0s")).toBe("12h")
+    expect(compactDuration("2m0s")).toBe("2m")
+    expect(compactDuration("1h30m0s")).toBe("1h30m")
+    expect(compactDuration("1h0m0.5s")).toBe("1h0.5s")
+  })
+  it("leaves what it has nothing to drop from alone", () => {
+    expect(compactDuration("30s")).toBe("30s")
+    expect(compactDuration("0s")).toBe("0s")
+    expect(compactDuration("500ms")).toBe("500ms")
+    expect(compactDuration("not a duration")).toBe("not a duration")
+  })
+  it("stays the same setting, so seeding with it is not an edit", () => {
+    for (const raw of ["720h0m0s", "2m0s", "1h30m0s"]) {
+      expect(sameSetting(compactDuration(raw), raw, "duration")).toBe(true)
+    }
   })
 })
 

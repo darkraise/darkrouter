@@ -300,6 +300,19 @@ export function formatDuration(raw: string): string {
   return `${total}s`
 }
 
+/**
+ * A Go duration with its zero units dropped: `720h0m0s` as `720h`, `2m0s` as
+ * `2m`. Still Go's own syntax, so an editor can seed with it and a save sends
+ * what the box shows; `formatDuration`'s "30 days" is for reading, and
+ * ParseDuration would refuse it.
+ */
+export function compactDuration(raw: string): string {
+  const m = /^(\d+h)?(\d+m)?(\d+(?:\.\d+)?s)?$/.exec(raw)
+  if (!m || raw === "") return raw
+  const parts = [m[1], m[2], m[3]].filter((p) => p && !/^0+(?:\.0+)?[hms]$/.test(p))
+  return parts.length > 0 ? parts.join("") : raw
+}
+
 export type SettingRow = {
   field: string
   meta: SettingMeta
