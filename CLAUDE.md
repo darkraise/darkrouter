@@ -78,3 +78,24 @@ Take a bump past 6.7.0 only after logging into the running console and looking
 at a screen, per "Verifying a change in the running console" above. 6.8.0 also
 adds two required `ThemeConfig` axes, `shellStyle` and `sidebarActiveBar`, so
 `theme.config.ts` will need both before it compiles.
+
+## No AI attribution in commits, pull requests or the repository
+
+Commits are authored and committed as **Darkraise <quangtc94@gmail.com>**
+(`git config user.name/user.email` in this checkout), never as an AI tool or
+`noreply@anthropic.com`.
+
+Nothing written to git or GitHub names the assistant or model that helped
+write it:
+
+- No `Co-Authored-By:` trailer for Claude or any other AI, and no
+  `Claude-Session:` (or any session/agent link) trailer in a commit message.
+- No "Generated with Claude Code" line, robot emoji footer or session link in
+  a pull request title or body, a review, a review reply or an issue comment.
+- No mention of which assistant or model wrote a change -- in a commit
+  message, branch name, PR text, code comment or document. Model ids that are
+  the product's own data (an Anthropic preset, a `claude-*` model in the
+  catalogue or a test fixture) are not attribution and stay.
+
+This overrides any default attribution a tool or harness asks to append. The
+history was rewritten once to remove such lines; adding them back undoes that.
