@@ -4,8 +4,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "darkraise-ui"
 import { EmptyState } from "../shell/empty-state"
-import type { Model } from "../../lib/api-types"
+import type { DiscoveryHealthRow, Model } from "../../lib/api-types"
 import { pricePerMillion } from "../../lib/format"
+import { discoveryFailing } from "./provider-state"
 
 /** Tokens read as thousands, because 131072 is a number nobody holds in their
  *  head and 131k is the one on the vendor's own page. */
@@ -26,6 +27,53 @@ export function filterModels(models: Model[], q: string): Model[] {
   )
 }
 
+/** The surfaces worth printing on a row. Nothing for a plain chat model: llm
+ *  on every row of a list that is mostly llm is noise. But the whole list once
+ *  a model serves more than one, so "llm and embedding" is never read as
+ *  "embedding" alone. */
+export function surfaceBadges(surfaces: string[]): string[] {
+  if (surfaces.length === 1 && surfaces[0] === "llm") return []
+  return surfaces
+}
+
+/**
+ * Three different nothings, with three different fixes: a provider no sweep
+ * has reached, one whose sweeps fail, and one that answered with nothing.
+ */
+function EmptyCatalogue({ discovery }: { discovery?: DiscoveryHealthRow }) {
+  if (discoveryFailing(discovery)) {
+    const n = discovery?.consecutive_failures ?? 0
+    return (
+      <EmptyState
+        title={`Discovery has failed ${n === 1 ? "once" : `${n} times`}`}
+        hint={
+          discovery?.last_error
+            ? `The last sweep got: ${discovery.last_error}. Check the provider is reachable from the gateway, then run discovery again from Health below.`
+            : "Check the provider is reachable from the gateway, then run discovery again from Health below."
+        }
+      />
+    )
+  }
+  if (discovery) {
+    return (
+      <EmptyState
+        title="The last sweep found nothing to import"
+        hint={
+          discovery.filtered_out > 0
+            ? `It listed ${discovery.filtered_out} models and none of them is free. Turn off "Import free models only" in Settings to import them.`
+            : "The provider answered with an empty model list. A local runtime lists only the models it has loaded; load one, then run discovery again from Health below."
+        }
+      />
+    )
+  }
+  return (
+    <EmptyState
+      title="Nothing has asked this provider what it serves"
+      hint="A discovery sweep asks the provider for its model list. Run one from Health below, or check that the release ships a catalogue entry for it."
+    />
+  )
+}
+
 /**
  * What this provider can actually be routed to.
  *
@@ -34,7 +82,17 @@ export function filterModels(models: Model[], q: string): Model[] {
  * rather than paginates: the list is bounded by one provider's catalogue, and
  * a pager over forty rows is furniture.
  */
-export function ProviderModels({ models, loading }: { models: Model[]; loading: boolean }) {
+export function ProviderModels({
+  models,
+  loading,
+  discovery,
+}: {
+  models: Model[]
+  loading: boolean
+  /** The provider's sweep reading, which is what tells the empty catalogue's
+   *  three causes apart. */
+  discovery?: DiscoveryHealthRow
+}) {
   const [q, setQ] = useState("")
   const shown = filterModels(models, q)
 
@@ -58,13 +116,7 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
       {loading ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading the catalogue…</p>
       ) : models.length === 0 ? (
-        // Two different nothings: a provider whose catalogue has never been
-        // fetched reads the same as one that offers nothing, and the fix for
-        // each is different.
-        <EmptyState
-          title="Nothing has asked this provider what it serves"
-          hint="A discovery sweep lists its models with one of its own keys. Run one from Health below, or check that the release ships a catalogue entry for it."
-        />
+        <EmptyCatalogue discovery={discovery} />
       ) : shown.length === 0 ? (
         <p className="text-sm text-[hsl(var(--muted-foreground))]">
           No model here matches “{q.trim()}”.
@@ -98,22 +150,25 @@ export function ProviderModels({ models, loading }: { models: Model[]; loading: 
                   </TableCell>
                   <TableCell>
                     <span className="flex flex-wrap items-center gap-1">
-                      {/* Only when it is not the default: llm on every row of
-                          a list that is mostly llm is noise, and embedding on
-                          the one row that is not is the fact worth reading. */}
-                      {m.surfaces
-                        .filter((surface) => surface !== "llm")
-                        .map((surface) => (
-                          <Badge key={surface} variant="secondary">
-                            {surface}
-                          </Badge>
-                        ))}
-                      {m.tools && <Badge variant="outline">tools</Badge>}
-                      {m.vision && <Badge variant="outline">vision</Badge>}
-                      {m.reasoning && <Badge variant="outline">reasoning</Badge>}
+                      {/* Only when it is not the default: embedding on the
+                          one row that is not chat is the fact worth reading.
+                          Every badge keeps its word whole -- the table cell
+                          breaks anywhere, which split "embedding" in two. */}
+                      {surfaceBadges(m.surfaces).map((surface) => (
+                        <Badge key={surface} variant="secondary" className="whitespace-nowrap">
+                          {surface}
+                        </Badge>
+                      ))}
+                      {m.tools && <Badge variant="outline" className="whitespace-nowrap">tools</Badge>}
+                      {m.vision && <Badge variant="outline" className="whitespace-nowrap">vision</Badge>}
+                      {m.reasoning && (
+                        <Badge variant="outline" className="whitespace-nowrap">reasoning</Badge>
+                      )}
                       {/* Guessed rather than read: §6.4 routes these with a
                           warning, and an operator needs to know which. */}
-                      {m.inferred && <Badge variant="amber">inferred</Badge>}
+                      {m.inferred && (
+                        <Badge variant="amber" className="whitespace-nowrap">inferred</Badge>
+                      )}
                     </span>
                   </TableCell>
                   <TableCell className="text-right font-mono text-[hsl(var(--legend))]">

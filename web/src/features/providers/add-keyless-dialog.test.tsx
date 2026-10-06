@@ -129,4 +129,20 @@ describe("adding a keyless provider", () => {
     mount(vi.fn(), null)
     expect(screen.queryByRole("button", { name: /^Add / })).not.toBeInTheDocument()
   })
+
+  it("keeps its body while the caller clears the preset to close it", () => {
+    // The list closes this by setting its preset to null, which used to empty
+    // the body on the first frame of the exit animation: a bare header faded
+    // out over the table.
+    stub()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const ui = (preset: Preset | null) => (
+      <QueryClientProvider client={client}>
+        <AddKeylessDialog preset={preset} open onOpenChange={() => {}} />
+      </QueryClientProvider>
+    )
+    const view = render(ui(aihorde))
+    view.rerender(ui(null))
+    expect(screen.getByRole("button", { name: /Add AI Horde/ })).toBeInTheDocument()
+  })
 })
