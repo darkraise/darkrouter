@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { apiFilters, newerCount, optionsFrom } from "./requests-screen"
-import { buildColumns, modelLabel } from "./requests-columns"
+import { attemptsTitle, buildColumns, csvRows, modelLabel } from "./requests-columns"
 import type { RequestRow } from "../../lib/api-types"
 
 const row = (over: Partial<RequestRow> & { id: string }): RequestRow => ({
@@ -52,12 +52,21 @@ describe("filter options", () => {
 })
 
 describe("api filters", () => {
-  it("excludes the UI-only time-range bookkeeping key from the request", () => {
-    // `range` records which preset produced `since_ms` for the toggle group
-    // to redisplay; the API has no such parameter, and sending it anyway
-    // would vary the query cache key for no reason.
+  it("sends a preset as a window the server resolves on every read", () => {
+    // A since_ms frozen when the pill was pressed (or when a saved view was
+    // made, or a link copied) kept "1h" growing for as long as it lived, so
+    // one beside a preset is ignored. `range` itself is the toggle group's
+    // bookkeeping and never reaches the API.
     expect(apiFilters({ provider: "groq", range: "1h", since_ms: "123" })).toEqual({
       provider: "groq",
+      window_ms: String(60 * 60 * 1000),
+    })
+  })
+
+  it("keeps an absolute since_ms that no preset produced", () => {
+    // A drilldown from Usage names its own UTC-day window.
+    expect(apiFilters({ model: "m", range: "30-utc-days", since_ms: "123" })).toEqual({
+      model: "m",
       since_ms: "123",
     })
   })
@@ -67,7 +76,33 @@ describe("api filters", () => {
   })
 })
 
+describe("the attempts cell", () => {
+  it("says what happened on one attempt or none, not only on a failover", () => {
+    expect(attemptsTitle({ attempts: 0, status: "error" })).toBe("no attempt was made")
+    expect(attemptsTitle({ attempts: 1, status: "error" })).toBe("failed on its only attempt")
+    expect(attemptsTitle({ attempts: 1, status: "success" })).toBe("served on the first attempt")
+    expect(attemptsTitle({ attempts: 3, status: "success" })).toBe(
+      "3 attempts — this request failed over",
+    )
+  })
+})
+
+describe("the CSV export", () => {
+  it("writes the time as ISO-8601 rather than epoch milliseconds", () => {
+    const [out] = csvRows([{ ...row({ id: "1", ts_ms: Date.UTC(2026, 9, 6, 4, 15) }), failover: "single" }])
+    expect(out?.ts_ms).toBe("2026-10-06T04:15:00.000Z")
+  })
+})
+
 describe("the column-visibility menu", () => {
+  it("names the columns whose header is a component", () => {
+    // The menu falls back to the column id when the header is not a string,
+    // and the accessor keys read as "Ts_ms" and "Total_ms" there.
+    const ids = buildColumns(() => {}).map((c) => c.id)
+    expect(ids).toContain("time")
+    expect(ids).toContain("latency")
+  })
+
   it("offers no column it cannot name", () => {
     // The menu labels each entry with its header when that header is a string,
     // so a hideable column with an empty one renders as a nameless checkbox.

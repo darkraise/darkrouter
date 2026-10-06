@@ -12,7 +12,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "darkraise-ui"
-import { useUsage } from "../../lib/queries"
+import { useRequests, useUsage } from "../../lib/queries"
 import { useSearchFilters } from "../../lib/search-filters"
 import { count, money } from "../../lib/format"
 import { utcDayStartMs, utcDays } from "../../lib/time"
@@ -174,7 +174,11 @@ export function requestsSearch(
   days: number,
 ): Record<string, string> {
   return {
-    [dimension]: key,
+    // A provider's usage counts every attempt made on it, failed ones
+    // included, so its requests are the ones that tried it rather than only
+    // the ones it served: a provider that only ever failed drilled down to
+    // "No results". The model filter already matches any attempt's model.
+    [dimension === "provider" ? "attempted_provider" : dimension]: key,
     since_ms: String(utcDayStartMs(firstDay)),
     range: `${days}-utc-days`,
   }
@@ -294,6 +298,14 @@ export function UsageScreen() {
   const usage = useUsage({ dimension: dimension === "day" ? undefined : dimension, days })
   const usageRows = usage.data?.days ?? []
   const firstDay = usage.data?.first_day ?? ""
+  // Asked only when the window is empty, to tell "nothing has run" apart from
+  // "requests ran but none reached a provider", which usage cannot count.
+  const empty = usage.isSuccess && usageRows.length === 0
+  const logged = useRequests(
+    { limit: "1", since_ms: firstDay ? String(utcDayStartMs(firstDay)) : "" },
+    { enabled: empty && firstDay !== "" },
+  )
+  const loggedAny = (logged.data?.requests.length ?? 0) > 0
   const windowDays = utcDays(firstDay, usage.data?.last_day ?? "")
   const rows = summarise(usageRows, dimension)
   const series = chartSeries(usageRows, dimension)
@@ -316,6 +328,7 @@ export function UsageScreen() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <ToggleGroup
           type="single"
+          aria-label="Group by"
           value={dimension}
           onValueChange={(v) => v && setFilter("dimension", v === "day" ? "" : v)}
           variant="outline"
@@ -330,6 +343,7 @@ export function UsageScreen() {
 
         <ToggleGroup
           type="single"
+          aria-label="Range"
           value={range.value}
           onValueChange={(v) => v && setFilter("days", v === "30" ? "" : v)}
           variant="outline"
@@ -355,10 +369,25 @@ export function UsageScreen() {
       {usage.isPending ? (
         <ChartSkeleton />
       ) : usageRows.length === 0 ? (
-        !usage.isError && (
+        !usage.isError &&
+        (loggedAny ? (
+          // Requests are arriving; none of them reached a provider. Onboarding
+          // here told an operator with a connected client to go and connect
+          // one.
           <EmptyState
-            title="Usage rolls up once a day, once requests start arriving"
-            hint="Every served request lands in the day's totals. Spend needs a priced model — a model nobody has priced shows an em dash rather than a zero."
+            title="No request in this window reached a provider"
+            hint="Usage counts attempts on a provider. The log holds requests from this window that none was tried for — an unknown model, or every candidate skipped — and Requests says why for each."
+            action={
+              <Button asChild size="sm">
+                <Link to="/requests">Open Requests</Link>
+              </Button>
+            }
+            preview={<GhostChart />}
+          />
+        ) : (
+          <EmptyState
+            title="Usage appears here as requests are served"
+            hint="Every request a provider serves lands in its UTC day's totals as it finishes. Spend needs a priced model — a model nobody has priced shows an em dash rather than a zero."
             action={
               <Button asChild size="sm">
                 <Link to="/connect">Get a client connected</Link>
@@ -366,7 +395,7 @@ export function UsageScreen() {
             }
             preview={<GhostChart />}
           />
-        )
+        ))
       ) : (
         <>
           <Card className="mb-6 p-4">
@@ -391,13 +420,22 @@ export function UsageScreen() {
 
           <Card className="mb-6 p-4">
             <h2 className="mb-2 text-sm font-medium">Cost</h2>
-            <CostLineChart
-              data={stackByDay(series.rows, series.keys, (r) => r.cost_micros, windowDays)}
-              keys={series.keys}
-              labels={series.keys.map(keyLabel)}
-              formatValue={costTick}
-              legend={legend}
-            />
+            {usage.data?.priced ? (
+              <CostLineChart
+                data={stackByDay(series.rows, series.keys, (r) => r.cost_micros, windowDays)}
+                keys={series.keys}
+                labels={series.keys.map(keyLabel)}
+                formatValue={costTick}
+                legend={legend}
+              />
+            ) : (
+              // Not a chart of zeros. With no priced row the cost is unknown,
+              // as every "—" in the table below says, and a flat $0 line that
+              // stopped short of the one day with traffic said "free".
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                No priced model served traffic in this window, so its cost is unknown.
+              </p>
+            )}
           </Card>
 
           <Card className="mb-6 p-4">
@@ -409,7 +447,10 @@ export function UsageScreen() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{COLUMN_HEADING[dimension]}</TableHead>
+                  {/* The key stays on one line and the table scrolls inside
+                      its wrapper. The only wrappable column, it was the one
+                      the browser shrank, a hyphenated id one glyph per line. */}
+                  <TableHead className="whitespace-nowrap">{COLUMN_HEADING[dimension]}</TableHead>
                   <TableHead>Requests</TableHead>
                   <TableHead>Attempts</TableHead>
                   <TableHead>Tokens in</TableHead>
@@ -420,7 +461,7 @@ export function UsageScreen() {
               <TableBody>
                 {rows.map((r) => (
                   <TableRow key={r.key}>
-                    <TableCell className="font-mono text-sm">
+                    <TableCell className="font-mono text-sm whitespace-nowrap">
                       {/* Requests reads an empty filter as no filter, so the
                           no-alias bucket has nothing to link to. */}
                       {clickable && r.key !== "" ? (
