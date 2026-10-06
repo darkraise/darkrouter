@@ -16,7 +16,7 @@ import (
 func TestTokenStoreReportsARowThatMovedOnAsChanged(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(ctx, db, "master")
+	key, err := store.OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

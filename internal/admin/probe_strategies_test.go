@@ -98,7 +98,7 @@ func strategyServer(t *testing.T, presets catalog.Presets, client *http.Client) 
 
 	t.Helper()
 	db := storetest.Migrated(t)
-	key, err := store.OpenKeyring(context.Background(), db, "master")
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

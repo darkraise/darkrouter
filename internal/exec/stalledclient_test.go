@@ -101,8 +101,12 @@ func TestAClientThatStopsReadingIsNotAProviderFailure(t *testing.T) {
 	} {
 		for _, writeDeadline := range []time.Duration{idle, 3 * idle} {
 			t.Run(fmt.Sprintf("%s/write deadline %s", tc.name, writeDeadline), func(t *testing.T) {
+				// Each case spends most of its time waiting out a deadline, so
+				// they run together. A case that tunes a package global cannot.
 				if tc.tune != nil {
 					tc.tune(t)
+				} else {
+					t.Parallel()
 				}
 				up := httptest.NewServer(&scripted{by: map[string]http.HandlerFunc{"g1": tc.upstream}})
 				defer up.Close()

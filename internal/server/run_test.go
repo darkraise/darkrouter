@@ -23,6 +23,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 // freePort returns a port that was listenable a moment ago. Racy in principle,
@@ -225,16 +226,9 @@ func seedProviders(t *testing.T, ctx context.Context, db *store.DB, key *crypto.
 // package exercises the real persistence wiring.
 func serverBackedBy(t *testing.T, cfgStore *config.Store, ps ...provider.Provider) *Server {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := storetest.Migrated(t)
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.OpenKeyring(ctx, db, "test-master")
+	key, err := store.OpenKeyringForTest(ctx, db, "test-master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,19 +255,10 @@ func testServerWithConfig(t *testing.T, c *config.Config) *Server {
 }
 
 func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
-	dir := t.TempDir()
 	cfgStore := testConfigStore(t)
-
-	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := storetest.Migrated(t)
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.OpenKeyring(ctx, db, "master")
+	key, err := store.OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,18 +294,10 @@ func TestHealthzReportsDroppedRecordsAndWarnings(t *testing.T) {
 }
 
 func TestMetricsReportsCounters(t *testing.T) {
-	dir := t.TempDir()
 	cfgStore := testConfigStore(t)
-	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := storetest.Migrated(t)
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, _ := store.OpenKeyring(ctx, db, "master")
+	key, _ := store.OpenKeyringForTest(ctx, db, "master")
 	s, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -391,18 +368,10 @@ func TestCooldownSurvivesAGracefulRestart(t *testing.T) {
 }
 
 func TestRequestRowRecordsTheCandidateChain(t *testing.T) {
-	dir := t.TempDir()
 	cfgStore := testConfigStore(t)
-	db, err := store.Open(filepath.Join(dir, "darkrouter.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	db := storetest.Migrated(t)
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, _ := store.OpenKeyring(ctx, db, "master")
+	key, _ := store.OpenKeyringForTest(ctx, db, "master")
 	s, err := New(cfgStore, db, key, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -439,16 +408,9 @@ func offlineCatalog(c *config.Config) {
 func serverFixtureWith(t *testing.T, tune func(*config.Config), ps ...provider.Provider) (*store.DB, *crypto.Key, *config.Store) {
 	t.Helper()
 	cfgStore := config.NewStoreOf(testConfigOf(t, tune))
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := storetest.Migrated(t)
 	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.OpenKeyring(ctx, db, "test-master")
+	key, err := store.OpenKeyringForTest(ctx, db, "test-master")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func seededProvider(t *testing.T, db *DB, id string) {
 func TestCredentialRoundTrip(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestCredentialRoundTrip(t *testing.T) {
 func TestCredentialIsNotReadableInTheDatabaseFile(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCredentialIsNotReadableInTheDatabaseFile(t *testing.T) {
 func TestSwappedCiphertextFailsToDecrypt(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestSwappedCiphertextFailsToDecrypt(t *testing.T) {
 func TestCredentialsFailsUnderTheWrongKey(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestCredentialsFailsUnderTheWrongKey(t *testing.T) {
 func TestCredentialsAreOrderedAndScopedToTheProvider(t *testing.T) {
 	db := migrated(t)
 	ctx := context.Background()
-	key, err := OpenKeyring(ctx, db, "master")
+	key, err := OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

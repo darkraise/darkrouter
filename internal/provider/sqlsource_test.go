@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -11,20 +10,13 @@ import (
 
 	"github.com/darkraise/darkrouter/internal/crypto"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 func newTestDB(t *testing.T) (*store.DB, *crypto.Key) {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	key, err := store.OpenKeyring(ctx, db, "master")
+	db := storetest.Migrated(t)
+	key, err := store.OpenKeyringForTest(context.Background(), db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}

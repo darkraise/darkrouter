@@ -47,7 +47,7 @@ func credentialDB(t *testing.T, path, master string) string {
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	key, err := store.OpenKeyring(ctx, db, master)
+	key, err := store.OpenKeyringForTest(ctx, db, master)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRotateKeyRefusesWhileTheGatewayHoldsTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := store.OpenKeyring(ctx, db, "old-master"); err != nil {
+	if _, err := store.OpenKeyringForTest(ctx, db, "old-master"); err != nil {
 		t.Errorf("the refused rotation changed the key anyway: %v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestRotateKeyRotatesAStoppedDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	key, err := store.OpenKeyring(ctx, db, "new-master")
+	key, err := store.OpenKeyringForTest(ctx, db, "new-master")
 	if err != nil {
 		t.Fatalf("the new key does not open the rotated database: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestRotateKeyRefusesWhenTheDatabaseCannotBeLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := store.OpenKeyring(ctx, db, "old-master"); err != nil {
+	if _, err := store.OpenKeyringForTest(ctx, db, "old-master"); err != nil {
 		t.Errorf("the refused rotation changed the key anyway: %v", err)
 	}
 }
@@ -178,7 +178,7 @@ func TestRotateKeyRunsUnlockedOnceTheGatewayIsConfirmedStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := store.OpenKeyring(ctx, db, "new-master"); err != nil {
+	if _, err := store.OpenKeyringForTest(ctx, db, "new-master"); err != nil {
 		t.Errorf("the new key does not open the rotated database: %v", err)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +19,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/ir"
 	"github.com/darkraise/darkrouter/internal/provider/providertest"
 	"github.com/darkraise/darkrouter/internal/store"
+	"github.com/darkraise/darkrouter/internal/store/storetest"
 )
 
 func newTestServer(t *testing.T, tune func(*config.Config)) *Server {
@@ -660,21 +660,14 @@ func TestReadyzStaysUpThroughUnusableStoredSettings(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			db, err := store.Open(filepath.Join(t.TempDir(), "darkrouter.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			if err := db.Migrate(ctx); err != nil {
-				t.Fatal(err)
-			}
+			db := storetest.Migrated(t)
 			for k, v := range tc.rows {
 				if _, err := db.Write.ExecContext(ctx,
 					`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`, k, v); err != nil {
 					t.Fatal(err)
 				}
 			}
-			key, err := store.OpenKeyring(ctx, db, "master")
+			key, err := store.OpenKeyringForTest(ctx, db, "master")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -188,7 +188,7 @@ func TestTheCookieValueIsNotStored(t *testing.T) {
 func TestOverviewCountsCredentialsWithoutAKeyring(t *testing.T) {
 	db := storetest.Migrated(t)
 	ctx := context.Background()
-	key, err := store.OpenKeyring(ctx, db, "master")
+	key, err := store.OpenKeyringForTest(ctx, db, "master")
 	if err != nil {
 		t.Fatal(err)
 	}
