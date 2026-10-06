@@ -8,7 +8,7 @@ import {
   traceWhenWritten,
   type StreamMetrics,
 } from "../metrics"
-import { routeFromTrace, type TurnRoute } from "../message"
+import { attemptFailure, routeFromTrace, type TurnRoute } from "../message"
 import type { PlaygroundConfig } from "../config"
 import type { PlaygroundMessage, RequestTrace } from "../../../lib/api-types"
 
@@ -111,6 +111,9 @@ export function useChatRun(
   // stop() deliberately does not bump: a stopped run keeps its half answer
   // on screen. Either way the run still reports its turn.
   const generation = useRef(0)
+  // Counts sends, so a late finding about one run's failure is not written
+  // under the error of the run after it.
+  const runs = useRef(0)
 
   const history = messages.filter(
     (m, i) => !dropped.has(i) && !(m.role === "user" && dropped.has(i + 1)),
@@ -142,6 +145,7 @@ export function useChatRun(
     // The assistant turn this run will fill in, and the index its route lands
     // under when the trace arrives.
     const answerAt = turns.length
+    const myRun = ++runs.current
     setMessages([...turns, { role: "assistant", content: "" }])
     setError("")
     setBusy(true)
@@ -274,6 +278,24 @@ export function useChatRun(
         abort.current = null
         setBusy(false)
       }
+    }
+    // A failed or stopped turn has a trace as well -- the gateway recorded
+    // every attempt it made -- and it is the turn an operator most wants to
+    // open. Fetched apart from the run's own signal, which a stop has
+    // already aborted; superseded() still keeps the result out of a
+    // transcript that has replaced this one. On a failure the trace also
+    // says what the bare message cannot: a 429 and a 500 both arrive as
+    // "upstream request failed".
+    if ((failed || aborted) && liveRequestId !== "") {
+      const failedRun = failed
+      void traceWhenWritten(liveRequestId).then((trace) => {
+        if (!trace || superseded()) return
+        setRoutes((prev) => ({ ...prev, [answerAt]: routeFromTrace(trace) }))
+        const why = failedRun ? attemptFailure(trace) : undefined
+        if (why && runs.current === myRun) {
+          setError((prev) => (prev === "" || prev.includes(why) ? prev : `${prev} (${why})`))
+        }
+      })
     }
     // After the finally, so a stopped run still reports: the turns already
     // written stay, and a half answer is what the tokens were spent on.
