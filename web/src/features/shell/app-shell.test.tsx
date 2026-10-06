@@ -190,6 +190,23 @@ describe("the account menu from the keyboard", () => {
     expect(item).toHaveFocus()
     await user.keyboard("{Enter}")
     expect(props[handler]).toHaveBeenCalled()
+    // And closes, as a click does. The library closes only for the pointer,
+    // so after Settings the menu stayed open over the page it had opened.
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
+  })
+
+  it("closes on Space too", async () => {
+    const props = shell()
+    const user = userEvent.setup()
+    ;(await screen.findByRole("button", { name: "Account menu" })).focus()
+    await user.keyboard("{Enter}")
+    const item = await screen.findByRole("menuitem", { name: "Change password" })
+    for (let i = 0; i < 5 && document.activeElement !== item; i++) {
+      await user.keyboard("{ArrowDown}")
+    }
+    await user.keyboard(" ")
+    expect(props.onChangePassword).toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument())
   })
 })
 
@@ -254,6 +271,24 @@ describe("the mobile drawer", () => {
     await user.click(other)
     await waitFor(() => expect(other).toHaveAttribute("aria-pressed", "true"))
     expect(panel.querySelectorAll('.dr-theme-switcher-swatch[aria-pressed="true"]')).toHaveLength(2)
+  })
+
+  it("brings the theme panel into view when it opens", async () => {
+    // On a phone the row sits low in the drawer and the panel opened below
+    // the fold, so the only visible change was the chevron.
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    try {
+      await routed()
+      const { user, drawer } = await openDrawer()
+      await user.click(within(drawer).getByRole("button", { name: /customize theme/i }))
+      const panel = within(drawer).getByRole("group", { name: "Theme settings" })
+      await waitFor(() => expect(scroll).toHaveBeenCalled())
+      expect(scroll.mock.contexts[0]).toBe(panel)
+      expect(scroll.mock.calls[0]?.[0]).toMatchObject({ block: "nearest" })
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
   })
 })
 
