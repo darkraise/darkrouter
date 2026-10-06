@@ -358,6 +358,78 @@ func TestSigV4ProbeRefusesWithoutARegion(t *testing.T) {
 	}
 }
 
+func TestAMalformedSignedCredentialIsRefusedAtTheDoor(t *testing.T) {
+	// A secret that cannot parse can never sign a request. Stored, it sat
+	// enabled in rotation and the provider read healthy, "1/1 all available".
+	_, srv := newFakeAWS(t)
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"bed","kind":"bedrock","base_url":"`+srv.URL+`","auth_style":"sigv4","region":"us-east-1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"vx","preset":"vertex","project":"proj","location":"us-central1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+
+	for _, id := range []string{"bed", "vx"} {
+		w := do(t, s, cookie, token, "POST", "/api/providers/"+id+"/keys",
+			`{"label":"bad","secret":"not-json-SECRETCANARY"}`)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400: %s", id, w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "SECRETCANARY") || strings.Contains(w.Body.String(), "'o'") {
+			t.Errorf("%s: the refusal quotes the secret: %s", id, w.Body.String())
+		}
+	}
+	w := do(t, s, cookie, token, "GET", "/api/providers", "")
+	if strings.Contains(w.Body.String(), `"label":"bad"`) {
+		t.Errorf("a refused credential was stored: %s", w.Body.String())
+	}
+}
+
+func TestSigV4ProbeMarksAnUnparseableKeyRejected(t *testing.T) {
+	// One stored before the door was shut. Reported as an outage, the add
+	// dialog kept it "unverified"; it is the key that is wrong.
+	_, srv := newFakeAWS(t)
+	s, cookie, token, db := strategyServer(t, nil, srv.Client())
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"bed","kind":"bedrock","base_url":"`+srv.URL+`","auth_style":"sigv4","region":"us-east-1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := db.AddCredential(context.Background(), s.deps.Key, store.Credential{
+		ProviderID: "bed", Label: "old", Secret: "not-json", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := probeProvider(t, s, cookie, token, "bed")
+	if got.OK || !got.Rejected {
+		t.Fatalf("ok = %v, rejected = %v; want a rejected credential", got.OK, got.Rejected)
+	}
+}
+
+func TestTheProviderViewCarriesItsEndpointCoordinates(t *testing.T) {
+	// The settings dialog prefilled Region with nothing and said "unset" on a
+	// row that held us-east-1.
+	_, srv := newFakeAWS(t)
+	s, cookie, token, _ := strategyServer(t, nil, srv.Client())
+	bedrockProvider(t, s, cookie, token, srv.URL)
+
+	w := do(t, s, cookie, token, "GET", "/api/providers", "")
+	var list struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Region string `json:"region"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Providers) != 1 || list.Providers[0].Region != "us-east-1" {
+		t.Fatalf("providers = %+v, want bed in us-east-1", list.Providers)
+	}
+}
+
 // vertexProbeServer builds a server whose every outbound request, the token
 // exchange and the generation alike, lands on one fake answering the
 // generation with status.

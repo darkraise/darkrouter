@@ -371,6 +371,14 @@ func (s *Server) probeSigV4(ctx context.Context, row store.ProviderRow,
 	if s.deps.Auth == nil {
 		return "signature", 0, errors.New("the sigv4 strategy is not wired")
 	}
+	// A secret that does not parse is refused before any network call, and it
+	// is the credential that is wrong, not the provider: reported as an outage
+	// it was kept "unverified" and stayed enabled in rotation.
+	if cred.Secret != "" {
+		if err := credentialShapeError(auth.StyleSigV4, cred.Secret); err != nil {
+			return "signature", 0, rejectedCredential{err}
+		}
+	}
 	az, err := s.deps.Auth.For(ctx, authTargetFor(row, auth.StyleSigV4),
 		auth.Credential{ID: cred.ID, Kind: cred.Kind, Secret: cred.Secret})
 	if err != nil {
@@ -445,6 +453,11 @@ func (s *Server) probeGCP(ctx context.Context, row store.ProviderRow,
 
 	if s.deps.Auth == nil {
 		return "expiry", 0, errors.New("the gcp-sa strategy is not wired")
+	}
+	// The same refusal as the sigv4 probe's: a key file that does not parse is
+	// the credential's fault, whatever else is wrong with the provider.
+	if err := credentialShapeError(auth.StyleGCPSA, cred.Secret); err != nil {
+		return "expiry", 0, rejectedCredential{err}
 	}
 	az, err := s.deps.Auth.For(ctx, authTargetFor(row, auth.StyleGCPSA),
 		auth.Credential{ID: cred.ID, Kind: cred.Kind, Secret: cred.Secret})

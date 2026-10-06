@@ -57,6 +57,16 @@ async function fetchOverride(provider: string, model: string): Promise<LoadedOve
 
 const CAPABILITIES = ["tools", "vision", "reasoning"] as const
 
+/** One override as a comparable string: absent and empty read the same, and
+ *  capabilities compare as the three bools the backend stores. */
+function overrideKey(o: Partial<ModelOverride>): string {
+  return JSON.stringify([
+    o.context_window ?? null,
+    o.capabilities ? CAPABILITIES.map((k) => o.capabilities?.[k] ?? false) : null,
+    o.surfaces && o.surfaces.length > 0 ? o.surfaces : null,
+  ])
+}
+
 /**
  * `model_overrides` sits at the top of the merge precedence for capabilities,
  * context window and surfaces, and until now nothing in the product could
@@ -72,6 +82,7 @@ export function OverrideEditor({
   providers,
   model,
   onClose,
+  catalog,
 }: {
   /** Every provider the row serves through, first one first: an override is
    *  per (provider, model), so the editor opens on the first and offers the
@@ -79,6 +90,10 @@ export function OverrideEditor({
   providers: string[]
   model: string
   onClose: () => void
+  /** What the catalogue says now, shown as the blank fields' placeholders so
+   *  the operator can see what an override would replace. Blank boxes beside
+   *  switches that showed the catalogue's values read as "nothing known". */
+  catalog?: { surfaces: string[]; contextWindow: number }
 }) {
   const [provider, setProvider] = useState(providers[0] ?? "")
   const query = useQuery({
@@ -156,12 +171,23 @@ export function OverrideEditor({
       for (const key of CAPABILITIES) capabilities[key] = capability(key)
       patch.capabilities = capabilities
     }
-    patch.surfaces = surfacesValue
+    // Only a list with something in it. An empty one wrote a row of nothing
+    // ("Override saved" for a Save pressed on an untouched editor) that the
+    // editor then could not see or remove; omitted, the replace writes the
+    // column NULL, which is what a cleared box means anyway.
+    const surfaces = surfacesValue
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
+    if (surfaces.length > 0) patch.surfaces = surfaces
     return patch
   }
+
+  const patch = buildPatch()
+  // Save acts only on a change. A patch identical to the stored override is a
+  // write of what is already there, and an empty patch with no override is a
+  // write of nothing.
+  const changed = overrideKey(patch) !== overrideKey(existing ?? {})
 
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
@@ -218,6 +244,9 @@ export function OverrideEditor({
               precision={0}
               value={contextWindowValue}
               onChange={setDraftContextWindow}
+              placeholder={
+                catalog?.contextWindow ? `${catalog.contextWindow} from the catalogue` : undefined
+              }
             />
           </div>
 
@@ -240,7 +269,11 @@ export function OverrideEditor({
             <Label htmlFor="override-surfaces">Surfaces</Label>
             <Input
               id="override-surfaces"
-              placeholder="llm, embedding, image"
+              placeholder={
+                catalog && catalog.surfaces.length > 0
+                  ? `${catalog.surfaces.join(", ")} from the catalogue`
+                  : "llm, embedding, image"
+              }
               value={surfacesValue}
               onChange={(e) => setDraftSurfaces(e.target.value)}
             />
@@ -262,9 +295,9 @@ export function OverrideEditor({
           {/* Outline while it cannot act: a disabled filled Save is still
               the loudest thing in the sheet. */}
           <Button
-            variant={canSave ? "default" : "outline"}
-            disabled={!canSave}
-            onClick={() => save.mutate(buildPatch())}
+            variant={canSave && changed ? "default" : "outline"}
+            disabled={!canSave || !changed}
+            onClick={() => save.mutate(patch)}
           >
             Save
           </Button>

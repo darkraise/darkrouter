@@ -124,9 +124,79 @@ func TestMergeFallsBackToInferred(t *testing.T) {
 }
 
 func TestMergeTakesSurfacesFromThePreset(t *testing.T) {
+	// The preset bounds what a model may serve; the id picks within it. "big"
+	// names no surface, so on an llm+embedding preset it is a chat model.
 	m := find(t, Merge(mergeInput()), "big")
-	if len(m.Surfaces) != 2 || m.Surfaces[0] != ir.SurfaceLLM || m.Surfaces[1] != ir.SurfaceEmbedding {
-		t.Errorf("surfaces = %v", m.Surfaces)
+	if len(m.Surfaces) != 1 || m.Surfaces[0] != ir.SurfaceLLM {
+		t.Errorf("surfaces = %v, want [llm]", m.Surfaces)
+	}
+}
+
+func TestADiscoveredModelDoesNotInheritEveryPresetSurface(t *testing.T) {
+	// LM Studio declares llm+embedding because it can serve both, not because
+	// every model it lists does. Copying the pair onto each row labelled every
+	// chat model "embedding" and offered it to embedding requests.
+	in := mergeInput()
+	in.Presets["acme"] = Preset{
+		Name: "LM Studio", Kind: "openaicompat",
+		Surfaces: []string{"llm", "embedding"},
+	}
+	in.Rows = nil
+	for _, id := range []string{"mock-fast", "qwen2.5-7b-instruct", "mock-embed",
+		"text-embedding-nomic-embed-text-v1.5", "BAAI/bge-small-en-v1.5", "multilingual-e5-large"} {
+		in.Rows = append(in.Rows, store.ModelRow{
+			ProviderID: "p", ModelID: id, State: "live", CapabilitiesSource: "inferred",
+			Surfaces: []string{"llm"},
+		})
+	}
+	ms := Merge(in)
+	for _, id := range []string{"mock-fast", "qwen2.5-7b-instruct"} {
+		m := find(t, ms, id)
+		if len(m.Surfaces) != 1 || m.Surfaces[0] != ir.SurfaceLLM {
+			t.Errorf("%s: surfaces = %v, want [llm]", id, m.Surfaces)
+		}
+	}
+	for _, id := range []string{"mock-embed", "text-embedding-nomic-embed-text-v1.5",
+		"BAAI/bge-small-en-v1.5", "multilingual-e5-large"} {
+		m := find(t, ms, id)
+		if len(m.Surfaces) != 1 || m.Surfaces[0] != ir.SurfaceEmbedding {
+			t.Errorf("%s: surfaces = %v, want [embedding]", id, m.Surfaces)
+		}
+	}
+}
+
+func TestModelSurfacesOnlyPicksWhatThePresetDeclares(t *testing.T) {
+	groq := []ir.Surface{ir.SurfaceLLM, ir.SurfaceSTT, ir.SurfaceTTS}
+	cases := []struct {
+		id       string
+		declared []ir.Surface
+		want     []ir.Surface
+	}{
+		{"whisper-large-v3", groq, []ir.Surface{ir.SurfaceSTT}},
+		{"playai-tts", groq, []ir.Surface{ir.SurfaceTTS}},
+		{"llama-3.3-70b-versatile", groq, []ir.Surface{ir.SurfaceLLM}},
+		// An embedding-looking id on a preset that serves no embeddings is
+		// still whatever the preset serves.
+		{"some-embed-model", groq, []ir.Surface{ir.SurfaceLLM}},
+		// A single-surface preset needs no evidence.
+		{"voyage-3", []ir.Surface{ir.SurfaceEmbedding}, []ir.Surface{ir.SurfaceEmbedding}},
+		// No chat surface and no hint: the whole declared set is all there is.
+		{"x", []ir.Surface{ir.SurfaceEmbedding, ir.SurfaceRerank},
+			[]ir.Surface{ir.SurfaceEmbedding, ir.SurfaceRerank}},
+		{"rerank-v3.5", []ir.Surface{ir.SurfaceLLM, ir.SurfaceEmbedding, ir.SurfaceRerank},
+			[]ir.Surface{ir.SurfaceRerank}},
+	}
+	for _, c := range cases {
+		got := modelSurfaces(c.id, c.declared)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: surfaces = %v, want %v", c.id, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: surfaces = %v, want %v", c.id, got, c.want)
+			}
+		}
 	}
 }
 

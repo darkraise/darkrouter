@@ -381,6 +381,60 @@ describe("the grid view", () => {
     await grid()
     expect(cardFor(/Groq/).getByRole("button", { name: /^Test/ })).toBeInTheDocument()
   })
+
+  it("gives the grid a column it cannot overflow at phone width", async () => {
+    // With no template the implicit column was `auto` and grew to the card's
+    // max-content: 500px wide in a 375px viewport.
+    await grid()
+    const card = screen.getByRole("button", { name: /Groq/ }).parentElement as HTMLElement
+    expect(card.parentElement!.className).toMatch(/(^|\s)grid-cols-1(\s|$)/)
+    expect(card.className).toMatch(/min-w-0/)
+  })
+})
+
+describe("a configured provider that sends no key", () => {
+  const ollama: Provider = {
+    ...groq, id: "ollama", name: "Ollama", preset: "ollama",
+    base_url: "http://localhost:11434/v1", auth_style: "none", credentials: [],
+  }
+
+  it("is not offered a credential it would never send", async () => {
+    // "Add credentials — add another key to LM Studio", on a runtime with no
+    // key and a style that ignores one.
+    stub([groq, ollama])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Ollama" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    expect(within(row).queryByRole("button", { name: /add credentials/i })).toBeNull()
+    expect(within(row).getByRole("button", { name: "Probe" })).toHaveAttribute(
+      "title",
+      "Probe — check the provider answers",
+    )
+  })
+
+  it("is not offered one on its card either", async () => {
+    stub([groq, ollama])
+    await renderScreen()
+    await userEvent.click(await screen.findByLabelText(/grid view/i))
+    const card = within(
+      (await screen.findByRole("button", { name: /Ollama/ })).parentElement as HTMLElement,
+    )
+    expect(card.queryByRole("button", { name: /add credentials/i })).toBeNull()
+  })
+})
+
+describe("the connection chips", () => {
+  it("count All over the rows the other filters leave, like their siblings", async () => {
+    // "All 209" beside "6 of 209" and siblings adding up to six.
+    stub([groq])
+    await renderScreen()
+    await screen.findByRole("link", { name: "Groq" })
+    await userEvent.click(screen.getByLabelText("Configured only"))
+
+    const all = await screen.findByRole("radio", { name: /^All/ })
+    await waitFor(() => expect(all).toHaveTextContent(/^All\s*1$/))
+  })
 })
 
 describe("the list layout", () => {

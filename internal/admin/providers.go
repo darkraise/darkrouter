@@ -20,6 +20,7 @@ import (
 	"github.com/darkraise/darkrouter/internal/localcli"
 	"github.com/darkraise/darkrouter/internal/provider"
 	"github.com/darkraise/darkrouter/internal/store"
+	"golang.org/x/oauth2/google"
 )
 
 // providerIDPattern bounds a provider id to what a URL path segment, a log
@@ -172,6 +173,12 @@ type providerView struct {
 	// AllowUnsanctionedFree lets this provider's `avoid`-graded free models be
 	// imported and routed to. The console explains the risk beside the control.
 	AllowUnsanctionedFree bool `json:"allow_unsanctioned_free"`
+	// The endpoint coordinates a signed provider is reached through. None is
+	// secret, and without them the settings dialog had nothing to prefill:
+	// Bedrock's region read "unset" on a row that held us-east-1.
+	Region   string `json:"region,omitempty"`
+	Project  string `json:"project,omitempty"`
+	Location string `json:"location,omitempty"`
 }
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +208,7 @@ func (s *Server) providerView(ctx context.Context, p store.ProviderRow) (provide
 		BaseURL: p.BaseURL, Priority: p.Priority, Enabled: p.Enabled,
 		AuthStyle: p.AuthStyle, Credentials: []credentialView{},
 		FreeModelsOnly: p.FreeModelsOnly, AllowUnsanctionedFree: p.AllowUnsanctionedFree,
+		Region: p.Region, Project: p.Project, Location: p.Location,
 	}
 	if s.deps.Key == nil {
 		return v, nil
@@ -561,6 +569,13 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Refused here for the same reason: a signed credential that does not
+	// parse can never sign a request, and stored it sat enabled in rotation
+	// with the provider reading healthy.
+	if err := credentialShapeError(row.AuthStyle, body.Secret); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Counted before the write, so "was there anything here" is answerable
 	// afterwards. A provider with no credential cannot be swept at all: the
 	// discoverer needs one of the provider's own keys to ask what it serves,
@@ -588,6 +603,29 @@ func (s *Server) handleAddCredential(w http.ResponseWriter, r *http.Request) {
 	// Echoing it back would put it in a response body, a proxy log and a
 	// browser's network panel for no reason.
 	writeJSON(w, http.StatusCreated, createdReply(map[string]any{"id": id, "label": body.Label}, reloadErr))
+}
+
+// credentialShapeError reports a secret that cannot be a credential of this
+// style at all, whatever the provider would say about it. Only the signed
+// styles have a shape to check: a static key is an opaque string, and whether
+// it is accepted is the probe's question.
+//
+// The parsers' own errors are not passed on: a JSON syntax error quotes the
+// character it stopped at, which is a character of the secret.
+func credentialShapeError(style, secret string) error {
+	switch style {
+	case auth.StyleSigV4:
+		if _, err := auth.ParseAWSCredentials([]byte(secret)); err != nil {
+			return errors.New("not an AWS credential: expected a JSON document with " +
+				"access_key_id and secret_access_key")
+		}
+	case auth.StyleGCPSA:
+		if _, err := google.JWTConfigFromJSON([]byte(secret)); err != nil {
+			return errors.New("not a service-account key: expected the JSON key file " +
+				"Google issues for a service account")
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
