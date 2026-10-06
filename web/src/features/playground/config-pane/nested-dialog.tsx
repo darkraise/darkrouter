@@ -16,8 +16,10 @@ export const NestedDialogContext = createContext<(open: boolean) => void>(() => 
  * it -- a model suggestion list or a Select's options.
  *
  * Those popups portal to the body too, so the dialog's layer hears the same
- * Escape and closes, taking every value typed into it along. A dialog passes
- * this to its content's onEscapeKeyDown and stands down when it is true.
+ * Escape and closes, taking every value typed into it along. A dialog asks
+ * this from its content's onEscapeKeyDown and ignores the close that follows
+ * when it is true -- without cancelling the event, which the popup's own
+ * layer still needs to close itself.
  * Read off the focused element rather than reported by each control, so it
  * holds for any combobox or select the pane gains later: an open Select keeps
  * focus inside its listbox, and an open combobox keeps it on an input marked
