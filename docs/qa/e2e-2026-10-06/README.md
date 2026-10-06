@@ -1,11 +1,12 @@
 # Console E2E test report — 2026-10-06
 
-Every page, component and interactive behaviour of the darkrouter admin console was exercised in a real browser (Playwright/Chromium) against a locally running build of commit `e173520`. Each finding below was reproduced at least twice and carries screenshot evidence, a root cause traced to source, and a proposed fix. **No product code was changed** — this is a report.
+Every page, component and interactive behaviour of the darkrouter admin console was exercised in a real browser (Playwright/Chromium) against a locally running build of commit `e173520`. Each finding below was reproduced at least twice and carries screenshot evidence, a root cause traced to source, and a proposed fix. The findings were written before any product code changed; see **Fix status** below for how each was fixed and verified.
 
 ## Setup
 
 - **Build under test:** `npm run build` (console embedded) + `go build ./cmd/darkrouter`, run directly with a fresh database, proxy on `:8090`, admin on `:8091`. The console was claimed through its own claim screen.
 - **Upstreams:** the sandbox has no general internet, so two mock OpenAI-compatible servers ([`harness/mock-upstream.mjs`](harness/mock-upstream.mjs)) were added *through the UI* as the LM Studio (`:1234`, healthy, plus always-500 / always-429 / slow models) and vLLM (`:8000`, every second request 500) local runtimes.
+- **Instances:** [`harness/spawn-instance.sh`](harness/spawn-instance.sh) `<checkout> <proxy-port> <admin-port>` builds a checkout, starts it on a fresh database, claims it as `$QA_USER`/`$QA_PASS` and adds both mock runtimes. Each verifier ran its own instance this way.
 - **Traffic:** [`harness/traffic.sh`](harness/traffic.sh) — plain and streamed chat, slow, 500, 429, unknown model, embeddings, and the Anthropic `/v1/messages` dialect — plus alias traffic for failover.
 - **Viewports:** 1440×900, 768×1024, 375×812; light and dark.
 - **Out of scope / environment noise:** failures caused purely by the sandbox having no internet (models.dev sync, the four auto-added keyless providers being unreachable) are not reported as bugs — only how the UI *presents* them.
@@ -24,6 +25,145 @@ Every page, component and interactive behaviour of the darkrouter admin console 
 | **Total** | **0** | **10** | **37** | **49** | **8** | **104** |
 
 Duplicates are kept in their own area (each was found independently) and cross-linked; counting each root cause once, the total is about 101.
+
+## Fix status
+
+**All 104 findings are fixed on this branch** and were checked again in a browser against the integrated build. Three verifiers each started a fresh instance, re-ran every finding's original steps at the viewport and theme it was reported at, and then swept every screen for regressions at 1440, 768 and 375, light and dark. The first re-test came back with 103 fixed, 1 partial and none regressed. The partial one and the follow-ups below are now fixed too. The final build passes `go vet ./...` and `go test ./...`, plus typecheck, lint and the full Vitest suite (113 files, 1447 tests). A final smoke pass of 13 routes × 3 viewports × 2 themes found no console errors, no failed API calls and no page-level sideways scroll.
+
+### Behaviour changes worth knowing
+
+- **Gateway failover (ROUTING-02).** After a non-429 provider error, the executor now skips only the rest of that *target's* credentials. A different model on the same provider is still tried, as the alias promises. Skipped candidates are recorded in the trace as `target_failed`.
+- **Model surfaces (PROVIDERS-01).** A discovered model on a multi-surface preset now gets the surface its id names (`embed`, `rerank`, `whisper`, …), or `llm` when nothing does. It no longer inherits every surface of the preset. An embedding model with an unusual name now needs an override.
+- **Usage is read live (PROVIDERS-04, OPERATE-04/08).** Days the hourly rollup has not closed are aggregated from the request log on read, so Overview and Usage show traffic with no lag. The query runs on every Overview poll; watch it on a very busy gateway.
+- **Client tokens (PLAYGROUND-02).** The server still latches proxy authentication on once a token has been issued. The console now asks before the first token and says truthfully what state the gateway is in.
+- **Passwords (COORD-02).** The 12-character minimum is counted in characters on the server and the client; the 72-byte bcrypt ceiling stays.
+- **`server.public_url` (SETTINGS-07).** A non-http(s) scheme or a trailing `/v1`/`/v1beta` is now refused. A database that already stores one reverts it at load, with a warning.
+- **Requests time pills (OPERATE-09).** 1h/24h/7d send a rolling `window_ms` that the server resolves on each read, instead of a frozen `since_ms`.
+- **Catalog sync (SETTINGS-03).** New `GET /api/catalog/sync` reports the outcome of the newest finished sync.
+
+### Found during verification, and fixed
+
+| Id | Problem | Fix |
+|---|---|---|
+| V-01 | PLAYGROUND-16 partly open: at 375 the conversation title was still 60px wide | The title wraps under the model pill with a 10rem floor |
+| V-02 | Overview "N failed over" left out same-provider failovers, which the ROUTING-02 fix made possible | Usage by provider carries `failed_over` (distinct requests), and the router reads it |
+| V-03 | Alias names in the Overview graph were cut off with no tooltip | They wrap to two lines and carry a `title` |
+| V-04 | The Models toolbar scrolled the page sideways at 768/375; the Providers list's last column sat under the pinned actions at 1440; Bedrock showed an empty Base URL | The toolbar wraps; the Free tier badge moved onto the name line so the table fits its card; the endpoint derived from the region is shown |
+| V-05 | The account menu stayed open after a keyboard pick (darkraise-ui 6.7.0 menu item) | The menu's open state is controlled (`useClosingMenu`) |
+| V-06 | Log out with unsaved edits ended the session before asking | `confirmDiscardingDrafts()` asks before the logout POST |
+| V-07 | The phone drawer's theme panel opened below the fold | It scrolls itself into view |
+| V-08 | A refused first key (e.g. malformed AWS) left an empty provider row behind | The row is removed again, and a retry creates it fresh |
+
+<details><summary>Per-finding verification (104 findings)</summary>
+
+| Finding | Verified | How it was checked |
+|---|---|---|
+| COORD-02 | FIXED | `POST /api/users` with `密码密码` (4 chars, 12 bytes) → 400 "at least 12 characters", and 6 emoji (24 bytes) → 400. 12 CJK or 12 emoji → 201 (deleted afterwards). Change password with `密码密码` → 400. The client also refuses 6 emoji (12 UTF-16 units). |
+| COORD-01 | FIXED | `#setup-username` maxlength=64. With maxlength removed, a 65-character name gets "a username can be at most 64 characters" under the field. |
+| COORD-03 | FIXED | With no traffic in 5 min, the error rate reads "—" and latency reads "p50 — p95 —", both with "no requests in the last 5 min". |
+| SHELL-01 | FIXED | A real ULID (`01M4835FB398J5F4WCFAF2E6R6`) shows "Request › Open trace …", and Enter opens `/requests/<id>`. A lower-cased id also opens its trace. |
+| SHELL-02 | FIXED | Enter/Space on Settings, Change password and Log out all act; the menu closing after a keyboard pick was a follow-up, fixed (V-05). |
+| SHELL-03 | FIXED | At 375, tapping Models closes the drawer (0 dialogs). Change password from the drawer leaves only its own dialog open. |
+| SHELL-06 | FIXED | The drawer at 375 has Search (opens the palette with focus in its input) and Customize theme (mode, accent and surface; Dark applies). One small wart is NEW-shell-settings-03. |
+| SHELL-07 | FIXED | With `{"providers":5}` the rail and header survive and only the panel shows "This screen could not render". The palette still opens, and "Try again" refetches and recovers without a reload. |
+| SHELL-04 | FIXED | The 404 header shows "Not found / There is no page at this address", actions are at x=1348, there is an `h1`, and the tab title is "Not found · Darkrouter". |
+| SHELL-08 | FIXED | The theme section labels and the palette group headings now compute to 14px. |
+| SHELL-09 | FIXED | The monogram now carries the `text-sm` class (14px) and has no inline font-size. List monograms are 14px. |
+| SHELL-11 | FIXED | After Enter on the rail's Requests, or a palette jump, focus is on `MAIN#main-content`. Opening or closing a trace does not steal focus (it returns to the row's Open button). |
+| SHELL-12 | FIXED | After the cookie is cleared and Requests is clicked: "Your session has ended. Sign in again to carry on where you were." (`role=status`), and the tab is "Sign in · Darkrouter". Re-login returns to /requests. |
+| SHELL-13 | FIXED | A 429 with Retry-After 42 shows "Too many sign-in attempts. Try again in 42 seconds." with no `aria-invalid`, and the button counts down "Try again in 39 s" while disabled. Without Retry-After it says "Wait a minute, then try again." |
+| SHELL-14 | FIXED | The selected accent and surface swatches carry `aria-pressed="true"` (a11y tree: `button "coral" [pressed]`, `button "sepia" [pressed]`), and the state follows a click. |
+| SHELL-05 | FIXED | Search, Customize theme, Change password and Log out all line up with Settings (icon x=37, label x=67, `text-align:start`). |
+| SHELL-10 | FIXED | Connect and Settings items are both x=8 w=239, and every group label is at x=8. |
+| SHELL-15 | FIXED | Same fix as PROVIDERS-20: a square glyph, visible in dark mode. |
+| OPERATE-01 | FIXED | `?model=mock-error` returns 8 rows: the failed mock-error rows plus the errfb alias row whose attempt was mock-error. `?model=lmstudio%2Fmock-fast` returns 6 rows. `no-such-model` returns 2. |
+| OPERATE-02 | FIXED | Picking lmstudio in "Filter by provider" writes `attempted_provider=lmstudio`. With Status = error this lists the 8 lmstudio 429/500 failures. |
+| OPERATE-03 | FIXED | After Load more (100 loaded), a latency sort and Surface hidden: keyboard Open→Escape, mouse Open→X and Open→browser Back all return to the same caption, header and first row. Focus returns to the row's Open button. |
+| OPERATE-25 | FIXED | Usage → Model links are `?model=mock-fast&since_ms=1788739200000&range=30-utc-days` (no quotes), with no error banner and 23 rows. Provider links use `attempted_provider=`. |
+| OPERATE-04 | FIXED | Volumes and arcs now cover the same 30 days. Router 61 = lmstudio 46 + vllm 15, which matches `/api/usage?group_by=provider`. The arc count 4 equals that response's `failover_edges`. No "no traffic" row carries an arc. (See NEW-operate-01 for the count's scope.) |
+| OPERATE-05 | FIXED | A mouse click on the vLLM row navigates to /providers/vllm at 1440, 768 and 375. The element under the pointer is `rf-provider-link` / `rf-name`, with pointer-events enabled. |
+| OPERATE-06 | FIXED | At 768 and 375 the canvas keeps its natural width (scale 0.99). Text renders at full size (name box 20.9px) and the wrapper scrolls sideways. Scrolled to the right, the dashed arc and its "4" label are fully visible. |
+| OPERATE-07 | FIXED | All six keyless providers read "no key needed". |
+| OPERATE-08 | FIXED | Usage is now live, so a log with traffic never shows empty usage. Forcing `/api/usage` to return no days (route interception) shows "No request in this window reached a provider" with an "Open Requests" link. The /connect CTA and the "once a day" copy are gone. |
+| OPERATE-09 | FIXED | The 1h pill writes `?range=1h` with no since_ms, and the API call is `window_ms=3600000`. A saved view stores `{"range":"1h"}`. A legacy saved view carrying a frozen `since_ms` 3h old still sends only `window_ms=3600000`. Load more sends `window_ms` plus the cursor (50 → 87 rows, no duplicates). On the server, `window_ms=60000` returns only rows from the last minute (0 at the time of the test). |
+| OPERATE-10 | FIXED | The no-such-model trace shows "Error not_found" and "No attempt was made — nothing routes this model." |
+| OPERATE-11 | FIXED | Streamed mock-fast: the attempt reads "200 214 ms" and the latency track is filled. |
+| OPERATE-12 | FIXED | Shows "lmstudio/mock-error — cooling down" and "every candidate was skipped". |
+| OPERATE-13 | FIXED | Titles: "no attempt was made", "failed on its only attempt", "served on the first attempt", "2 attempts — this request failed over". |
+| OPERATE-14 | FIXED | The Columns menu lists Time, Surface, Model, Provider, Status, Attempts, Tokens, Latency, Path. |
+| OPERATE-15 | FIXED | `combobox "Status": "Status: error"` and the same for Source, Surface and Error code. The visible text is "Status: error". |
+| OPERATE-16 | FIXED | Save is disabled while the name is empty, Enter saves, and Escape (with focus in the field) cancels. |
+| OPERATE-17 | FIXED | Downloads as `requests.csv`. Time is ISO-8601 (`2026-10-06T07:53:51.926Z`). |
+| OPERATE-18 | FIXED | The groups are now named: radiogroup "Time range" (Requests), and "Group by" and "Range" (Usage). |
+| OPERATE-19 | FIXED | "Open in playground" on the mock-embed trace links to `/playground?mode=auxiliary&seed=<id>`. The page opens on Auxiliary → Embeddings with model `mock-embed` and the note "Seeded from trace …: the tool and model carried over. The original input was not retained…". |
+| OPERATE-20 | FIXED | Shows a single empty state, "No requests match these filters. Clear filters", at the top. The table is hidden. |
+| OPERATE-21 | FIXED | The facets wrap. Columns is fully in view at 768 (x 625–744) and at 375 (x 232–351). |
+| OPERATE-24 | FIXED | The success badge is dark green text rgb(3,46,21) on rgb(0,201,81), 6.74:1 in both modes. The same fix covers Settings' "hot" badge. |
+| OPERATE-26 | FIXED | The Cost card says "No priced model served traffic in this window, so its cost is unknown." It no longer draws a $0 line. |
+| OPERATE-27 | FIXED | At 375, keys stay on one line (cell height 37px). The table scrolls inside its own wrapper and there is no page overflow. |
+| OPERATE-22 | FIXED | The legend swatch for "failed over from somewhere else" is drawn dashed. |
+| OPERATE-23 | FIXED | The tile caption reads "Latency". |
+| PROVIDERS-01 | FIXED | `/api/models` now gives `llm` for the 4 chat models and `embedding` for mock-embed. On the detail page only mock-embed has the embedding badge, and /models Surfaces reads llm/embedding. `/v1/embeddings` with mock-fast or mock-slow returns 404 "no configured provider offers this model on this surface". mock-embed returns 200. A chat request for mock-embed returns 404. |
+| PROVIDERS-02 | FIXED | With Configured only on, the chips read All 6 = Local 2 + No auth 4. With q=studio, All 6. With state=degraded, All 4. |
+| PROVIDERS-03 | FIXED | The detail card reads "2 models cooling · mock-ratelimit · backoff 0 … / mock-error · backoff 1 …". The list card reads `lmstudio/mock-error · backoff …`. |
+| PROVIDERS-04 | FIXED | /providers/lmstudio shows "requests · 30d 46" with a sparkline right after the traffic, with no rollup in between. The list shows Traffic 75% / 25%. |
+| PROVIDERS-05 | FIXED | aihorde shows the "degraded" badge, the discovery tile "0/0 failing · N sweeps in a row", "Discovery has failed N times" quoting the Forbidden error, and the panel "discovery failing · Get …: Forbidden". |
+| PROVIDERS-06 | FIXED | The dialog gets `POST /keys` → 400 "not an AWS credential: expected a JSON document with access_key_id and secret_access_key". The secret is not echoed. The dialog stays open with the key under "Not added — still in the form". No credential is stored. Re-verify note (e): Replace with `still-not-json-qa` gets `PATCH` → 400 with the same text and no echo, and a well-shaped JSON then saves. One side effect: the provider row `bedrock` (region us-east-1, 0 credentials) is created before the key is refused, and it stays listed as "unconfigured". |
+| PROVIDERS-07 | FIXED | Settings prefills Region `us-east-1`. Project and Location are not offered for bedrock. The Connection card shows "Region us-east-1". |
+| PROVIDERS-08 | FIXED | The h2 "LM Studio" is 111px wide and not truncated at 375 or 768. The buttons wrap below it. No sideways scroll. |
+| PROVIDERS-09 | FIXED | The grid is one column at 375 (cards 24–351) and at 768 (280–744). Names are whole. No sideways scroll. |
+| PROVIDERS-10 | FIXED | At 1440, Override is pinned (right edge 1395). Rows are 68px. "inferred", "embedding" and "llm" no longer break mid-word. |
+| PROVIDERS-11 | FIXED | Health → Discovery has a "Run discovery" button, and clicking it toasts "Discovery sweep queued". |
+| PROVIDERS-12 | FIXED | The LM Studio row has no "+" (only Test, Probe, Discover and Reset breaker). Keyless rows read "Add credentials — add a key to …". |
+| PROVIDERS-13 | FIXED | The toast reads "Endpoint answered · 5 models · 1 ms". The tooltip reads "Probe — check the provider answers". |
+| PROVIDERS-14 | FIXED | Save is disabled when nothing has been edited, enabled after an edit, and disabled again after reverting it. The Surfaces placeholder reads "llm from the catalogue". |
+| PROVIDERS-15 | FIXED | The field has aria-label "New secret for qa-providers-good". Enter saves ("Credential updated"). Escape and save both return focus to Replace. |
+| PROVIDERS-16 | FIXED | /models?model=zzz shows no "Search models" box, no "No results", no "Page 1 of 0", and one NoMatch card. |
+| PROVIDERS-17 | FIXED | A disabled bedrock reads "credentials usable 0/1 · provider disabled". |
+| PROVIDERS-18 | FIXED | `abc` and `10.5` show role=alert "Priority must be a whole number" with aria-invalid=true. Save stays disabled even after another field is edited. |
+| PROVIDERS-19 | FIXED | ollama and auggie both read "Discovery lists its models on the first sweep after it is added." |
+| PROVIDERS-20 | FIXED | OVHcloud now shows a square white glyph on a blue tile, readable in both light and dark. |
+| PROVIDERS-21 | FIXED | 60ms into the close, the keyless dialog still shows its body (free-only box, Cancel/Add) while it fades. |
+| ROUTING-01 | FIXED | Keyless targets show green dots, and the tooltip says "routable · pinned to lmstudio". Rule 3 lists all six providers. lmstudio/mock-error shows amber "cooling · lmstudio is cooling for mock-error…" while its per-model breaker is open. |
+| ROUTING-02 | FIXED | errfb on a cold breaker returns 200 with `X-Darkrouter-Attempts: 2`. The trace shows 01 mock-error 500, then 02 mock-fast 200, with no skips. While the breaker is cooling it returns 200 with 1 attempt and the skip `lmstudio/mock-error — cooling down`. sameprov fails over flaky-1 500 → flaky-2 200. Its only 502 was flaky-1 cooling (skipped) plus a flaky-2 500, which is correct. The preview's "would be tried in this order" now holds. |
+| ROUTING-03 | FIXED | Escape with the suggestion list open closes only the list; the dialog stays, with name and targets kept. A second Escape closes the dialog. |
+| ROUTING-05 | FIXED | At 1440, scale is 1 and no title is truncated: the titles wrap. At 768 and 375 the ladder is shown instead, with the note "Shown as a ladder: the graph needs a wider screen." |
+| ROUTING-06 | FIXED | While mock-error is cooling: ladder `01 mock-fast` / `– mock-error cooling`. In the graph, the skipped node sits on its own row with no incoming edge ("skipped — cooling"). The only edge is origin → mock-fast. |
+| ROUTING-07 | FIXED | Full names are shown (`qa-routing-errfb` and `qa-routing-errfb-copy`), with no truncation. |
+| ROUTING-08 | FIXED | A new draft shows the "new · unsaved" badge, "1 unsaved change", and a disabled "Preview (not saved yet)". Save is disabled when nothing has changed. Navigating to Models asks for confirmation; Cancel stays with the draft and OK leaves. The server was never written. |
+| ROUTING-04 | FIXED | After Escape or Cancel, focus returns to "Add alias". |
+| ROUTING-09 | FIXED | The list now opens in the flow under the field, with all 8 options visible. "Create with 2 targets" stays visible and clickable. |
+| ROUTING-10 | FIXED | For `mock-fast`: "is a model in the catalogue…" (legend colour). For `lmstudio/mock-fast`: a red "is how a request pins lmstudio…". |
+| ROUTING-11 | FIXED | The 409 toast reads "Aliases changed elsewhere since you loaded them. Your edits are kept on top of the new version — review them and Save again." A second Save stored both edits. |
+| PLAYGROUND-01 | FIXED | After sends 1–4, the distance from the bottom is 0 every time (scrollHeight 695→1724). The newest answer is in view. |
+| PLAYGROUND-02 | FIXED | Before: gateway 200, with the copy "The gateway accepts requests without a token. Creating the first client token switches authentication on…". Create (by click or Enter) opens the confirm "Require a token from every client? … each client that works today without one starts getting 401. Revoking the token later does not switch authentication back off." Cancel creates nothing. After create, proxy 9420 returns 401 without the token and 200 with it. The page reads "Every request must carry a client token". The revoke confirm says it is the last token and that auth stays on. After revoke: 401 with and without the token, and `{"issued":true,"tokens":[]}`. The page reads "Every client token has been revoked … the gateway still requires a token", and "No client token exists yet" is gone. |
+| PLAYGROUND-03 | FIXED | Re-verify note (d): with the suggestion list open, the first Escape closes only the list (dialog kept, value "mock-f" kept) and the second closes the dialog. The Dialect select behaves the same: the first Escape closes the listbox and focus returns to #pg-dialect, and the second closes the dialog. |
+| PLAYGROUND-04 | FIXED | Re-verify note (c): mock-ratelimit reads "upstream request failed (429 from lmstudio)". mock-error reads "(500 from lmstudio)". Each has a route line `lmstudio/mock-ratelimit 1 ms · 0 in · 0 out trace` with a link to `/requests/<id>`, and the trace's attempt is `429 retryable_provider`. A stopped turn also gets a route line and a trace link. |
+| PLAYGROUND-06 | FIXED | gemini: Tools shows the reason and is outlined red. Send is disabled with the reason "Gemini declares tools as functionDeclarations…". anthropic: the placeholder is in Anthropic shape, and an OpenAI-shaped tool blocks Send ("tool 1 is in the OpenAI shape…"). |
+| PLAYGROUND-07 | FIXED | With the switch off, the bodies carry `stream:false` and the columns still render the reply. |
+| PLAYGROUND-09 | FIXED | Four columns wrap 2×2 at 1440 with inputs 364px wide, so full names show. No sideways scroll. The cap copy reads "Four is the most compared at once." |
+| PLAYGROUND-10 | FIXED | At 375 and 768 the page scrolls as one column. Answers are 226px tall each, and the grid has no nested scroller. |
+| PLAYGROUND-11 | FIXED | Deleting from the rail trash or from the header menu both open "Delete <title>? The transcript is removed from the server and cannot be recovered." Cancel keeps the conversation and Delete removes it. Body pointer-events are restored afterwards. |
+| PLAYGROUND-12 | FIXED | `/v1`, `/v1beta`, `ftp://` and `not a url` each get an inline role=alert error quoting the typed value, aria-invalid, and Save disabled. The server also refuses `/v1` and `ftp://` with 400. A bare domain saves and normalises to https. Clearing the field restores the estimate. |
+| PLAYGROUND-05 | FIXED | After a failed turn (no-such-model, 429, 500) there is no "0 of 1 answers still have a trace" caveat. |
+| PLAYGROUND-08 | FIXED | While running there is a Stop button and the note reads "Locked while this comparison runs." The Chat note is absent. After Stop, Run is enabled and the column shows a stopped dot. |
+| PLAYGROUND-13 | FIXED | The tab list wraps inside the card at 375 (41–334) and 768. No sideways page scroll. |
+| PLAYGROUND-14 | FIXED | `#composer-error` has role=alert and the textarea has aria-describedby="composer-error". Compare column errors are role=alert. |
+| PLAYGROUND-15 | FIXED | In a locked conversation, Save and Manage presets are enabled, Load is disabled, and Save opens "Save this request". |
+| PLAYGROUND-16 | FIXED | Consumption and last-turn figures are in a "Show consumption" sheet below 1024px; the conversation title, still 60px wide at 375 on the first re-test, now wraps under the model pill at 192px (V-01). |
+| PLAYGROUND-17 | FIXED | At 375 the rail is replaced by a "Tool" select listing all 7 tools with their blurbs. No sideways scroll. |
+| PLAYGROUND-18 | FIXED | Create sits 8px from the Name input. |
+| SETTINGS-01 | FIXED | 30s→31s: the toast says "takes effect after a restart" and a banner appears. Back to 30s: plain "Settings saved", with `pending_restart` [] and `warnings` [] in both /api/config and /healthz. Reset-to-default also gives a plain toast. |
+| SETTINGS-02 | FIXED | Rail click, palette jump, reload and Back with a draft all ask first; Log out asking before it posts was a follow-up, fixed (V-06). |
+| SETTINGS-03 | FIXED | While the sync runs the button reads "Syncing catalog…". Then an error toast says "Catalog sync failed: models.dev sync: fetch: Get "https://models.dev/api.json": Forbidden. The previous metadata is still serving." An amber card, "The last catalog sync failed · <time>: <error> · The gateway is serving the metadata it had before. Sync catalog now tries again.", is shown only on Settings (not on Overview, Models or Providers). See re-verify note (a). |
+| SETTINGS-04 | FIXED | `#new-account-username` has maxlength=64 (fill, typing and insertText all stop at 64). The API answers a 65-character name with 400 "a username can be at most 64 characters". |
+| SETTINGS-05 | FIXED | At 375, label and value stack, and the env badge fits (x 76–334). main scrollWidth equals clientWidth (375). |
+| SETTINGS-06 | FIXED | "Use a size such as 512 KB, 32 MB or 1 GB." / "policy.timeout.total (30s) must be at least connect + first_byte (1m10s)" (no `[keys] broke the … rule`) / "policy.timeout.idle must be a duration such as 30s, 5m or 2h" / "policy.retry.max_attempts is too large" / `9999999999 GB` → "That size is too large." |
+| SETTINGS-07 | FIXED | `ftp://x` → "server.public_url must start with http:// or https://, got "ftp://x"" on the row, and nothing is saved. |
+| SETTINGS-08 | FIXED | URL boxes are 382px wide with `title` set to the full URL (models.dev fully visible). Durations show `720h`, `72h`, `12h`, `10m` with "30 days" and "3 days" hints, and no more `720h0m0s`. |
+| SETTINGS-09 | FIXED | The off switch now has a 2px border and thumb in muted-foreground: rgb(167,154,144) in dark and rgb(91,80,72) in light. It is clearly visible. |
+
+</details>
 
 ## Fix first
 
@@ -1655,7 +1795,7 @@ _Scope: Every setting field, save/reset/restart semantics, catalog sync, account
 - Change password (as qa-settings-member in fresh contexts): short new password and mismatch are blocked client-side; wrong current password shows "the current password is wrong" inside the dialog, which stays open and the user stays logged in; success closes the dialog with a toast. The account's other browser session was revoked (`authenticated:false`, redirected to login), and login with the new password succeeded.
 - Light and dark mode at 1440, 768 and 375 (only the SETTINGS-05 and SETTINGS-09 problems). No `text-xs` or custom font sizes in `web/src/features/settings/*`. No console errors other than the expected 4xx responses.
 
-## Cleanup
+**Cleanup**
 - Every setting I changed was reverted immediately. Final `/api/config` has no `database` rows, and `warnings` and `pending_restart` are empty in both `/api/config` and `/healthz`. I ran one Reload config to clear the stale SETTINGS-01 warning.
 - Note for the coordinator: during my first validation run, `server.public_url` was found stored in the database before my `not a url` case (which was refused) and was reset by my cleanup. If another tester (e.g. Connect) had set a public URL around 04:16 UTC, it was cleared by me.
 - Accounts created: qa-settings-ws, qa-settings-member, qa-settings-admin. All three are deleted, and `/api/users` now lists only qa-admin.
