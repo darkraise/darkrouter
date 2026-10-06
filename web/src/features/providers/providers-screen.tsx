@@ -418,7 +418,7 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
           provider too, whose endpoint still reads a key, but never on a `none`
           one: that style sends no key, so the dialog would store a secret
           nothing ever uses. */}
-      {(!row.provider || takesCredential(row.provider)) && (
+      {!row.provider || takesCredential(row.provider) ? (
         <Button
           size="icon"
           variant="ghost"
@@ -432,6 +432,14 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
           <Plus className="size-[var(--icon-size)]" />
           <span className="sr-only">Add credentials</span>
         </Button>
+      ) : (
+        // Holds the slot so the icons below line up with every other row's.
+        // Invisible is out of the accessibility tree and the tab order too.
+        <span aria-hidden="true" className="invisible">
+          <Button size="icon" variant="ghost" tabIndex={-1} disabled>
+            <Plus className="size-[var(--icon-size)]" />
+          </Button>
+        </span>
       )}
       <Button
         size="icon"
