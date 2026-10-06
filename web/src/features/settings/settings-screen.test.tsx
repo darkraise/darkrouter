@@ -245,8 +245,12 @@ describe("the reload result", () => {
 })
 
 describe("the sync result", () => {
-  it("says started rather than synced, since the gateway answers 202", () => {
-    expect(syncMessage({ triggered: true })).toMatch(/started/i)
+  it("says what the run came to, not only that it started", () => {
+    expect(syncMessage({ state: "done" })).toBe("Catalog synced.")
+    expect(syncMessage({ state: "failed", error: "fetch returned 403 Forbidden" })).toBe(
+      "Catalog sync failed: fetch returned 403 Forbidden. The previous metadata is still serving.",
+    )
+    expect(syncMessage({ state: "running" })).toMatch(/still running/i)
   })
 })
 
@@ -273,7 +277,9 @@ function gate() {
 
 function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
-  sync?: { triggered: boolean }
+  sync?: { triggered: boolean; run?: number }
+  /** GET /api/catalog/sync, before and after the POST. */
+  syncStatus?: { before?: unknown; after?: unknown }
   sessions?: unknown[]
   users?: { users: unknown[]; me: string }
   /** GET /api/users answers 403, as it does for a caller who is not an
@@ -295,6 +301,7 @@ function stubSettingsFetch(overrides: {
 }) {
   let configFetches = 0
   let saved = false
+  let syncPosted = false
   const saves: unknown[] = []
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const method = (init as RequestInit | undefined)?.method ?? "GET"
@@ -350,7 +357,18 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/catalog/sync" && method === "POST") {
-      return new Response(JSON.stringify(overrides.sync ?? { triggered: true }), {
+      syncPosted = true
+      return new Response(JSON.stringify(overrides.sync ?? { triggered: true, run: 1 }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/catalog/sync" && method === "GET") {
+      const body = syncPosted
+        ? (overrides.syncStatus?.after ??
+          { running: false, run: 1, finished_at: "2026-10-06T04:00:00Z", error: "" })
+        : (overrides.syncStatus?.before ?? { running: false, run: 0 })
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -410,19 +428,66 @@ describe("the pending-restart notice", () => {
 })
 
 describe("a sync request", () => {
-  it("refreshes the models list once the gateway has accepted the run", async () => {
-    const { fetchMock } = stubSettingsFetch({ sync: { triggered: true } })
+  const toasts = () => screen.queryAllByRole("status").map((s) => s.textContent ?? "").join(" | ")
+
+  it("waits for the run it started and says it worked", async () => {
+    const { fetchMock } = stubSettingsFetch({})
     const user = userEvent.setup()
     mount(<SettingsScreen />)
 
     await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
     await user.click(await screen.findByRole("button", { name: /^sync$/i }))
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/catalog/sync" && (i as RequestInit)?.method === "POST")).toBe(
-        true,
-      ),
-    )
+    await waitFor(() => expect(toasts()).toMatch(/catalog synced/i), { timeout: 4000 })
+    expect(toasts()).not.toMatch(/started/i)
+    expect(
+      fetchMock.mock.calls.some(([u, i]) => u === "/api/catalog/sync" && (i as RequestInit)?.method === "POST"),
+    ).toBe(true)
+  })
+
+  it("says why the run it started failed, and keeps the failure on the page", async () => {
+    stubSettingsFetch({
+      syncStatus: {
+        after: {
+          running: false,
+          run: 1,
+          finished_at: "2026-10-06T04:00:00Z",
+          error: "models.dev sync: fetch returned 403 Forbidden",
+        },
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
+    await user.click(await screen.findByRole("button", { name: /^sync$/i }))
+
+    await waitFor(() => expect(toasts()).toMatch(/catalog sync failed: .*403 Forbidden/i), {
+      timeout: 4000,
+    })
+    expect(await screen.findByText(/the last catalog sync failed/i)).toBeInTheDocument()
+  })
+
+  it("shows a scheduled sync's failure nobody was watching", async () => {
+    stubSettingsFetch({
+      syncStatus: {
+        before: { running: false, run: 3, finished_at: "2026-10-06T04:00:00Z", error: "fetch: Forbidden" },
+      },
+    })
+    mount(<SettingsScreen />)
+
+    expect(await screen.findByText(/the last catalog sync failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/fetch: Forbidden/)).toBeInTheDocument()
+  })
+
+  it("says nothing about a sync that succeeded", async () => {
+    stubSettingsFetch({
+      syncStatus: { before: { running: false, run: 3, finished_at: "2026-10-06T04:00:00Z", error: "" } },
+    })
+    mount(<SettingsScreen />)
+
+    await screen.findByText("log.retention")
+    expect(screen.queryByText(/the last catalog sync failed/i)).not.toBeInTheDocument()
   })
 })
 
