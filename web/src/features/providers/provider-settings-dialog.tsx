@@ -14,28 +14,28 @@ import { api, routingNotUpdated } from "../../lib/api"
 import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Provider } from "../../lib/api-types"
+import { endpointFieldsFor } from "./add-accounts-dialog"
+import { endpointOf } from "./provider-state"
 
 /**
- * The touched half of a provider's settings.
+ * A provider's settings as the dialog edits them.
+ *
+ * Every field opens on what the provider holds and is compared against it, so
+ * a dialog opened and saved without an edit sends `{}` rather than rewriting
+ * values that never changed.
  *
  * Region, project and location are pointer fields on the backend
  * (`store.ProviderPatch.Region` / `.Project` / `.Location`): a key present with
- * value "" means "set this to empty", not "leave alone". `GET /api/providers`
- * returns none of them, so the inputs start with nothing to prefill — null
- * distinguishes "never touched" from "touched and cleared", which "" alone
- * cannot.
- *
- * The others are compared against the provider they came from, so a dialog
- * opened and saved without an edit sends `{}` rather than rewriting values
- * that never changed.
+ * value "" means "set this to empty". Emptying a box that held a value is
+ * therefore a deliberate clear, and is sent.
  */
 export type SettingsDraft = {
   priority: string
   baseUrl: string
   freeModelsOnly: boolean
-  region: string | null
-  project: string | null
-  location: string | null
+  region: string
+  project: string
+  location: string
 }
 
 export function draftOf(p: Provider): SettingsDraft {
@@ -43,25 +43,29 @@ export function draftOf(p: Provider): SettingsDraft {
     priority: String(p.priority),
     baseUrl: p.base_url,
     freeModelsOnly: p.free_models_only,
-    region: null,
-    project: null,
-    location: null,
+    region: p.region ?? "",
+    project: p.project ?? "",
+    location: p.location ?? "",
   }
+}
+
+/** Why the typed priority cannot be saved, or null when it can.
+ *
+ *  Whole numbers in plain decimal only. The backend field is a Go `*int`, so
+ *  `10.5` comes back as a raw `cannot unmarshal number 10.5` toast, and
+ *  `Number` would read `0x10` as 16 — a value nobody typed. And an empty box is
+ *  not zero: `Number("")` is 0, the highest priority there is. */
+export function priorityError(typed: string): string | null {
+  return /^-?\d+$/.test(typed.trim()) ? null : "Priority must be a whole number"
 }
 
 export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
   const typed = draft.priority.trim()
-  const priority = Number(typed)
-  // A field that will not parse is left out rather than sent. NaN serialises
-  // to null, and an emptied field is worse than that: `Number("")` is 0, so a
-  // cleared box would quietly write the highest priority there is.
-  //
-  // Whole numbers only. The backend field is a Go `*int`, so `10.5` comes back
-  // as a raw `cannot unmarshal number 10.5` toast, and `Number` would read
-  // `0x10` as 16 — a value nobody typed.
-  if (typed !== "" && Number.isInteger(priority) && priority !== p.priority) {
-    patch.priority = priority
+  // A field that will not parse is left out rather than sent; the dialog says
+  // why beside the box and holds Save until it is fixed.
+  if (priorityError(typed) === null && Number(typed) !== p.priority) {
+    patch.priority = Number(typed)
   }
   // An emptied box leaves the endpoint alone rather than clearing it: a
   // provider with no base URL is unreachable, and the backend rejects the
@@ -69,12 +73,14 @@ export function settingsPatch(draft: SettingsDraft, p: Provider): Record<string,
   const baseUrl = draft.baseUrl.trim()
   if (baseUrl !== "" && baseUrl !== p.base_url) patch.base_url = baseUrl
   if (draft.freeModelsOnly !== p.free_models_only) patch.free_models_only = draft.freeModelsOnly
-  if (draft.region !== null) patch.region = draft.region
-  if (draft.project !== null) patch.project = draft.project
+  if (draft.region !== (p.region ?? "")) patch.region = draft.region
+  if (draft.project !== (p.project ?? "")) patch.project = draft.project
   // Vertex alone reads a location, and the backend refuses changing one that
   // is set, so a stray space or an empty value would be stored for good.
-  const location = draft.location?.trim() ?? ""
-  if (p.kind === "vertex" && location !== "") patch.location = location
+  const location = draft.location.trim()
+  if (p.kind === "vertex" && location !== "" && location !== (p.location ?? "")) {
+    patch.location = location
+  }
   return patch
 }
 
@@ -116,6 +122,17 @@ export function ProviderSettingsDialog({
 
   const patch = settingsPatch(draft, provider)
   const dirty = Object.keys(patch).length > 0
+  // Shown rather than silently dropped: before, Save just went grey on "abc",
+  // and with another field edited it stayed live and dropped the priority.
+  const priorityProblem = priorityError(draft.priority)
+  // Only the fields this kind reads. Region on an openaicompat provider means
+  // nothing, and offering it invited a value that would be stored and ignored.
+  const endpointFields = endpointFieldsFor(provider.kind)
+  // What an empty box means for a provider whose host is built from its other
+  // fields, read off the draft so the preview follows a region being typed.
+  const derived = provider.base_url
+    ? undefined
+    : endpointOf({ ...draft, base_url: "", kind: provider.kind })
 
   return (
     <Dialog
@@ -141,12 +158,23 @@ export function ProviderSettingsDialog({
                 onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
                 className="w-24"
                 inputMode="numeric"
+                aria-invalid={priorityProblem !== null || undefined}
+                aria-describedby={priorityProblem ? "provider-priority-error" : undefined}
               />
             </div>
             <p className="max-w-sm text-sm text-[hsl(var(--legend))]">
               The order the router walks providers in when a bare model name could be
               served by more than one.
             </p>
+            {priorityProblem && (
+              <p
+                id="provider-priority-error"
+                role="alert"
+                className="basis-full text-sm text-[hsl(var(--destructive))]"
+              >
+                {priorityProblem}
+              </p>
+            )}
           </div>
 
           {/* Editable because a local runtime's address is the operator's, not
@@ -159,11 +187,15 @@ export function ProviderSettingsDialog({
               id="provider-base-url"
               value={draft.baseUrl}
               onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              placeholder={derived?.url || undefined}
               spellCheck={false}
               className="font-mono"
             />
             <span className="text-sm text-[hsl(var(--legend))]">
-              The endpoint the gateway calls. Emptying the box leaves it unchanged.
+              {derived?.derivedFrom
+                ? `Left empty, the gateway derives the endpoint from ${derived.derivedFrom}. ` +
+                  "A URL here replaces it, for a private endpoint."
+                : "The endpoint the gateway calls. Emptying the box leaves it unchanged."}
             </span>
           </div>
 
@@ -188,50 +220,56 @@ export function ProviderSettingsDialog({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-end gap-3 border-t pt-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-region">Region</Label>
-              {/* Blank rather than prefilled: GET /api/providers does not
-                  return either field, so there is no current value to show. */}
-              <Input
-                id="provider-region"
-                value={draft.region ?? ""}
-                onChange={(e) => setDraft({ ...draft, region: e.target.value })}
-                placeholder="unset"
-                className="w-40"
-              />
+          {endpointFields.length > 0 && (
+            <div className="flex flex-wrap items-end gap-3 border-t pt-4">
+              {endpointFields.includes("region") && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="provider-region">Region</Label>
+                  <Input
+                    id="provider-region"
+                    value={draft.region}
+                    onChange={(e) => setDraft({ ...draft, region: e.target.value })}
+                    placeholder="us-east-1"
+                    className="w-40"
+                  />
+                </div>
+              )}
+              {endpointFields.includes("project") && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="provider-project">Project</Label>
+                  <Input
+                    id="provider-project"
+                    value={draft.project}
+                    onChange={(e) => setDraft({ ...draft, project: e.target.value })}
+                    placeholder="my-project"
+                    className="w-40"
+                  />
+                </div>
+              )}
+              {/* Fills a location the provider was created without. The
+                  backend refuses moving one that is set, so a set one is
+                  shown and not offered for editing. */}
+              {endpointFields.includes("location") && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="provider-location">Location</Label>
+                  <Input
+                    id="provider-location"
+                    value={draft.location}
+                    onChange={(e) => setDraft({ ...draft, location: e.target.value })}
+                    placeholder="us-central1"
+                    disabled={Boolean(provider.location)}
+                    className="w-40"
+                  />
+                </div>
+              )}
+              <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
+                Where the endpoint is. A changed value moves every request this provider
+                serves.
+                {endpointFields.includes("location") &&
+                  " The location can be set once: a provider that already has one keeps it."}
+              </p>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="provider-project">Project</Label>
-              <Input
-                id="provider-project"
-                value={draft.project ?? ""}
-                onChange={(e) => setDraft({ ...draft, project: e.target.value })}
-                placeholder="unset"
-                className="w-40"
-              />
-            </div>
-            {/* Fills a location the provider was created without. The backend
-                refuses moving one that is set. */}
-            {provider.kind === "vertex" && (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="provider-location">Location</Label>
-                <Input
-                  id="provider-location"
-                  value={draft.location ?? ""}
-                  onChange={(e) => setDraft({ ...draft, location: e.target.value })}
-                  placeholder="unset"
-                  className="w-40"
-                />
-              </div>
-            )}
-            <p className="max-w-xs text-sm text-[hsl(var(--legend))]">
-              Only the ones you type are written. Leave them alone and they keep
-              whatever they hold.
-              {provider.kind === "vertex" &&
-                " The location can be set once: a provider that already has one keeps it."}
-            </p>
-          </div>
+          )}
         </div>
 
         <div className="mt-2 flex items-center gap-2 border-t pt-3">
@@ -243,7 +281,10 @@ export function ProviderSettingsDialog({
             >
               Cancel
             </Button>
-            <Button disabled={!dirty || save.isPending} onClick={() => save.mutate(patch)}>
+            <Button
+              disabled={!dirty || priorityProblem !== null || save.isPending}
+              onClick={() => save.mutate(patch)}
+            >
               Save changes
             </Button>
           </div>

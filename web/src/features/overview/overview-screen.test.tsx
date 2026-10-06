@@ -3,13 +3,15 @@ import {
   errorSeries,
   flowProviders,
   requestSeries,
+  routerFailoverCount,
   spendQualifier,
   spendReading,
   spendSeries,
+  windowMeasured,
 } from "./overview-screen"
 import { failoverLabel } from "./failover-label"
 import { durationParts as duration, money } from "../../lib/format"
-import type { Overview, ProviderTile, UsageRow } from "../../lib/api-types"
+import type { Overview, Provider, ProviderTile, UsageRow } from "../../lib/api-types"
 
 const tile = (over: Partial<ProviderTile> & { id: string }): ProviderTile => ({
   name: over.id,
@@ -117,6 +119,35 @@ describe("flowProviders", () => {
     // The count is the denominator: 2 cooling out of 3 is a different
     // reading from 2 out of 2, and the node cannot say which without it.
     expect(got[0]).toMatchObject({ cooling: 2, credentials: 3, needsReauth: false })
+  })
+
+  it("marks the providers that route without a key", () => {
+    const got = flowProviders(
+      overview([tile({ id: "lmstudio", credentials: 0 }), tile({ id: "groq", credentials: 0 })]),
+      [],
+      [
+        { id: "lmstudio", auth_style: "none" } as Provider,
+        { id: "groq", auth_style: "bearer" } as Provider,
+      ],
+    )
+    expect(got.map((p) => [p.id, p.keyless])).toEqual([
+      ["lmstudio", true],
+      ["groq", false],
+    ])
+  })
+})
+
+describe("the live window", () => {
+  it("is unmeasured when no request landed in it", () => {
+    // A 0 ms p50 and a 0% error rate over nothing read as an excellent window
+    // that never happened.
+    expect(windowMeasured({ ...overview([]), requests: 0 })).toBe(false)
+    expect(windowMeasured({ ...overview([]), requests: 3, requests_per_min: 0.6 })).toBe(true)
+  })
+
+  it("falls back to the rate when the server sends no count", () => {
+    expect(windowMeasured(overview([]))).toBe(false)
+    expect(windowMeasured({ ...overview([]), requests_per_min: 0.2 })).toBe(true)
   })
 })
 
@@ -226,5 +257,17 @@ describe("the failover strip", () => {
     })
     expect(label).toContain("m-4")
     expect(label).not.toContain("→ →")
+  })
+})
+
+describe("routerFailoverCount", () => {
+  it("reads the server's request count, which includes same-provider rescues", () => {
+    // One cross-provider arc, but three requests failed over: two were
+    // rescued by another model on the provider that failed them.
+    expect(routerFailoverCount(3, [{ count: 1 }])).toBe(3)
+  })
+
+  it("sums the arcs for a server that sends no count", () => {
+    expect(routerFailoverCount(undefined, [{ count: 2 }, { count: 1 }])).toBe(3)
   })
 })

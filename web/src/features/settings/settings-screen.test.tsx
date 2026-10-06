@@ -19,6 +19,12 @@ import {
 } from "./settings-screen"
 import { ApiError } from "../../lib/api"
 import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
+import { useUnsavedChangesGuard } from "../../lib/unsaved-changes"
+
+// The guard is TanStack Router's useBlocker, which needs a router this mount
+// does not have; what this screen owes it is the right `dirty`, which is what
+// the mock records.
+vi.mock("../../lib/unsaved-changes", () => ({ useUnsavedChangesGuard: vi.fn() }))
 
 // PageHeader calls useRouterAdapter unconditionally even without breadcrumbs
 // or tabs, so anything rendering it needs a provider — Settings never uses
@@ -167,11 +173,20 @@ describe("fieldErrors", () => {
       .toEqual({ "log.retention": "log.retention must be at least 48h, got 1h" })
   })
 
-  it("attaches a cross-key refusal to every key it names", () => {
-    const msg =
-      "[policy.timeout.total policy.timeout.connect policy.timeout.first_byte] broke the timeout budget rule (policy.timeout.total (5s) must be at least connect + first_byte (1m10s))"
-    expect(fieldErrors(msg, ["policy.timeout.total", "policy.timeout.connect", "log.retention"]))
-      .toEqual({ "policy.timeout.total": msg, "policy.timeout.connect": msg })
+  it("attaches a cross-key refusal to every key the gateway names, not only the ones in its sentence", () => {
+    const msg = "policy.timeout.total (5s) must be at least connect + first_byte (1m10s)"
+    const keys = ["policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"]
+    expect(fieldErrors(msg, ["policy.timeout.total", "log.retention"], keys)).toEqual({
+      "policy.timeout.total": msg,
+      "policy.timeout.connect": msg,
+      "policy.timeout.first_byte": msg,
+    })
+  })
+
+  it("falls back to the patched keys a refusal without keys names", () => {
+    const msg = "policy.timeout.total (5s) must be at least connect + first_byte (1m10s)"
+    expect(fieldErrors(msg, ["policy.timeout.total", "log.retention"]))
+      .toEqual({ "policy.timeout.total": msg })
   })
 
   it("attaches nothing when the message names no key", () => {
@@ -230,8 +245,12 @@ describe("the reload result", () => {
 })
 
 describe("the sync result", () => {
-  it("says started rather than synced, since the gateway answers 202", () => {
-    expect(syncMessage({ triggered: true })).toMatch(/started/i)
+  it("says what the run came to, not only that it started", () => {
+    expect(syncMessage({ state: "done" })).toBe("Catalog synced.")
+    expect(syncMessage({ state: "failed", error: "fetch returned 403 Forbidden" })).toBe(
+      "Catalog sync failed: fetch returned 403 Forbidden. The previous metadata is still serving.",
+    )
+    expect(syncMessage({ state: "running" })).toMatch(/still running/i)
   })
 })
 
@@ -258,7 +277,9 @@ function gate() {
 
 function stubSettingsFetch(overrides: {
   reload?: { valid: boolean; error?: string; serving?: string }
-  sync?: { triggered: boolean }
+  sync?: { triggered: boolean; run?: number }
+  /** GET /api/catalog/sync, before and after the POST. */
+  syncStatus?: { before?: unknown; after?: unknown }
   sessions?: unknown[]
   users?: { users: unknown[]; me: string }
   /** GET /api/users answers 403, as it does for a caller who is not an
@@ -280,6 +301,7 @@ function stubSettingsFetch(overrides: {
 }) {
   let configFetches = 0
   let saved = false
+  let syncPosted = false
   const saves: unknown[] = []
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
     const method = (init as RequestInit | undefined)?.method ?? "GET"
@@ -335,7 +357,18 @@ function stubSettingsFetch(overrides: {
       })
     }
     if (url === "/api/catalog/sync" && method === "POST") {
-      return new Response(JSON.stringify(overrides.sync ?? { triggered: true }), {
+      syncPosted = true
+      return new Response(JSON.stringify(overrides.sync ?? { triggered: true, run: 1 }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+    if (url === "/api/catalog/sync" && method === "GET") {
+      const body = syncPosted
+        ? (overrides.syncStatus?.after ??
+          { running: false, run: 1, finished_at: "2026-10-06T04:00:00Z", error: "" })
+        : (overrides.syncStatus?.before ?? { running: false, run: 0 })
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -395,19 +428,66 @@ describe("the pending-restart notice", () => {
 })
 
 describe("a sync request", () => {
-  it("refreshes the models list once the gateway has accepted the run", async () => {
-    const { fetchMock } = stubSettingsFetch({ sync: { triggered: true } })
+  const toasts = () => screen.queryAllByRole("status").map((s) => s.textContent ?? "").join(" | ")
+
+  it("waits for the run it started and says it worked", async () => {
+    const { fetchMock } = stubSettingsFetch({})
     const user = userEvent.setup()
     mount(<SettingsScreen />)
 
     await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
     await user.click(await screen.findByRole("button", { name: /^sync$/i }))
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([u, i]) => u === "/api/catalog/sync" && (i as RequestInit)?.method === "POST")).toBe(
-        true,
-      ),
-    )
+    await waitFor(() => expect(toasts()).toMatch(/catalog synced/i), { timeout: 4000 })
+    expect(toasts()).not.toMatch(/started/i)
+    expect(
+      fetchMock.mock.calls.some(([u, i]) => u === "/api/catalog/sync" && (i as RequestInit)?.method === "POST"),
+    ).toBe(true)
+  })
+
+  it("says why the run it started failed, and keeps the failure on the page", async () => {
+    stubSettingsFetch({
+      syncStatus: {
+        after: {
+          running: false,
+          run: 1,
+          finished_at: "2026-10-06T04:00:00Z",
+          error: "models.dev sync: fetch returned 403 Forbidden",
+        },
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    await user.click(await screen.findByRole("button", { name: /sync catalog now/i }))
+    await user.click(await screen.findByRole("button", { name: /^sync$/i }))
+
+    await waitFor(() => expect(toasts()).toMatch(/catalog sync failed: .*403 Forbidden/i), {
+      timeout: 4000,
+    })
+    expect(await screen.findByText(/the last catalog sync failed/i)).toBeInTheDocument()
+  })
+
+  it("shows a scheduled sync's failure nobody was watching", async () => {
+    stubSettingsFetch({
+      syncStatus: {
+        before: { running: false, run: 3, finished_at: "2026-10-06T04:00:00Z", error: "fetch: Forbidden" },
+      },
+    })
+    mount(<SettingsScreen />)
+
+    expect(await screen.findByText(/the last catalog sync failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/fetch: Forbidden/)).toBeInTheDocument()
+  })
+
+  it("says nothing about a sync that succeeded", async () => {
+    stubSettingsFetch({
+      syncStatus: { before: { running: false, run: 3, finished_at: "2026-10-06T04:00:00Z", error: "" } },
+    })
+    mount(<SettingsScreen />)
+
+    await screen.findByText("log.retention")
+    expect(screen.queryByText(/the last catalog sync failed/i)).not.toBeInTheDocument()
   })
 })
 
@@ -526,6 +606,80 @@ describe("the settings form", () => {
     expect(
       screen.queryAllByRole("status").some((s) => /must be at least 48h/.test(s.textContent ?? "")),
     ).toBe(false)
+  })
+
+  it("asks before an exit throws an unsaved edit away, and not once it is discarded", async () => {
+    const guard = vi.mocked(useUnsavedChangesGuard)
+    guard.mockClear()
+    stubSettingsFetch({})
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Keep request records for")
+    expect(guard).toHaveBeenLastCalledWith(false)
+    await user.clear(box)
+    await user.type(box, "96h")
+    expect(guard).toHaveBeenLastCalledWith(true)
+
+    await user.click(screen.getByRole("button", { name: /^discard$/i }))
+    expect(guard).toHaveBeenLastCalledWith(false)
+  })
+
+  it("refuses a size it cannot read on the row, before a round trip", async () => {
+    // The server only ever sees bytes, so its refusal of "2 TB" would be about
+    // a spelling the operator never used.
+    const { saves } = stubSettingsFetch({
+      config: () => {
+        const c = cfg()
+        c.values["capture.max_bytes"] = "1048576"
+        c.fields["capture.max_bytes"] = { source: "default", hot_reloadable: true, kind: "bytes" }
+        return c
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Largest body recorded")
+    await user.clear(box)
+    await user.type(box, "2 TB")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    expect(await screen.findByText("Use a size such as 512 KB, 32 MB or 1 GB.")).toBeInTheDocument()
+    expect(box).toHaveAttribute("aria-describedby", "capture.max_bytes-error")
+    expect(saves).toHaveLength(0)
+  })
+
+  it("puts a cross-key refusal on every field the gateway names", async () => {
+    stubSettingsFetch({
+      config: () => {
+        const c = cfg()
+        for (const [k, v] of [
+          ["policy.timeout.total", "5m0s"],
+          ["policy.timeout.connect", "10s"],
+          ["policy.timeout.first_byte", "1m0s"],
+        ]) {
+          c.values[k!] = v!
+          c.fields[k!] = { source: "default", hot_reloadable: true, kind: "duration" }
+        }
+        return c
+      },
+      save: {
+        status: 400,
+        body: {
+          error: "policy.timeout.total (30s) must be at least connect + first_byte (1m10s)",
+          keys: ["policy.timeout.total", "policy.timeout.connect", "policy.timeout.first_byte"],
+        },
+      },
+    })
+    const user = userEvent.setup()
+    mount(<SettingsScreen />)
+
+    const box = await screen.findByLabelText("Total request time")
+    await user.clear(box)
+    await user.type(box, "30s")
+    await user.click(await screen.findByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(screen.getAllByText(/must be at least connect \+ first_byte/)).toHaveLength(3))
   })
 
   it("toasts a refusal that names no field", async () => {
@@ -738,22 +892,25 @@ describe("the settings form", () => {
 
     const box = await screen.findByLabelText("Keep request records for")
     await user.clear(box)
-    await user.type(box, "96h")
+    // A spelling the gateway answers differently, so the box's text says
+    // which answer it was seeded from.
+    await user.type(box, "5760m")
     await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
     const statuses = await screen.findAllByRole("status")
     expect(statuses.some((s) => s.textContent?.includes("Settings saved"))).toBe(true)
     // The refetch is still in flight: what the operator typed is still what
     // the box shows, rather than the value the save replaced.
-    expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h")
+    expect(screen.getByLabelText("Keep request records for")).toHaveValue("5760m")
 
     held.open()
+    // 96h0m0s as the gateway reports it, shown without its zero units.
     await waitFor(() =>
-      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h"),
     )
   })
 
-  it("clears the Save bar and shows the stored spelling after a save", async () => {
+  it("clears the Save bar and shows the stored value after a save", async () => {
     stubSettingsFetch({
       configAfterSave: () => ({ ...cfg(), values: { ...cfg().values, "log.retention": "96h0m0s" } }),
     })
@@ -763,11 +920,11 @@ describe("the settings form", () => {
     const box = await screen.findByLabelText("Keep request records for")
     expect(box).toHaveValue("72h")
     await user.clear(box)
-    await user.type(box, "96h")
+    await user.type(box, "5760m")
     await user.click(await screen.findByRole("button", { name: /^save$/i }))
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h0m0s"),
+      expect(screen.getByLabelText("Keep request records for")).toHaveValue("96h"),
     )
     expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
   })

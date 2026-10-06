@@ -8,6 +8,7 @@ const provider = (over: Partial<FlowProvider> & { id: string }): FlowProvider =>
   priority: 1,
   candidate: true,
   credentials: 1,
+  keyless: false,
   cooling: 0,
   needsReauth: false,
   state: "healthy",
@@ -85,6 +86,15 @@ describe("the routing flow graph", () => {
     expect(nodes.find((n) => n.id === "provider:a")?.data.share).toBe(0.75)
   })
 
+  it("keeps provider rows clickable", () => {
+    // xyflow turns pointer events off on a node that is neither selectable
+    // nor draggable, so the row's link answered only the keyboard.
+    const { nodes } = buildGraph([], [provider({ id: "a" })], [], 0)
+    const row = nodes.find((n) => n.id === "provider:a")
+    expect(row?.style?.pointerEvents).toBe("all")
+    expect(row?.className).toContain("nopan")
+  })
+
   it("survives a window in which nothing was routed", () => {
     // A gateway that has served nothing yet must not divide by zero and
     // render NaN% on every row.
@@ -119,6 +129,15 @@ describe("what a provider row says about itself", () => {
     expect(
       providerNote(provider({ id: "a", credentials: 1, needsReauth: true })),
     ).toBe("1 credential · needs reconnection")
+  })
+
+  it("does not ask for a key a keyless provider never needed", () => {
+    // LM Studio serving every request read "no credentials", the same words
+    // a provider missing its key gets.
+    expect(providerNote(provider({ id: "lmstudio", credentials: 0, keyless: true }))).toBe(
+      "no key needed",
+    )
+    expect(providerNote(provider({ id: "groq", credentials: 0 }))).toBe("no credentials")
   })
 
   it("distinguishes switched off from never configured", () => {

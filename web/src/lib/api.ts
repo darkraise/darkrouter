@@ -31,9 +31,24 @@ export class ApiError extends Error {
     /** The parsed JSON error body, for a caller that needs more of it than
      *  the message -- such as whether a failed write had in fact committed. */
     readonly body?: unknown,
+    /** Seconds the server asked the caller to wait (Retry-After), when it
+     *  said. A rate-limited caller that is not told how long tries again
+     *  early and is refused again. */
+    readonly retryAfter?: number,
   ) {
     super(message)
   }
+}
+
+/** Retry-After in whole seconds, from either of its two forms: a delay, or
+ *  an HTTP date to wait until. Undefined when absent or unreadable. */
+export function retryAfterSeconds(header: string | null, now = Date.now()): number | undefined {
+  if (header === null || header.trim() === "") return undefined
+  const value = header.trim()
+  if (/^\d+$/.test(value)) return Number(value)
+  const at = Date.parse(value)
+  if (Number.isNaN(at)) return undefined
+  return Math.max(0, Math.ceil((at - now) / 1000))
 }
 
 /** A write the server committed but could not load into routing. It answers
@@ -194,7 +209,7 @@ async function send(
       // A non-JSON error body means something upstream of the API answered.
       // The status line is all there is to report.
     }
-    throw new ApiError(res.status, message, parsed)
+    throw new ApiError(res.status, message, parsed, retryAfterSeconds(res.headers.get("Retry-After")))
   }
   return res
 }
@@ -262,14 +277,19 @@ export async function* stream(
     credentials: "same-origin",
     signal,
   })
+  const requestId = res.headers.get("X-Darkrouter-Request") ?? ""
   if (!res.ok || !res.body) {
+    // A refused run still has a trace — every attempt it made — so the
+    // caller gets its id before the error rather than only on success. A
+    // session that has expired answers without one, and starts nothing.
+    if (requestId) onStart?.({ requestId })
     // A 401 here is ambiguous in a way request() never sees: this path also
     // carries a live executor run, and a bad credential answers 401 too —
     // that is the playground's whole reason to exist. throwOnExecutorError
     // tells the two apart.
     return await throwOnExecutorError(res)
   }
-  onStart?.({ requestId: res.headers.get("X-Darkrouter-Request") ?? "" })
+  onStart?.({ requestId })
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

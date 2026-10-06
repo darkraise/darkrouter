@@ -26,6 +26,24 @@ describe("ProviderIcon", () => {
     expect(container.textContent).toBe("AG")
   })
 
+  it("sizes the monogram from the type scale, never in pixels", () => {
+    // CLAUDE.md: a pixel size opts out of the font-size axis, and the 28px
+    // tile came out at 11px, below the 14px floor.
+    for (const [size, step] of [[28, "text-sm"], [36, "text-sm"], [44, "text-lg"]] as const) {
+      const { container, unmount } = render(<ProviderIcon id="my-thing" name="My Thing" size={size} />)
+      const tile = container.firstElementChild as HTMLElement
+      expect(tile.style.fontSize).toBe("")
+      expect(tile.className).toContain(step)
+      unmount()
+    }
+  })
+
+  it("draws OVHcloud's glyph on its brand tile", () => {
+    const { container } = render(<ProviderIcon preset="ovhcloud" id="ovhcloud" name="OVHcloud AI" />)
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.querySelector("svg path")).not.toBeNull()
+  })
+
   it("claims no brand for a provider that has no preset", () => {
     const { container } = render(<ProviderIcon id="my-thing" name="My Thing" />)
     expect(container.querySelector("img")).toBeNull()

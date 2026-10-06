@@ -62,11 +62,19 @@ import {
   type ConnectionType,
   type ProviderRow,
 } from "./provider-rows"
-import { breakersFor, discoveryLine, probeOutcome } from "./provider-state"
+import {
+  breakersFor,
+  coolingSubject,
+  discoveryBrief,
+  discoveryFailing,
+  discoveryLine,
+  probeOutcome,
+  takesCredential,
+} from "./provider-state"
 import { dateTime, zoneLabel } from "../../lib/format"
 import "./providers-table.css"
 
-export { breakersFor, discoveryLine, probeOutcome, providerState } from "./provider-state"
+export { breakersFor, discoveryBrief, discoveryLine, probeOutcome, providerState } from "./provider-state"
 
 export type ProviderView = "list" | "grid"
 
@@ -256,22 +264,28 @@ function buildColumns(actions: RowActions): Columns {
         <span className="flex min-w-[14rem] items-center gap-3">
           <ProviderIcon preset={r.row.preset} id={r.row.id} name={r.row.name} size={36} />
           <span className="flex min-w-0 flex-col">
-            <Link
-              to="/providers/$id"
-              params={{ id: r.row.id }}
-              className="truncate font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
-            >
-              {r.row.name}
-            </Link>
+            {/* The badge rides on the name's line rather than beside the
+                two-line block: there it widened the column by its own width,
+                and at a laptop width that is what pushed the table past its
+                card and put a column under the pinned actions. */}
+            <span className="flex min-w-0 items-center gap-2">
+              <Link
+                to="/providers/$id"
+                params={{ id: r.row.id }}
+                className="truncate font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--focus-ring))]"
+              >
+                {r.row.name}
+              </Link>
+              {r.row.freeTier && (
+                <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                  Free tier
+                </Badge>
+              )}
+            </span>
             <span className="truncate font-mono text-sm text-[hsl(var(--legend))]">
               {r.row.id} · {r.row.kind}
             </span>
           </span>
-          {r.row.freeTier && (
-            <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
-              Free tier
-            </Badge>
-          )}
         </span>
       ),
     },
@@ -296,18 +310,6 @@ function buildColumns(actions: RowActions): Columns {
         ),
     },
     {
-      id: "traffic",
-      // The window is in the header because it is the one thing the meter
-      // cannot say about itself.
-      header: "Traffic · 30d",
-      cell: ({ row: { original: r } }) =>
-        r.share !== undefined ? (
-          <ShareMeter fraction={r.share} label={`${Math.round(r.share * 100)}%`} />
-        ) : (
-          <span className="text-[hsl(var(--legend))]">—</span>
-        ),
-    },
-    {
       id: "state",
       header: "State",
       // A mark, not the word: most of two hundred rows are unconfigured, and
@@ -321,9 +323,12 @@ function buildColumns(actions: RowActions): Columns {
       cell: ({ row: { original: r } }) => {
         if (!r.row.provider) return <span className="text-[hsl(var(--legend))]">—</span>
         const line = discoveryLine(r.discovery)
-        const warn = r.discovery !== undefined && r.discovery.max_missing_streak > 0
-        // A tooltip rather than a title: the line is longer than the cell as
-        // soon as a provider has anything to report, and a title never shows
+        const warn =
+          r.discovery !== undefined &&
+          (r.discovery.max_missing_streak > 0 || discoveryFailing(r.discovery))
+        // The cell says the gist and the tooltip the whole line: in full it
+        // is longer than the cell as soon as a provider has anything to
+        // report. A tooltip rather than a title, because a title never shows
         // on touch or on keyboard focus.
         return (
           <Tooltip>
@@ -332,11 +337,11 @@ function buildColumns(actions: RowActions): Columns {
                 tabIndex={0}
                 className={
                   warn
-                    ? "block max-w-[11rem] truncate text-sm text-[hsl(var(--warning))]"
-                    : "block max-w-[11rem] truncate text-sm text-[hsl(var(--legend))]"
+                    ? "block whitespace-nowrap text-sm text-[hsl(var(--warning))]"
+                    : "block whitespace-nowrap text-sm text-[hsl(var(--legend))]"
                 }
               >
-                {line}
+                {discoveryBrief(r.discovery)}
               </span>
             </TooltipTrigger>
             <TooltipContent>
@@ -345,6 +350,24 @@ function buildColumns(actions: RowActions): Columns {
           </Tooltip>
         )
       },
+    },
+    {
+      id: "traffic",
+      // The window is in the header because it is the one thing the meter
+      // cannot say about itself.
+      //
+      // Last before the actions, after State and Discovery. At a laptop
+      // width the table is wider than its card, and the pinned actions cover
+      // whichever column comes last: when that was Discovery, a failing
+      // sweep read "discove". A share of traffic half under the actions
+      // still reads as a bar; a warning half under them reads as nothing.
+      header: "Traffic · 30d",
+      cell: ({ row: { original: r } }) =>
+        r.share !== undefined ? (
+          <ShareMeter fraction={r.share} label={`${Math.round(r.share * 100)}%`} />
+        ) : (
+          <span className="text-[hsl(var(--legend))]">—</span>
+        ),
     },
     {
       id: "actions",
@@ -405,18 +428,33 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
     <span className="flex gap-2">
       {/* A second key on a working provider is ordinary, and it opens the same
           dialog the unconfigured row does -- the preset is already settled, so
-          there is no picker to walk. Offered on a keyless provider too: its
-          endpoint can still sit behind a key, which is the case the detail
-          page's "add a credential anyway" already covers. */}
-      <Button
-        size="icon"
-        variant="ghost"
-        title={`Add credentials — add another key to ${row.name}`}
-        onClick={() => actions.onAdd(row)}
-      >
-        <Plus className="size-[var(--icon-size)]" />
-        <span className="sr-only">Add credentials</span>
-      </Button>
+          there is no picker to walk. Offered on an optional or anonymous
+          provider too, whose endpoint still reads a key, but never on a `none`
+          one: that style sends no key, so the dialog would store a secret
+          nothing ever uses. */}
+      {!row.provider || takesCredential(row.provider) ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          title={
+            row.accounts === 0
+              ? `Add credentials — add a key to ${row.name}`
+              : `Add credentials — add another key to ${row.name}`
+          }
+          onClick={() => actions.onAdd(row)}
+        >
+          <Plus className="size-[var(--icon-size)]" />
+          <span className="sr-only">Add credentials</span>
+        </Button>
+      ) : (
+        // Holds the slot so the icons below line up with every other row's.
+        // Invisible is out of the accessibility tree and the tab order too.
+        <span aria-hidden="true" className="invisible">
+          <Button size="icon" variant="ghost" tabIndex={-1} disabled>
+            <Plus className="size-[var(--icon-size)]" />
+          </Button>
+        </span>
+      )}
       <Button
         size="icon"
         variant="ghost"
@@ -429,7 +467,11 @@ function RowActionCell({ r, actions }: { r: ListRow; actions: RowActions }) {
       <Button
         size="icon"
         variant="ghost"
-        title="Probe — check the credential is accepted"
+        title={
+          row.accounts > 0
+            ? "Probe — check the credential is accepted"
+            : "Probe — check the provider answers"
+        }
         onClick={() => actions.onProbe(row.id)}
       >
         <Radio className="size-[var(--icon-size)]" />
@@ -521,8 +563,8 @@ export function ProvidersScreen() {
   const probe = useApiMutation({
     mutationFn: (id: string) => api.post<ProbeResult>(`/api/providers/${id}/test`, {}),
     invalidates: [keys.providers, keys.health],
-    onSuccess: (result) => {
-      const verdict = probeOutcome(result)
+    onSuccess: (result, id) => {
+      const verdict = probeOutcome(result, providers.data?.providers.find((p) => p.id === id))
       if (verdict.kind === "success") toast.success(verdict.message)
       else toast.error(verdict.message)
     },
@@ -535,7 +577,10 @@ export function ProvidersScreen() {
   const providerRows = useMemo(() => providers.data?.providers ?? [], [providers.data])
   const healthRows = useMemo(() => health.data ?? [], [health.data])
   const discoveryRows = useMemo(() => discovery.data?.providers ?? [], [discovery.data])
-  const all = useMemo(() => mergeProviderRows(presetRows, providerRows), [presetRows, providerRows])
+  const all = useMemo(
+    () => mergeProviderRows(presetRows, providerRows, discoveryRows),
+    [presetRows, providerRows, discoveryRows],
+  )
   const rows = useMemo(
     () => filterProviderRows(all, { q, state, connection, configuredOnly, freeTier }),
     [all, q, state, connection, configuredOnly, freeTier],
@@ -552,6 +597,9 @@ export function ProvidersScreen() {
     () => connectionCounts(filterProviderRows(all, { q, state, configuredOnly, freeTier })),
     [all, q, state, configuredOnly, freeTier],
   )
+  // "All" is one more chip over the same rows, so it counts them the same way.
+  // Counting the whole catalogue read 209 beside a list of six.
+  const allCount = Object.values(counts).reduce((n, c) => n + c, 0)
 
   // The mutation triggers are stable across renders, so the column set is
   // built once and DataTable is not handed a new table definition per poll.
@@ -715,7 +763,7 @@ export function ProvidersScreen() {
         >
           <ToggleGroupItem value="all" className={CHIP_SHAPE}>
             All
-            <span className="tabular-nums text-[hsl(var(--legend))]">{all.length}</span>
+            <span className="tabular-nums text-[hsl(var(--legend))]">{allCount}</span>
           </ToggleGroupItem>
           {CONNECTION_ORDER.map((type) => (
             <ToggleGroupItem
@@ -750,6 +798,7 @@ export function ProvidersScreen() {
         preset={keylessPreset}
         open={keylessPreset !== null}
         onOpenChange={(next) => !next && setKeylessPreset(null)}
+        onDone={(id) => void navigate({ to: "/providers/$id", params: { id } })}
       />
 
       <AddLocalDialog
@@ -811,17 +860,28 @@ export function ProvidersScreen() {
         // supports, so it is never empty on its own.
         <NoMatch what="providers" onClear={clearFilters} />
       ) : view === "grid" ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        // One column until there is room for two names beside their marks and
+        // state badges -- at a tablet's width the sidebar leaves about 500px,
+        // and two cards in it cut every name to four letters. `grid-cols-1`
+        // is minmax(0, 1fr): with no template the
+        // implicit column was `auto` and grew to the card's max-content, which
+        // pushed every card past the right edge of a phone.
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
           {list.map((r) => (
             <ProviderCard
               key={r.row.id}
               row={r.row}
               mix={r.mix}
               onTest={() => setTesting(r.row)}
-              onAdd={() =>
-                r.row.keyless && !r.row.configured
-                  ? rowActions.onAddKeyless(r.row)
-                  : rowActions.onAdd(r.row)
+              onAdd={
+                // The same rule as the row's "+": nothing to add to a provider
+                // whose style sends no key.
+                r.row.provider && !takesCredential(r.row.provider)
+                  ? undefined
+                  : () =>
+                      r.row.keyless && !r.row.configured
+                        ? rowActions.onAddKeyless(r.row)
+                        : rowActions.onAdd(r.row)
               }
               share={r.share}
               onOpen={() => void navigate({ to: "/providers/$id", params: { id: r.row.id } })}
@@ -855,8 +915,10 @@ export function ProvidersScreen() {
 
       {healthRows.some((e) => e.cooling_until) && (
         <Card className="mt-6 p-4">
+          {/* Breakers, not credentials: most of them are per model, and a
+              keyless provider has no credential to cool at all. */}
           <h2 className="mb-2 text-sm font-medium">
-            Cooling credentials
+            Cooling breakers
             <span className="ml-2 font-normal text-[hsl(var(--legend))]">{zoneLabel()}</span>
           </h2>
           <ul className="flex flex-col gap-1 font-mono text-sm">
@@ -864,7 +926,7 @@ export function ProvidersScreen() {
               .filter((e) => e.cooling_until)
               .map((e) => (
                 <li key={`${e.provider_id}/${e.key_id}/${e.model}`}>
-                  {e.provider_id}/{e.key_id || "—"} · backoff {e.backoff_level} ·{" "}
+                  {e.provider_id}/{coolingSubject(e)} · backoff {e.backoff_level} ·{" "}
                   {e.consecutive_failures} consecutive failures · until{" "}
                   {dateTime(e.cooling_until as string)}
                 </li>

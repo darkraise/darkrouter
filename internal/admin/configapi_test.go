@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -350,6 +351,61 @@ func TestPutConfigAcceptsARestartOnlyFieldAndNamesIt(t *testing.T) {
 	}
 }
 
+// Moving a restart-only key back to the value the process booted with leaves
+// nothing to restart for. The save's answer, the warnings and pending_restart
+// all have to say so: the screen once toasted "takes effect after a restart"
+// and kept a restart warning up beside a pending list that was empty.
+func TestPutConfigRevertingToTheBootValueRequiresNoRestart(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	booted := getConfig(t, s).Values["catalog.sync_timeout"]
+
+	put := func(body string) []string {
+		t.Helper()
+		w := do(t, s, cookie, token, "PUT", "/api/config", body)
+		if w.Code != 200 {
+			t.Fatalf("PUT %s = %d: %s", body, w.Code, w.Body.String())
+		}
+		var out struct {
+			RestartRequired []string `json:"restart_required"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.RestartRequired
+	}
+	restartWarned := func() bool {
+		for _, w := range getConfig(t, s).Warnings {
+			if strings.Contains(w, "catalog.sync_timeout") && strings.Contains(w, "restart") {
+				return true
+			}
+		}
+		return false
+	}
+
+	if got := put(`{"set":{"catalog.sync_timeout":"31s"}}`); !slices.Equal(got, []string{"catalog.sync_timeout"}) {
+		t.Fatalf("restart_required = %v after a change, want [catalog.sync_timeout]", got)
+	}
+	if !restartWarned() {
+		t.Fatal("no restart warning after a restart-only change")
+	}
+
+	if got := put(fmt.Sprintf(`{"set":{"catalog.sync_timeout":%q}}`, booted)); len(got) != 0 {
+		t.Errorf("restart_required = %v after reverting to the boot value, want none", got)
+	}
+	if restartWarned() {
+		t.Error("the restart warning outlived a revert to the boot value")
+	}
+	if got := getConfig(t, s).PendingRestart; len(got) != 0 {
+		t.Errorf("pending_restart = %v after reverting, want none", got)
+	}
+
+	// A reset of a stored row equal to the default changes nothing running.
+	if got := put(`{"reset":["catalog.sync_timeout"]}`); len(got) != 0 {
+		t.Errorf("restart_required = %v for a reset to the running value, want none", got)
+	}
+}
+
 // Never null: a client cannot tell a JSON null from a field an older build did
 // not serve.
 func TestPutConfigRestartRequiredIsAlwaysAnArray(t *testing.T) {
@@ -395,6 +451,41 @@ func TestPutConfigRefusesABootstrapKey(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "DARKROUTER_PROXY_TOKEN") {
 		t.Errorf("the refusal does not name the variable: %s", w.Body.String())
+	}
+}
+
+// A refusal names the keys it is about beside its sentence, so the console
+// places it on those rows without reading key names out of the text. A
+// cross-key rule names every key in it; a refusal about no key names none.
+func TestPutConfigRefusalCarriesItsKeys(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	refuse := func(body string) (string, []string, bool) {
+		t.Helper()
+		w := do(t, s, cookie, token, "PUT", "/api/config", body)
+		if w.Code != 400 {
+			t.Fatalf("PUT %s = %d, want 400: %s", body, w.Code, w.Body.String())
+		}
+		var out struct {
+			Error string   `json:"error"`
+			Keys  []string `json:"keys"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Error, out.Keys, strings.Contains(w.Body.String(), `"keys"`)
+	}
+
+	msg, keys, _ := refuse(`{"set":{"capture.max_bytes":"2 TB"}}`)
+	if msg != "capture.max_bytes must be a whole number of bytes" || !slices.Equal(keys, []string{"capture.max_bytes"}) {
+		t.Errorf("bytes refusal = %q %v", msg, keys)
+	}
+	msg, keys, _ = refuse(`{"set":{"policy.timeout.total":"30s"}}`)
+	if strings.Contains(msg, "[") || len(keys) != 3 || !slices.Contains(keys, "policy.timeout.connect") {
+		t.Errorf("rule refusal = %q %v, want a sentence and all three keys", msg, keys)
+	}
+	if _, _, has := refuse(`{"set":{"no.such.key":"1"}}`); has {
+		t.Error("a refusal about no setting carried a keys field")
 	}
 }
 

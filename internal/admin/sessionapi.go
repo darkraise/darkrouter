@@ -7,7 +7,8 @@ import (
 	"github.com/darkraise/darkrouter/internal/store"
 )
 
-// minPasswordChars is the floor the setup page and a password change share.
+// minPasswordChars is the floor the setup page and a password change share,
+// in characters rather than bytes (see passwordProblem).
 const minPasswordChars = 12
 
 // sessionIDPrefix is how much of a stored session id a listing shows and the
@@ -120,12 +121,8 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "the current password is wrong")
 		return
 	}
-	if len(body.New) < minPasswordChars {
-		writeError(w, http.StatusBadRequest, "the new password must be at least 12 characters")
-		return
-	}
-	if len(body.New) > maxPasswordBytes {
-		writeError(w, http.StatusBadRequest, "the new password must be at most 72 bytes")
+	if msg := passwordProblem("the new password", body.New); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	hash, err := s.hashPassword(body.New)

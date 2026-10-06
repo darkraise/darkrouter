@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { Transcript, nearBottom } from "./transcript"
 
@@ -93,5 +93,68 @@ describe("following a streaming answer down", () => {
     const el = document.createElement("div")
     scrolled(el, 0, 400, 400)
     expect(nearBottom(el)).toBe(true)
+  })
+})
+
+describe("the transcript's follow", () => {
+  // The follow runs on content growth, which jsdom never produces, so the
+  // observer is captured and fired by hand where the browser would.
+  function mountFollowing(messages: { role: "user" | "assistant"; content: string }[]) {
+    let grew = () => {}
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          grew = cb
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    const view = render(<Transcript messages={messages} routes={{}} busy model="fast" />)
+    const el = view.container.firstElementChild as HTMLElement
+    return { view, el, grew: () => grew() }
+  }
+  /** As `scrolled`, but with a scrollTop the follow can write to. */
+  function laidOut(el: HTMLElement, top: number, client: number, height: number) {
+    Object.defineProperty(el, "scrollTop", { value: top, writable: true, configurable: true })
+    Object.defineProperty(el, "clientHeight", { value: client, configurable: true })
+    Object.defineProperty(el, "scrollHeight", { value: height, configurable: true })
+  }
+  const turns = [
+    { role: "user" as const, content: "one" },
+    { role: "assistant" as const, content: "first answer" },
+  ]
+
+  it("keeps the bottom in view however much an answer grows at once", () => {
+    // The old check measured after growth: one jump past the slack -- a
+    // throttled Markdown flush, or the final render once streaming ended --
+    // read as "scrolled up", and the view stopped moving for good.
+    const { el, grew } = mountFollowing(turns)
+    laidOut(el, 0, 400, 1400)
+    grew()
+    expect(el.scrollTop).toBe(1400)
+    vi.unstubAllGlobals()
+  })
+
+  it("lets the reader scroll up, and brings them back down on their next send", () => {
+    const { view, el, grew } = mountFollowing(turns)
+    laidOut(el, 100, 400, 1400)
+    fireEvent.scroll(el)
+    grew()
+    expect(el.scrollTop).toBe(100)
+
+    view.rerender(
+      <Transcript
+        messages={[...turns, { role: "user", content: "two" }, { role: "assistant", content: "" }]}
+        routes={{}}
+        busy
+        model="fast"
+      />,
+    )
+    laidOut(el, 100, 400, 1600)
+    grew()
+    expect(el.scrollTop).toBe(1600)
+    vi.unstubAllGlobals()
   })
 })

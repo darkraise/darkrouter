@@ -99,6 +99,8 @@ import YiMono from "@lobehub/icons/es/Yi/components/Mono"
 import ZAIMono from "@lobehub/icons/es/ZAI/components/Mono"
 import ZenMuxMono from "@lobehub/icons/es/ZenMux/components/Mono"
 
+import { OvhcloudMark } from "./ovhcloud-mark"
+
 export type BrandMark = {
   Mark: ComponentType<{ size?: number }>
   /** A CSS background -- flat for most brands, a gradient for five. Null when
@@ -165,6 +167,8 @@ export const BRAND_MARKS: Record<string, BrandMark> = {
   "openai": { Mark: OpenAIMono, background: "#000", color: "#fff" },
   "opencode": { Mark: OpenCodeMono, background: "#000", color: "#fff" },
   "openrouter": { Mark: OpenRouterMono, background: "#000", color: "#C8FF00" },
+  // Not from @lobehub/icons, which has no OVHcloud mark: see ovhcloud-mark.tsx.
+  "ovhcloud": { Mark: OvhcloudMark, background: "#2744a0", color: "#fff" },
   "perplexity": { Mark: PerplexityMono, background: "#22B8CD", color: "#000" },
   "pollinations": { Mark: PollinationsMono, background: "#000", color: "#fff" },
   "poolside": { Mark: PoolsideMono, background: "#4137FF", color: "#fff" },

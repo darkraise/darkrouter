@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react"
 import { Banner, Card } from "darkraise-ui"
 import { useConfig, useOverview, useProviders, useUsage } from "../../lib/queries"
-import type { Overview, UsageRow } from "../../lib/api-types"
+import type { Overview, Provider, UsageRow } from "../../lib/api-types"
 import { durationParts, money, percent } from "../../lib/format"
 import { AddAccountsDialog } from "../providers/add-accounts-dialog"
+import { isKeyless } from "../providers/provider-state"
 import { FirstRunProviders } from "../shell/first-run-providers"
 import { LoadError } from "../shell/screen-state"
 import { FlowGraph, aliasesFromUsage, type FlowProvider } from "./flow-graph"
@@ -36,6 +37,15 @@ export function spendReading(spend: Overview["today_spend"]): string {
 export function spendQualifier(spend: Overview["today_spend"]): string | null {
   if (!spend.estimated || !spend.priced || spend.micros === null) return null
   return "this figure includes estimated prices"
+}
+
+/** Whether the live window measured anything. With no request in it, a p50 of
+ *  0 ms and an error rate of 0% are not readings but the absence of one, and
+ *  printing them as numbers reads as an excellent window that never happened.
+ *  `requests` is the server's count; an older server without it is judged
+ *  by its rate, which is zero exactly when the count is. */
+export function windowMeasured(o: Overview): boolean {
+  return (o.requests ?? o.requests_per_min) > 0
 }
 
 /** Daily totals in day order, so a sparkline's x-axis is time. */
@@ -190,7 +200,11 @@ function TileSkeleton() {
 export function flowProviders(
   overview: Overview,
   byProvider: UsageRow[],
+  providers: Provider[] = [],
 ): FlowProvider[] {
+  // The tiles carry counts and states only; whether a provider needs a key at
+  // all is its auth style, read from the providers list.
+  const keyless = new Set(providers.filter(isKeyless).map((p) => p.id))
   const volume = new Map<string, number>()
   for (const row of byProvider) {
     if (!row.key) continue
@@ -209,10 +223,22 @@ export function flowProviders(
       // the window happened to contain. `degraded` still routes.
       candidate: tile.state !== "disabled" && tile.state !== "unconfigured",
       credentials: tile.credentials,
+      keyless: keyless.has(tile.id),
       cooling: tile.cooling,
       needsReauth: tile.needs_reauth,
       state: tile.state,
     }))
+}
+
+/** The router's "failed over" reading: requests, as the server counts them.
+ *  The arcs summed are only the fallback for a server that predates the
+ *  count — they miss a same-provider rescue and count a request that failed
+ *  at two providers twice. */
+export function routerFailoverCount(
+  failedOver: number | undefined,
+  arcs: { count: number }[],
+): number {
+  return failedOver ?? arcs.reduce((n, e) => n + e.count, 0)
 }
 
 export function OverviewScreen() {
@@ -231,18 +257,25 @@ export function OverviewScreen() {
   // returns a response shaped differently than expected must read as "not
   // known yet" rather than crash the whole screen on a missing collection.
   const noProviders = providers.data?.providers?.length === 0
+  const measured = o ? windowMeasured(o) : false
   const p95 = o ? durationParts(o.latency.p95_ms) : null
   const p50 = o ? durationParts(o.latency.p50_ms) : null
+  const unmeasured = "no requests in the last 5 min"
 
   // The graph's inputs, rebuilt only when the responses that feed them
   // change. Every three-second poll re-rendered this screen, and fresh
   // arrays on each pass made the canvas lay itself out again for nothing.
   const graphAliases = useMemo(() => aliasesFromUsage(aliasDays ?? []), [aliasDays])
+  const providerList = providers.data?.providers
   const graphProviders = useMemo(
-    () => (o ? flowProviders(o, providerDays ?? []) : []),
-    [o, providerDays],
+    () => (o ? flowProviders(o, providerDays ?? [], providerList ?? []) : []),
+    [o, providerDays, providerList],
   )
-  const failoverEdges = o?.failover_edges
+  // From the provider usage rather than from /api/overview: the volumes the
+  // graph draws are that response's days, and returns from the overview's
+  // five-minute window beside them drew arcs between rows reading "no
+  // traffic" under a router reading "0 requests".
+  const failoverEdges = byProvider.data?.failover_edges
   const graphFailovers = useMemo(
     () =>
       (failoverEdges ?? []).map((e) => ({
@@ -310,7 +343,8 @@ export function OverviewScreen() {
                   <Tile
                     caption="Error rate"
                     window={LIVE_WINDOW}
-                    readings={[{ value: percent(o.error_rate) }]}
+                    readings={[{ value: measured ? percent(o.error_rate) : "—" }]}
+                    note={measured ? null : unmeasured}
                     points={errorSeries(days)}
                     // Named for what it plots. The daily rollup has no error
                     // column, so the trend under an error rate is the closest
@@ -319,12 +353,20 @@ export function OverviewScreen() {
                     seriesLabel={`${SERIES_WINDOW} · failovers per day`}
                   />
                   <Tile
-                    caption="p50 latency"
+                    caption="Latency"
                     window={LIVE_WINDOW}
-                    readings={[
-                      { label: "p50", value: p50!.value, unit: p50!.unit },
-                      { label: "p95", value: p95!.value, unit: p95!.unit },
-                    ]}
+                    readings={
+                      measured
+                        ? [
+                            { label: "p50", value: p50!.value, unit: p50!.unit },
+                            { label: "p95", value: p95!.value, unit: p95!.unit },
+                          ]
+                        : [
+                            { label: "p50", value: "—" },
+                            { label: "p95", value: "—" },
+                          ]
+                    }
+                    note={measured ? null : unmeasured}
                     // usage_daily has no per-day latency column, so there is
                     // no series to plot here.
                     seriesLabel="live window only"
@@ -360,10 +402,19 @@ export function OverviewScreen() {
                 thicker edge, larger share
               </li>
               <li className="flex items-center gap-1.5">
-                <span
-                  className="h-0.5 w-6 rounded border-t-2 border-dashed border-[hsl(var(--info))] bg-transparent"
-                  aria-hidden="true"
-                />
+                {/* Drawn as the edge itself. A dashed border two pixels tall
+                    painted solid, identical to the swatch beside it. */}
+                <svg className="h-1 w-6" viewBox="0 0 24 4" aria-hidden="true">
+                  <line
+                    x1="0"
+                    y1="2"
+                    x2="24"
+                    y2="2"
+                    stroke="hsl(var(--info))"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                  />
+                </svg>
                 failed over from somewhere else
               </li>
               <li className="flex items-center gap-1.5">
@@ -380,10 +431,11 @@ export function OverviewScreen() {
                 aliases={graphAliases}
                 providers={graphProviders}
                 failovers={graphFailovers}
-                // Every return the graph draws, summed — not the five rows
-                // /api/overview caps its recent list at, which would report a
-                // busy window as five.
-                failoverCount={o.failover_edges.reduce((n, e) => n + e.requests, 0)}
+                // Requests that failed over, over the same days as the
+                // volumes — not the five rows /api/overview caps its recent
+                // list at, and not the arcs summed: a rescue by another model
+                // on the same provider draws no arc.
+                failoverCount={routerFailoverCount(byProvider.data?.failed_over, graphFailovers)}
               />
             ) : (
               // The heading and its explanation without a canvas beneath them

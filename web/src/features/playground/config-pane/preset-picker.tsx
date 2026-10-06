@@ -41,9 +41,15 @@ function bodyFor(name: string, config: PlaygroundConfig) {
 export function PresetPicker({
   config,
   onChange,
+  loadDisabled = false,
 }: {
   config: PlaygroundConfig
   onChange: (next: PlaygroundConfig) => void
+  /** Set where the pane is locked. Only loading changes the settings; saving
+   *  them as a preset or deleting another preset does not, so those stay
+   *  open -- and a conversation whose settings worked is exactly when an
+   *  operator wants to keep them. */
+  loadDisabled?: boolean
 }) {
   const { data: playgroundPresets } = usePlaygroundPresets()
   const [open, setOpen] = useState(false)
@@ -97,6 +103,7 @@ export function PresetPicker({
       <div className="flex items-center gap-2">
         <Select
           value=""
+          disabled={loadDisabled}
           onValueChange={(id) => {
             const found = (playgroundPresets ?? []).find((p) => p.id === id)
             if (found) load(found)

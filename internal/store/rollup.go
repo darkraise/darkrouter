@@ -29,22 +29,7 @@ const settingPruneCutoff = "log_prune_cutoff"
 // otherwise never recompute again.
 func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	started := time.Now()
-	utc := now.UTC()
-	startOfToday := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
-	yesterday := startOfToday.AddDate(0, 0, -1)
-	from := yesterday
-	to := startOfToday.AddDate(0, 0, 1)
-
-	// Yesterday and today are recomputed wholesale. That is safe because
-	// log.retention is floored at two days, so pruning can never reach a row
-	// inside this window -- a recompute always sees everything the day had.
-	// The previous run's day is safe for the same reason: a prune after that
-	// run, while the gateway was still up, cannot have reached two days
-	// before it, and RunRollup catches up at startup, before retention's
-	// first prune. Not the day before it, which a prune in the hour after
-	// that run can have cut into. None of that holds when rollups kept
-	// failing while retention ran on, so the reach-back skips the previous
-	// run's day once a prune has reached into it.
+	_, yesterday, to := rollupDays(now)
 
 	// The window's rows are cleared rather than upserted. 0006 widened the key
 	// with alias, so a recomputed group no longer matches the row a narrower
@@ -59,27 +44,9 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	last, ok, err := getSetting(ctx, tx, settingRollupLastRun)
+	from, err := rollupFrom(ctx, tx, now)
 	if err != nil {
 		return fmt.Errorf("rollup: %w", err)
-	}
-	if ms, perr := strconv.ParseInt(last, 10, 64); ok && perr == nil {
-		lu := time.UnixMilli(ms).UTC()
-		if lastDay := time.Date(lu.Year(), lu.Month(), lu.Day(), 0, 0, 0, 0, time.UTC); lastDay.Before(from) {
-			from = lastDay
-			// Rollups that keep failing while the gateway stays up leave the
-			// last run's day behind retention. Once a prune has cut into it,
-			// it can no longer be rebuilt whole, so what usage_daily already
-			// holds for it is the better record. Only that day: the days after
-			// it were never rolled up, so whatever survives beats no row.
-			fence, ferr := firstUnprunedDay(ctx, tx)
-			if ferr != nil {
-				return fmt.Errorf("rollup: %w", ferr)
-			}
-			if fence.After(lastDay) {
-				from = lastDay.AddDate(0, 0, 1)
-			}
-		}
 	}
 
 	if _, err := tx.ExecContext(ctx,
@@ -97,40 +64,7 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 		 SELECT day, provider_id, model, alias,
 		        sum(is_served), sum(is_attempt), sum(t_in), sum(t_out),
 		        CASE WHEN count(c) = 0 THEN NULL ELSE sum(c) END
-		   FROM (
-		     -- Attributed to the attempt's OWN provider: a failover's discarded
-		     -- tokens were burned where they were tried, not where the retry
-		     -- happened to succeed.
-		     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch') AS day,
-		            a.provider_id AS provider_id, a.model AS model,
-		            r.resolved_alias AS alias,
-		            -- Only the serving attempt counts as a request, so summing
-		            -- this column across providers still equals the real
-		            -- request count. Keyed on the outcome rather than on
-		            -- matching the request's final provider: the pre-commit 400
-		            -- retry re-attempts the SAME provider and model, so a
-		            -- provider match identifies two rows where one served.
-		            CASE WHEN a.outcome = 'success' THEN 1 ELSE 0 END AS is_served,
-		            1 AS is_attempt,
-		            coalesce(a.tokens_in, 0) AS t_in,
-		            coalesce(a.tokens_out, 0) AS t_out,
-		            a.cost_micros AS c
-		       FROM requests r
-		       JOIN request_attempts a ON a.request_id = r.id
-		      WHERE r.ts >= ? AND r.ts < ?
-		     UNION ALL
-		     -- A request that predates attempt rows still has its own counts.
-		     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch'),
-		            r.final_provider_id, r.final_model, r.resolved_alias,
-		            1, 0,
-		            coalesce(r.tokens_in, 0), coalesce(r.tokens_out, 0),
-		            r.cost_micros
-		       FROM requests r
-		      WHERE r.ts >= ? AND r.ts < ?
-		        AND r.final_provider_id <> ''
-		        AND NOT EXISTS (
-		              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
-		   )
+		   FROM (`+usageSourceSQL+`)
 		  GROUP BY day, provider_id, model, alias`,
 		from.UnixMilli(), to.UnixMilli(), from.UnixMilli(), to.UnixMilli()); err != nil {
 		return fmt.Errorf("rollup: %w", err)
@@ -149,6 +83,121 @@ func (d *DB) Rollup(ctx context.Context, now time.Time) error {
 			"duration", time.Since(started))
 	}
 	return nil
+}
+
+// usageSourceSQL is one row per attempt (or per attempt-less request) with the
+// day and the three keys usage_daily is grouped by. It takes the window twice,
+// as (from, to, from, to) in unix milliseconds.
+//
+// Shared by the rollup and by UsageBy's read of the days the rollup has not
+// finalized yet, so the two cannot disagree about what a day counted.
+const usageSourceSQL = `
+     -- Attributed to the attempt's OWN provider: a failover's discarded
+     -- tokens were burned where they were tried, not where the retry
+     -- happened to succeed.
+     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch') AS day,
+            a.provider_id AS provider_id, a.model AS model,
+            r.resolved_alias AS alias,
+            -- Only the serving attempt counts as a request, so summing
+            -- this column across providers still equals the real
+            -- request count. Keyed on the outcome rather than on
+            -- matching the request's final provider: the pre-commit 400
+            -- retry re-attempts the SAME provider and model, so a
+            -- provider match identifies two rows where one served.
+            CASE WHEN a.outcome = 'success' THEN 1 ELSE 0 END AS is_served,
+            1 AS is_attempt,
+            coalesce(a.tokens_in, 0) AS t_in,
+            coalesce(a.tokens_out, 0) AS t_out,
+            a.cost_micros AS c
+       FROM requests r
+       JOIN request_attempts a ON a.request_id = r.id
+      WHERE r.ts >= ? AND r.ts < ?
+     UNION ALL
+     -- A request that predates attempt rows still has its own counts.
+     SELECT strftime('%Y-%m-%d', r.ts / 1000, 'unixepoch'),
+            r.final_provider_id, r.final_model, r.resolved_alias,
+            1, 0,
+            coalesce(r.tokens_in, 0), coalesce(r.tokens_out, 0),
+            r.cost_micros
+       FROM requests r
+      WHERE r.ts >= ? AND r.ts < ?
+        AND r.final_provider_id <> ''
+        AND NOT EXISTS (
+              SELECT 1 FROM request_attempts a WHERE a.request_id = r.id)
+`
+
+// rollupDays is the start of today, of yesterday, and of tomorrow in UTC for
+// now: the two days every rollup recomputes, and the end of its window.
+func rollupDays(now time.Time) (today, yesterday, tomorrow time.Time) {
+	utc := now.UTC()
+	today = time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
+	return today, today.AddDate(0, 0, -1), today.AddDate(0, 0, 1)
+}
+
+// rollupFrom is the first day a rollup at now recomputes: yesterday, or the
+// day of the previous run when that is older.
+//
+// Yesterday and today are recomputed wholesale. That is safe because
+// log.retention is floored at two days, so pruning can never reach a row
+// inside this window -- a recompute always sees everything the day had.
+// The previous run's day is safe for the same reason: a prune after that
+// run, while the gateway was still up, cannot have reached two days
+// before it, and RunRollup catches up at startup, before retention's
+// first prune. Not the day before it, which a prune in the hour after
+// that run can have cut into. None of that holds when rollups kept
+// failing while retention ran on, so the reach-back skips the previous
+// run's day once a prune has reached into it.
+func rollupFrom(ctx context.Context, q queryer, now time.Time) (time.Time, error) {
+	_, from, _ := rollupDays(now)
+	last, ok, err := getSetting(ctx, q, settingRollupLastRun)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if ms, perr := strconv.ParseInt(last, 10, 64); ok && perr == nil {
+		lu := time.UnixMilli(ms).UTC()
+		if lastDay := time.Date(lu.Year(), lu.Month(), lu.Day(), 0, 0, 0, 0, time.UTC); lastDay.Before(from) {
+			from = lastDay
+			// Rollups that keep failing while the gateway stays up leave the
+			// last run's day behind retention. Once a prune has cut into it,
+			// it can no longer be rebuilt whole, so what usage_daily already
+			// holds for it is the better record. Only that day: the days after
+			// it were never rolled up, so whatever survives beats no row.
+			fence, ferr := firstUnprunedDay(ctx, q)
+			if ferr != nil {
+				return time.Time{}, ferr
+			}
+			if fence.After(lastDay) {
+				from = lastDay.AddDate(0, 0, 1)
+			}
+		}
+	}
+	return from, nil
+}
+
+// pendingFrom is the first day usage_daily does not yet hold in full: the
+// day of the last committed rollup, whose requests after that run are still
+// only in the requests table, or rollupFrom's reach-back when that is
+// earlier. Before any rollup has run it is rollupFrom itself.
+//
+// The previous run's yesterday is left to usage_daily: that run recomputed it
+// whole, and what can still land on it afterwards is only a request that
+// began before midnight and finished after that run.
+func pendingFrom(ctx context.Context, q queryer, now time.Time) (time.Time, error) {
+	from, err := rollupFrom(ctx, q, now)
+	if err != nil {
+		return time.Time{}, err
+	}
+	last, ok, err := getSetting(ctx, q, settingRollupLastRun)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if ms, perr := strconv.ParseInt(last, 10, 64); ok && perr == nil {
+		lu := time.UnixMilli(ms).UTC()
+		if lastDay := time.Date(lu.Year(), lu.Month(), lu.Day(), 0, 0, 0, 0, time.UTC); lastDay.After(from) {
+			from = lastDay
+		}
+	}
+	return from, nil
 }
 
 // firstUnprunedDay is the start of the earliest UTC day no prune has reached

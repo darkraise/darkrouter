@@ -14,7 +14,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function mount(tokens: unknown[], values: Record<string, string> = {}, saveError?: string) {
+function mount(
+  tokens: unknown[],
+  values: Record<string, string> = {},
+  saveError?: string,
+  auth: { issued?: boolean; shared_secret?: boolean } = {},
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -24,8 +29,21 @@ function mount(tokens: unknown[], values: Record<string, string> = {}, saveError
         Object.assign(values, patch.set)
         return new Response(JSON.stringify({ valid: true, restart_required: [] }))
       }
+      if (url === "/api/proxy-tokens" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            id: "t9",
+            name: "laptop",
+            prefix: "dk_new",
+            created_at: "2026-08-01T10:00:00Z",
+            last_used_at: null,
+            secret: "dk_new_secret",
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        )
+      }
       const body = url.includes("/api/proxy-tokens")
-        ? { tokens }
+        ? { tokens, issued: auth.issued ?? false, shared_secret: auth.shared_secret ?? false }
         : url.includes("/api/models")
           ? { models: [], aliases: [] }
           : url.includes("/api/config")
@@ -84,16 +102,86 @@ describe("the connect screen", () => {
     expect(screen.getByText(/ANTHROPIC_BASE_URL=http:\/\/localhost:18080/)).toBeInTheDocument()
   })
 
-  it("keeps the draft and existing URLs when saving is rejected", async () => {
+  it("keeps the draft and existing URLs when saving is rejected, and says why beside the field", async () => {
     const user = userEvent.setup()
     mount([], { "server.public_url": "https://llm.example.com" }, "Invalid URL")
     const input = await screen.findByLabelText("Public base URL")
     await user.clear(input)
-    await user.type(input, "invalid?")
+    await user.type(input, "https://other.example.com")
     await user.click(screen.getByRole("button", { name: "Save address" }))
     await waitFor(() => expect(screen.getByRole("button", { name: "Save address" })).toBeEnabled())
-    expect(input).toHaveValue("invalid?")
+    expect(input).toHaveValue("https://other.example.com")
     expect(screen.getByText("https://llm.example.com/v1")).toBeInTheDocument()
+    // Inline and lasting, not a toast that leaves the rejected value
+    // sitting in the field unexplained.
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(/"https:\/\/other\.example\.com" was not saved: Invalid URL/)
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    expect(input.getAttribute("aria-describedby")).toContain(alert.id)
+  })
+
+  it.each([
+    ["https://llm.example.com/v1", /ends in \/v1/],
+    ["ftp://llm.example.com", /http:\/\/ or https:\/\/ only/],
+    ["not a url", /is not a URL/],
+  ])("refuses %s before saving, with the reason under the field", async (typed, reason) => {
+    const user = userEvent.setup()
+    mount([])
+    const input = await screen.findByLabelText("Public base URL")
+    await user.type(input, typed)
+    expect(screen.getByRole("alert")).toHaveTextContent(reason)
+    expect(screen.getByRole("alert")).toHaveTextContent(`"${typed}"`)
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByRole("button", { name: "Save address" })).toBeDisabled()
+    await user.type(input, "{Enter}")
+    expect(fetch).not.toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT" }))
+  })
+
+  it("asks before the first token switches authentication on, on click and on Enter", async () => {
+    const user = userEvent.setup()
+    mount([])
+    expect(
+      await screen.findByText(/accepts requests without a token/i),
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Name"), "laptop{Enter}")
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog).toHaveTextContent(/starts getting 401/)
+    expect(dialog).toHaveTextContent(/does not switch authentication back off/)
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(fetch).not.toHaveBeenCalledWith("/api/proxy-tokens", expect.objectContaining({ method: "POST" }))
+
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await user.click(await screen.findByRole("button", { name: "Create and require tokens" }))
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/proxy-tokens", expect.objectContaining({ method: "POST" })),
+    )
+    expect(await screen.findByText("dk_new_secret")).toBeInTheDocument()
+  })
+
+  it("creates a further token without asking once authentication is on", async () => {
+    const user = userEvent.setup()
+    mount(
+      [{ id: "t1", name: "ci", prefix: "dk_abc", created_at: "2026-08-01T10:00:00Z", last_used_at: null }],
+      {},
+      undefined,
+      { issued: true },
+    )
+    await user.type(await screen.findByLabelText("Name"), "laptop")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/proxy-tokens", expect.objectContaining({ method: "POST" })),
+    )
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("tells the truth once every token has been revoked", async () => {
+    // The gateway latched authentication on at the first token; an empty
+    // list now means every client is refused, not that none was configured.
+    mount([], {}, undefined, { issued: true })
+    expect(await screen.findByText("Every client token has been revoked")).toBeInTheDocument()
+    expect(screen.getAllByText(/refused with 401/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/no client token exists yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/accepts requests without a token/i)).not.toBeInTheDocument()
   })
 
   it("labels the token name and points the empty copy at the form", async () => {

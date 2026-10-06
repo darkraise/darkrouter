@@ -317,6 +317,14 @@ func TestPublicURLRejectsWhatAClientCannotUse(t *testing.T) {
 		{"path only", "/v1"},
 		{"query", "https://api.example.com?key=x"},
 		{"fragment", "https://api.example.com#v1"},
+		// Connect gives this to every client as its base URL, and the gateway
+		// speaks nothing but HTTP.
+		{"ftp scheme", "ftp://api.example.com"},
+		{"websocket scheme", "wss://api.example.com"},
+		// Connect appends these itself; a value ending in one doubles it.
+		{"trailing /v1", "https://api.example.com/v1"},
+		{"trailing /v1/", "https://api.example.com/v1/"},
+		{"trailing /v1beta", "https://api.example.com/prefix/v1beta"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := defaultConfig()
@@ -325,6 +333,20 @@ func TestPublicURLRejectsWhatAClientCannotUse(t *testing.T) {
 				t.Fatalf("public_url %q must be refused", tc.value)
 			}
 		})
+	}
+}
+
+// The schemes and prefixes the refusals above must not catch.
+func TestPublicURLAcceptsHTTPAndAPathPrefix(t *testing.T) {
+	for _, v := range []string{
+		"http://10.0.0.5:8090", "HTTPS://llm.example.com", "https://example.com/darkrouter/",
+		"https://example.com/v1-gateway", "https://example.com/v1/gateway",
+	} {
+		c := defaultConfig()
+		c.Server.PublicURL = v
+		if err := Validate(c); err != nil {
+			t.Errorf("public_url %q refused: %v", v, err)
+		}
 	}
 }
 

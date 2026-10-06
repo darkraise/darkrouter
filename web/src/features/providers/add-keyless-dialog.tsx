@@ -46,6 +46,14 @@ export function AddKeylessDialog({
     if (open) setFreeOnly(false)
   }
 
+  // The last preset named, kept through the close. A caller that clears its
+  // preset to close the dialog would otherwise empty the body on the first
+  // frame of the exit animation, leaving a bare header to fade out over the
+  // page.
+  const [shown, setShown] = useState(preset)
+  if (preset && preset !== shown) setShown(preset)
+  const subject = preset ?? shown
+
   const add = useApiMutation({
     mutationFn: (p: Preset) =>
       api.post("/api/providers", {
@@ -53,13 +61,12 @@ export function AddKeylessDialog({
         preset: p.id,
         free_models_only: freeOnly,
       }),
-    success: preset ? `${preset.name} added` : "Provider added",
+    success: (_reply, p) => `${p.name} added`,
     warning: (reply) => createdButNotRouted(reply),
     invalidates: [keys.providers, keys.health, keys.overview, keys.models],
-    onSuccess: () => {
-      if (!preset) return
+    onSuccess: (_reply, p) => {
       onOpenChange(false)
-      onDone?.(preset.id)
+      onDone?.(p.id)
     },
   })
 
@@ -74,14 +81,14 @@ export function AddKeylessDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {preset && (
+        {subject && (
           <>
             <div className="flex items-center gap-3 rounded-[var(--radius)] border p-3">
-              <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={28} />
+              <ProviderIcon preset={subject.id} id={subject.id} name={subject.name} size={28} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{preset.name}</span>
+                <span className="block truncate font-medium">{subject.name}</span>
                 <span className="block truncate font-mono text-sm text-[hsl(var(--legend))]">
-                  {preset.id} · {preset.kind}
+                  {subject.id} · {subject.kind}
                 </span>
               </span>
             </div>
@@ -111,8 +118,8 @@ export function AddKeylessDialog({
                 >
                   Cancel
                 </Button>
-                <Button disabled={add.isPending} onClick={() => add.mutate(preset)}>
-                  Add {preset.name}
+                <Button disabled={add.isPending} onClick={() => add.mutate(subject)}>
+                  Add {subject.name}
                 </Button>
               </div>
             </div>

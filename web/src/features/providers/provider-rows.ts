@@ -1,4 +1,4 @@
-import type { Preset, Provider } from "../../lib/api-types"
+import type { DiscoveryHealthRow, Preset, Provider } from "../../lib/api-types"
 import { isKeyless, providerState, type ProviderState } from "./provider-state"
 
 /**
@@ -62,7 +62,11 @@ function rowFromPreset(p: Preset): ProviderRow {
   }
 }
 
-function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
+function rowFromProvider(
+  p: Provider,
+  preset: Preset | undefined,
+  discovery: DiscoveryHealthRow | undefined,
+): ProviderRow {
   return {
     // The provider's own base URL, not the preset's: an operator who pointed
     // a preset at their own machine has a local provider, whatever the
@@ -73,7 +77,7 @@ function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
     name: p.name,
     preset: p.preset,
     kind: p.kind,
-    state: providerState(p),
+    state: providerState(p, discovery),
     accounts: p.credentials.length,
     priority: p.priority,
     // A keyless provider is configured with no accounts at all: there is
@@ -94,10 +98,20 @@ function rowFromProvider(p: Provider, preset: Preset | undefined): ProviderRow {
  * A configured provider whose preset this build does not ship still appears:
  * it is serving requests, and dropping it from the list because the catalogue
  * moved would hide the one row an operator most needs to find.
+ *
+ * `discovery` is what lets a keyless provider whose sweeps all fail read as
+ * degraded rather than healthy; without it the state is the credentials' alone.
  */
-export function mergeProviderRows(presets: Preset[], providers: Provider[]): ProviderRow[] {
+export function mergeProviderRows(
+  presets: Preset[],
+  providers: Provider[],
+  discovery: DiscoveryHealthRow[] = [],
+): ProviderRow[] {
   const byId = new Map(presets.map((p) => [p.id, p]))
-  const configured = providers.map((p) => rowFromProvider(p, byId.get(p.preset || p.id)))
+  const sweeps = new Map(discovery.map((d) => [d.provider_id, d]))
+  const configured = providers.map((p) =>
+    rowFromProvider(p, byId.get(p.preset || p.id), sweeps.get(p.id)),
+  )
   const taken = new Set(configured.map((r) => r.id))
   const rest = presets.filter((p) => !taken.has(p.id)).map(rowFromPreset)
 

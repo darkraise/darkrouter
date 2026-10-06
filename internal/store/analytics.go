@@ -64,23 +64,55 @@ func UsageWindow(now time.Time, days int) (first, last string) {
 	return today.AddDate(0, 0, 1-days).Format(time.DateOnly), today.Format(time.DateOnly)
 }
 
-// UsageBy rolls usage_daily up over the UsageWindow for now and days, split
-// by one dimension, oldest first because a chart reads left to right.
+// UsageBy rolls usage up over the UsageWindow for now and days, split by one
+// dimension, oldest first because a chart reads left to right.
+//
+// usage_daily alone lags the log by up to a rollup interval, so on its own
+// this read "no traffic" for the first hour of every gateway and every new
+// day, beside a live strip counting requests per minute. The days the rollup
+// has not finalized are therefore read from the requests table with the
+// rollup's own query, and their usage_daily rows set aside exactly as the
+// rollup's clear would: the answer is what usage_daily would hold if the
+// rollup ran now. That is one or two days of rows rather than the window,
+// and a read rather than a write, so it costs no logging throughput -- unlike
+// running the rollup itself every few seconds.
 func (d *DB) UsageBy(ctx context.Context, now time.Time, days int, dim UsageDimension) ([]UsageRow, error) {
 	first, last := UsageWindow(now, days)
-	col := dim.column()
-	sel, group := "'' AS k", "day"
-	if col != "" {
-		sel, group = col+" AS k", "day, "+col
+	pending, err := pendingFrom(ctx, d.Read, now)
+	if err != nil {
+		return nil, fmt.Errorf("usage by: %w", err)
 	}
-	q := `SELECT day, ` + sel + `,
-	             sum(requests), sum(attempts), sum(tokens_in), sum(tokens_out),
-	             CASE WHEN count(cost_micros) = 0 THEN NULL ELSE sum(cost_micros) END
-	        FROM usage_daily
-	       WHERE day >= ? AND day <= ?
-	       GROUP BY ` + group + `
+	_, _, end := rollupDays(now)
+	firstDay, _ := time.Parse(time.DateOnly, first)
+	if pending.Before(firstDay) {
+		pending = firstDay
+	}
+	pf, to := pending.UnixMilli(), end.UnixMilli()
+
+	col := dim.column()
+	sel := "''"
+	if col != "" {
+		sel = col
+	}
+	q := `SELECT day, k,
+	             sum(req), sum(att), sum(t_in), sum(t_out),
+	             CASE WHEN count(c) = 0 THEN NULL ELSE sum(c) END
+	        FROM (
+	          SELECT day, ` + sel + ` AS k, requests AS req, attempts AS att,
+	                 tokens_in AS t_in, tokens_out AS t_out, cost_micros AS c
+	            FROM usage_daily
+	           WHERE day >= ? AND day <= ?
+	             AND day NOT IN (
+	                   SELECT DISTINCT strftime('%Y-%m-%d', ts / 1000, 'unixepoch')
+	                     FROM requests
+	                    WHERE ts >= ? AND ts < ?)
+	          UNION ALL
+	          SELECT day, ` + sel + `, is_served, is_attempt, t_in, t_out, c
+	            FROM (` + usageSourceSQL + `)
+	        )
+	       GROUP BY day, k
 	       ORDER BY day, k`
-	rows, err := d.Read.QueryContext(ctx, q, first, last)
+	rows, err := d.Read.QueryContext(ctx, q, first, last, pf, to, pf, to, pf, to)
 	if err != nil {
 		return nil, fmt.Errorf("usage by: %w", err)
 	}
@@ -269,7 +301,37 @@ type FailoverEdge struct {
 // that refused to the one that served, which needs the pair -- so this walks
 // the attempts rather than the request rows.
 func (d *DB) FailoverEdges(ctx context.Context, window time.Duration) ([]FailoverEdge, error) {
-	since := time.Now().Add(-window).UnixMilli()
+	return d.FailoverEdgesSince(ctx, time.Now().Add(-window))
+}
+
+// FailedOverSince counts the requests from since on that a failed attempt
+// handed to another candidate which then served them.
+//
+// Not the sum of FailoverEdgesSince: an edge is a pair of different
+// providers, so a request a provider's second model rescued is in no edge,
+// and a request that failed at two providers before a third served it is in
+// two.
+func (d *DB) FailedOverSince(ctx context.Context, sinceTime time.Time) (int64, error) {
+	var n int64
+	err := d.Read.QueryRowContext(ctx,
+		`SELECT count(DISTINCT r.id)
+		   FROM requests r
+		   JOIN request_attempts failed
+		     ON failed.request_id = r.id AND failed.outcome <> 'success'
+		   JOIN request_attempts served
+		     ON served.request_id = r.id AND served.outcome = 'success'
+		  WHERE r.ts >= ?`, sinceTime.UnixMilli()).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed over: %w", err)
+	}
+	return n, nil
+}
+
+// FailoverEdgesSince is FailoverEdges over every request from since on, for a
+// caller whose window is calendar days -- the routing graph draws its returns
+// over the same days its usage volumes cover.
+func (d *DB) FailoverEdgesSince(ctx context.Context, sinceTime time.Time) ([]FailoverEdge, error) {
+	since := sinceTime.UnixMilli()
 	rows, err := d.Read.QueryContext(ctx,
 		`SELECT failed.provider_id, served.provider_id, count(*)
 		   FROM request_attempts failed

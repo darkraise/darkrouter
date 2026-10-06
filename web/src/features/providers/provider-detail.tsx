@@ -25,6 +25,7 @@ import {
 } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { utcDays } from "../../lib/time"
+import { dateTime } from "../../lib/format"
 import { ConfirmButton } from "../shell/confirm-button"
 import { EmptyState, GhostRows } from "../shell/empty-state"
 import { LoadError } from "../shell/screen-state"
@@ -45,7 +46,17 @@ import {
   requestsByDay,
   totalRequests,
 } from "./provider-stats"
-import { STATE_VARIANT, breakersFor, isKeyless, providerState } from "./provider-state"
+import {
+  STATE_VARIANT,
+  breakersFor,
+  coolingSubject,
+  coolingTitle,
+  discoveryFailing,
+  endpointFact,
+  isKeyless,
+  providerState,
+  takesCredential,
+} from "./provider-state"
 import { isLocalPreset } from "./local-runtimes"
 import { AddLocalDialog } from "./add-local-dialog"
 
@@ -65,6 +76,13 @@ function Fact({ term, children }: { term: string; children: React.ReactNode }) {
       </dd>
     </>
   )
+}
+
+/** Bedrock and Vertex store no base URL, so the endpoint they are derived to
+ *  is shown in its place rather than an empty value under "Base URL". */
+function EndpointFact({ of }: { of: Parameters<typeof endpointFact>[0] }) {
+  const { term, value } = endpointFact(of)
+  return <Fact term={term}>{value}</Fact>
 }
 
 /**
@@ -117,9 +135,9 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
 
       <header className="mt-3 mb-6 flex flex-wrap items-center gap-4 border-b pb-5">
         <ProviderIcon preset={preset.id} id={preset.id} name={preset.name} size={44} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-2xl font-semibold tracking-tight">{preset.name}</h2>
+            <h2 className="min-w-0 truncate text-2xl font-semibold tracking-tight">{preset.name}</h2>
             <Badge variant={STATE_VARIANT.unconfigured}>unconfigured</Badge>
             {preset.free_tier && <Badge variant="secondary">Free tier</Badge>}
           </div>
@@ -218,11 +236,17 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
           <section>
             <h2 className="mb-2 text-sm font-medium">Models</h2>
             {/* Not "no models": nothing has asked this provider what it serves.
-                A catalogue is the result of a discovery sweep, and a sweep
-                needs a credential. */}
+                A catalogue is the result of a discovery sweep, which a keyed
+                provider runs with its first credential and every other one
+                runs as soon as it is added. Telling a local runtime it needs a
+                credential contradicted the panel above. */}
             <EmptyState
               title="Nothing has asked this provider what it serves"
-              hint="Discovery lists a provider's models with one of its own keys, so the catalogue fills in once a credential exists."
+              hint={
+                local || keyless || localProgram
+                  ? "Discovery lists its models on the first sweep after it is added."
+                  : "Discovery lists a provider's models with one of its own keys, so the catalogue fills in once a credential exists."
+              }
             />
           </section>
         </div>
@@ -231,7 +255,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium">Connection</h2>
             <dl className="text-sm">
-              <Fact term="Base URL">{preset.base_url}</Fact>
+              <EndpointFact of={preset} />
               <Fact term="Preset">{preset.id}</Fact>
               <Fact term="Auth style">{preset.auth_kind}</Fact>
               <Fact term="Kind">{preset.kind}</Fact>
@@ -360,7 +384,8 @@ export function ProviderDetail() {
   }
   if (!provider) return null
 
-  const state = providerState(provider)
+  const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
+  const state = providerState(provider, discoveryRow)
   // Asked of the preset, not the row. A local runtime's row holds the address
   // the gateway can actually reach it on, and adding one rewrites the host —
   // inside a container "localhost" is the container, so a runtime on the
@@ -381,7 +406,10 @@ export function ProviderDetail() {
     usage.data ? utcDays(usage.data.first_day, usage.data.last_day) : [],
   )
   const requests = totalRequests(usage.data?.days ?? [], provider.id)
-  const discoveryRow = discovery.data?.providers.find((d) => d.provider_id === provider.id)
+  // A `none` provider sends no key, so a credential stored on it is a secret
+  // nothing uses; a local runtime is reached by its address. Neither is
+  // offered one.
+  const credentialable = !localRuntime && takesCredential(provider)
   const discovered = discoveryFraction(discoveryRow)
   const modelsFailed = catalog.isError && !catalog.data
   const healthFailed = health.isError && !health.data
@@ -400,9 +428,9 @@ export function ProviderDetail() {
           of that page. */}
       <header className="mt-3 mb-6 flex flex-wrap items-center gap-4 border-b pb-5">
         <ProviderIcon preset={provider.preset} id={provider.id} name={provider.name} size={44} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-2xl font-semibold tracking-tight">{provider.name}</h2>
+            <h2 className="min-w-0 truncate text-2xl font-semibold tracking-tight">{provider.name}</h2>
             <Badge variant={STATE_VARIANT[state]}>{state}</Badge>
           </div>
           <p className="mt-0.5 font-mono text-sm text-[hsl(var(--legend))]">
@@ -463,11 +491,16 @@ export function ProviderDetail() {
         >
           {!usageFailed && <Sparkline points={series} />}
         </Stat>
+        {/* A disabled provider's keys are all still enabled, but the router
+            will not pick any of them: "1/1 all available" beside a disabled
+            badge said the opposite of what routing does. */}
         <Stat
           caption="credentials usable"
-          value={`${accountsSummary.usable}/${accountsSummary.total}`}
+          value={`${provider.enabled ? accountsSummary.usable : 0}/${accountsSummary.total}`}
           note={
-            healthFailed
+            !provider.enabled
+              ? "provider disabled"
+              : healthFailed
               ? "cooldowns did not load"
               : accountsSummary.cooling > 0
               ? `${accountsSummary.cooling} cooling`
@@ -477,7 +510,9 @@ export function ProviderDetail() {
                   ? "none configured"
                   : "all available"
           }
-          tone={healthFailed || accountsSummary.cooling > 0 ? "warning" : "muted"}
+          tone={
+            !provider.enabled || healthFailed || accountsSummary.cooling > 0 ? "warning" : "muted"
+          }
         />
         <Stat
           caption="models offered"
@@ -498,7 +533,9 @@ export function ProviderDetail() {
           tone={
             discoveryFailed ||
             (discoveryRow &&
-              (discoveryRow.max_missing_streak > 0 || discoveryRow.total === 0))
+              (discoveryRow.max_missing_streak > 0 ||
+                discoveryRow.total === 0 ||
+                discoveryFailing(discoveryRow)))
               ? "warning"
               : "muted"
           }
@@ -516,7 +553,7 @@ export function ProviderDetail() {
                   And while the list is empty the panel below carries its own
                   call to action, so this button was the same act offered twice
                   a few pixels apart. */}
-              {provider.credentials.length > 0 && !localRuntime && (
+              {provider.credentials.length > 0 && credentialable && (
                 <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}>
                   <Plus className="size-[var(--icon-size)]" />
                   Add credentials
@@ -542,6 +579,8 @@ export function ProviderDetail() {
                     ? `${provider.name} is a model server on this machine, reached at the address it listens on rather than with a key. There is no account here to hold one, and it needs none to be routed to.`
                     : !/^https?:\/\//i.test(provider.base_url ?? "")
                     ? `${provider.name} runs a program on this machine, and that program holds its own login, so the router can choose it as it is. Add a credential only to hand it a session of your own instead of the one it keeps on disk.`
+                    : !takesCredential(provider)
+                    ? `${provider.name} is reached with no credential and sends none, so the router can choose it as it is.`
                     : provider.auth_style === "anonymous"
                       ? `${provider.name} is reached with the key it publishes, which this release ships, so the router can choose it as it is. A credential of your own can still be added — a registered key buys a shorter queue.`
                       : isKeyless(provider)
@@ -549,9 +588,10 @@ export function ProviderDetail() {
                         : `The router cannot choose ${provider.name} until it has a key to send with. Its settings and priority are kept either way.`
                 }
                 action={
-                  // A local runtime is reached by address and takes no key, so
-                  // this panel explains the state and offers nothing to do.
-                  localRuntime ? undefined : (
+                  // A local runtime is reached by address and a `none` style
+                  // sends no key, so this panel explains the state and offers
+                  // nothing to do.
+                  !credentialable ? undefined : (
                     <Button size="sm" variant={isKeyless(provider) ? "secondary" : "default"} onClick={() => setAddOpen(true)}>
                       {isKeyless(provider) ? "Add a credential anyway" : "Add the first credential"}
                     </Button>
@@ -590,7 +630,7 @@ export function ProviderDetail() {
                 onRetry={() => void catalog.refetch()}
               />
             ) : (
-              <ProviderModels models={models} loading={catalog.isPending} />
+              <ProviderModels models={models} loading={catalog.isPending} discovery={discoveryRow} />
             )}
           </section>
 
@@ -622,10 +662,15 @@ export function ProviderDetail() {
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium">Connection</h2>
             <dl className="text-sm">
-              <Fact term="Base URL">{provider.base_url}</Fact>
+              <EndpointFact of={provider} />
               <Fact term="Preset">{provider.preset || "—"}</Fact>
               <Fact term="Auth style">{provider.auth_style}</Fact>
               <Fact term="Kind">{provider.kind}</Fact>
+              {/* Only where set: on a signed provider these are where the
+                  endpoint is, and on any other they are nothing at all. */}
+              {provider.region && <Fact term="Region">{provider.region}</Fact>}
+              {provider.project && <Fact term="Project">{provider.project}</Fact>}
+              {provider.location && <Fact term="Location">{provider.location}</Fact>}
             </dl>
           </Card>
 
@@ -661,14 +706,18 @@ export function ProviderDetail() {
 
           {cooling.length > 0 && (
             <Card className="border-[hsl(var(--warning))] p-4">
-              <h2 className="mb-2 text-sm font-medium">
-                {cooling.length} {cooling.length === 1 ? "credential" : "credentials"} cooling
-              </h2>
+              <h2 className="mb-2 text-sm font-medium">{coolingTitle(cooling)}</h2>
               <ul className="flex flex-col gap-1 font-mono text-sm text-[hsl(var(--legend))]">
                 {cooling.map((e) => (
                   <li key={`${e.key_id}/${e.model}`}>
-                    {e.key_id || "—"} · backoff {e.backoff_level} · {e.consecutive_failures}{" "}
-                    consecutive failures
+                    {/* The credential by the label the table above shows, not
+                        its id, so the two can be matched by eye. */}
+                    {coolingSubject(
+                      e,
+                      provider.credentials.find((c) => c.id === e.key_id)?.label,
+                    )}{" "}
+                    · backoff {e.backoff_level} · {e.consecutive_failures} consecutive failures
+                    {e.cooling_until && <> · until {dateTime(e.cooling_until)}</>}
                   </li>
                 ))}
               </ul>

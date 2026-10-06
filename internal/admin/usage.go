@@ -162,6 +162,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		"requests_per_min": float64(stats.Requests) / (float64(stats.WindowSec) / 60),
 		"error_rate":       errRate,
 		"window_sec":       stats.WindowSec,
+		// The count behind the rate, so a window with nothing in it can say so
+		// rather than print a 0 ms latency and a 0% error rate that were
+		// never measured.
+		"requests": stats.Requests,
 		"today_spend": map[string]any{
 			"micros":    spendMicros,
 			"priced":    spendPriced,
@@ -236,6 +240,26 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	// response today and must see the exact shape they always have.
 	if groupBy != "" {
 		resp["group_by"] = groupBy
+	}
+	// The routing graph draws its returns between the provider rows this
+	// response sizes, so they are counted over the same days. The overview's
+	// own failover_edges cover its five-minute window, and arcs from that
+	// beside thirty days of volumes drew returns between rows reading "no
+	// traffic".
+	if dim == store.UsageByProvider {
+		start, _ := time.Parse(time.DateOnly, first)
+		edges, err := s.deps.DB.FailoverEdgesSince(r.Context(), start)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		resp["failover_edges"] = edges
+		failedOver, err := s.deps.DB.FailedOverSince(r.Context(), start)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		resp["failed_over"] = failedOver
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

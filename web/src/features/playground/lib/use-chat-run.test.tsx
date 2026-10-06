@@ -269,6 +269,49 @@ describe("running one chat turn", () => {
     expect(result.current.busy).toBe(false)
   })
 
+  it("files the route and trace link under a stopped turn too", async () => {
+    // The run's own signal is aborted by the stop, so a trace wait tied to
+    // it gave up at once and the stopped answer had no route or link.
+    streamMock.mockImplementation(async function* (
+      _path: string,
+      _body: unknown,
+      onStart?: (s: { requestId: string }) => void,
+    ) {
+      onStart?.({ requestId: "01STOP" })
+      yield frame("par")
+      throw Object.assign(new Error("aborted"), { name: "AbortError" })
+    })
+    traceMock.mockResolvedValue({
+      id: "01STOP", tokens_in: 3, tokens_out: 1, total_ms: 90, cost_micros: null,
+      model: "m", final_model: "m", provider: "groq",
+      attempts: [{ provider: "groq", model: "m", outcome: "client_cancelled", status_code: 200 }],
+    })
+
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.routes[1]?.requestId).toBe("01STOP"))
+    expect(traceMock).toHaveBeenCalledWith("01STOP")
+    // A stop is not a failure, so nothing is said under the composer.
+    expect(result.current.error).toBe("")
+  })
+
+  it("names the status a failed run got back, off its trace", async () => {
+    // "upstream request failed" is the same sentence for a 429 and a 500.
+    yields('data: {"error":{"message":"upstream request failed"}}\n\n')
+    traceMock.mockResolvedValue({
+      id: "01TRACE", tokens_in: 0, tokens_out: 0, total_ms: 40, cost_micros: null,
+      model: "m", final_model: "", provider: "lmstudio",
+      attempts: [{ provider: "lmstudio", model: "m", outcome: "retryable_provider", status_code: 429 }],
+    })
+
+    const { result } = renderHook(() => useChatRun({ ...emptyConfig(), model: "m" }, () => {}))
+    await act(() => result.current.send("hi"))
+
+    await waitFor(() => expect(result.current.error).toBe("upstream request failed (429 from lmstudio)"))
+    expect(result.current.routes[1]?.requestId).toBe("01TRACE")
+  })
+
   it("files the route under the turn it served", async () => {
     // A transcript of six answers has to say which provider produced each,
     // not only the last.

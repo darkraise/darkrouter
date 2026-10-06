@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AuxMode } from "./aux-mode"
+
+const { searchMock, traceQueryMock } = vi.hoisted(() => ({
+  searchMock: vi.fn(() => ({}) as { seed?: string }),
+  traceQueryMock: vi.fn(() => ({ data: undefined, isError: false }) as { data?: unknown; isError: boolean }),
+}))
 
 const { postAuxMock, signals } = vi.hoisted(() => ({
   postAuxMock: vi.fn(),
@@ -10,8 +15,11 @@ const { postAuxMock, signals } = vi.hoisted(() => ({
 
 vi.mock("../../shell/model-combobox", () => ({
   useModelCandidates: () => ({ candidates: [], loading: false }),
-  ModelCombobox: ({ onChange }: { onChange: (model: string) => void }) => (
-    <button onClick={() => onChange("embed-model")}>Choose model</button>
+  ModelCombobox: ({ onChange, value }: { onChange: (model: string) => void; value: string }) => (
+    <>
+      <button onClick={() => onChange("embed-model")}>Choose model</button>
+      <span data-testid="model">{value}</span>
+    </>
   ),
 }))
 vi.mock("./tool-rail", () => ({
@@ -38,7 +46,9 @@ vi.mock("../../../lib/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/queries")>()),
   useModels: () => ({ data: { models: [{ model: "embed-model", providers: ["anthropic-main"] }], aliases: [] } }),
   useProviders: () => ({ data: { providers: [{ id: "anthropic-main", kind: "anthropic" }] } }),
+  useTrace: traceQueryMock,
 }))
+vi.mock("@tanstack/react-router", () => ({ useSearch: () => searchMock() }))
 vi.mock("./results", () => ({ RunCard: () => null }))
 vi.mock("./run-readings", () => ({ RunReadings: () => null }))
 const readFileMock = vi.hoisted(() => vi.fn())
@@ -86,9 +96,63 @@ describe("Auxiliary visibility", () => {
     expect(screen.getByText("Token Count")).toBeInTheDocument()
   })
 
+  it("offers the tools as a select where the rail is folded away", async () => {
+    // Below lg the rail panel is hidden; at phone width it had squeezed the
+    // names to "To…", "E…". The select carries the same seven, with their
+    // blurbs.
+    render(<AuxMode active />)
+    await userEvent.click(screen.getByLabelText("Tool"))
+    await userEvent.click(await screen.findByRole("option", { name: /^Embeddings — turn text into a vector/ }))
+    expect(screen.getByText("Embeddings")).toBeInTheDocument()
+  })
+
   it("defaults the counting dialect to the model's provider", async () => {
     render(<AuxMode active />)
     await userEvent.click(screen.getByRole("button", { name: "Choose model" }))
     expect(screen.getByTestId("dialect")).toHaveTextContent("anthropic")
+  })
+})
+
+describe("Auxiliary seeded from a trace", () => {
+  afterEach(() => {
+    searchMock.mockReturnValue({})
+    traceQueryMock.mockReturnValue({ data: undefined, isError: false })
+  })
+
+  it("opens on the trace's tool with the model it asked for", () => {
+    // The trace drawer sends a non-chat request here as ?seed=; landing on
+    // Token Count with no model left the operator to find both again.
+    searchMock.mockReturnValue({ seed: "01EMB" })
+    traceQueryMock.mockReturnValue({
+      data: { id: "01EMB", surface: "embedding", model: "embed-model", alias: "" },
+      isError: false,
+    })
+    render(<AuxMode active />)
+    expect(screen.getAllByText("Embeddings").length).toBeGreaterThan(0)
+    expect(screen.getByTestId("model")).toHaveTextContent("embed-model")
+    expect(screen.getByText(/seeded from trace 01EMB: the tool and model carried over/i)).toBeInTheDocument()
+  })
+
+  it("leaves a chat trace to Chat, which sees the same seed", () => {
+    // Every mode is mounted under one URL, so an llm trace must not also
+    // switch this one to Token Count behind the chat the operator opened.
+    searchMock.mockReturnValue({ seed: "01CHAT" })
+    traceQueryMock.mockReturnValue({
+      data: { id: "01CHAT", surface: "llm", model: "gpt", alias: "" },
+      isError: false,
+    })
+    render(<AuxMode active />)
+    expect(screen.getByTestId("model")).toHaveTextContent("")
+    expect(screen.queryByText(/trace 01CHAT/)).toBeNull()
+  })
+
+  it("says so when the trace is not a request any tool sends", () => {
+    searchMock.mockReturnValue({ seed: "01LLM" })
+    traceQueryMock.mockReturnValue({
+      data: { id: "01LLM", surface: "realtime", model: "m", alias: "" },
+      isError: false,
+    })
+    render(<AuxMode active />)
+    expect(screen.getByText(/not a request any tool here sends/i)).toBeInTheDocument()
   })
 })

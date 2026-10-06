@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { LoginScreen } from "./login"
@@ -107,5 +107,73 @@ describe("the login screen", () => {
     expect(screen.getByRole("button", { name: /sign in/i })).toBeDisabled()
     await user.type(screen.getByLabelText(/^password/i), "x")
     expect(screen.getByRole("button", { name: /sign in/i })).toBeEnabled()
+  })
+
+  it("names the tab for the sign-in form", () => {
+    document.title = "Requests · Darkrouter"
+    render(<LoginScreen onAuthenticated={() => {}} />)
+    expect(document.title).toBe("Sign in · Darkrouter")
+  })
+
+  it("explains an ended session, and only then", () => {
+    const { unmount } = render(<LoginScreen onAuthenticated={() => {}} reason="expired" />)
+    expect(screen.getByText(/session has ended/i)).toHaveAttribute("role", "status")
+    unmount()
+    render(<LoginScreen onAuthenticated={() => {}} />)
+    expect(screen.queryByText(/session has ended/i)).not.toBeInTheDocument()
+  })
+
+  it("says how long a rate-limited sign-in has to wait, without calling the password wrong", async () => {
+    // The limiter refuses the attempt, not the credential: the password may
+    // well be right. The wait is in Retry-After, and the server sends it.
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ error: "too many login attempts; try again later" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "42" },
+        }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const user = userEvent.setup()
+    render(<LoginScreen onAuthenticated={() => {}} />)
+
+    await user.type(screen.getByLabelText(/username/i), "admin")
+    await user.type(screen.getByLabelText(/^password/i), "right-all-along")
+    await user.click(screen.getByRole("button", { name: /sign in/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many sign-in attempts. Try again in 42 seconds.",
+    )
+    expect(screen.getByLabelText(/username/i)).not.toHaveAttribute("aria-invalid")
+    expect(screen.getByLabelText(/^password/i)).not.toHaveAttribute("aria-invalid")
+    // Retrying early only earns another 429, so the button waits too.
+    expect(screen.getByRole("button", { name: /try again in 42 s/i })).toBeDisabled()
+  })
+
+  it("opens sign-in again once the wait has passed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(
+          async () =>
+            new Response(JSON.stringify({ error: "too many login attempts; try again later" }), {
+              status: 429,
+              headers: { "Content-Type": "application/json", "Retry-After": "2" },
+            }),
+        ),
+      )
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      render(<LoginScreen onAuthenticated={() => {}} />)
+      await user.type(screen.getByLabelText(/username/i), "admin")
+      await user.type(screen.getByLabelText(/^password/i), "pw")
+      await user.click(screen.getByRole("button", { name: /sign in/i }))
+      expect(await screen.findByRole("button", { name: /try again in 2 s/i })).toBeDisabled()
+
+      await act(() => vi.advanceTimersByTimeAsync(2100))
+      expect(screen.getByRole("button", { name: /sign in/i })).toBeEnabled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

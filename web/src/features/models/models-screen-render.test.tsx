@@ -181,6 +181,19 @@ describe("the models empty state", () => {
       expect(screen.getByText(/no models match these filters/i)).toBeInTheDocument(),
     )
     expect(screen.queryByText(/discovery fills this catalogue/i)).not.toBeInTheDocument()
+    // One empty state, not the table's own "No results" row and a pager
+    // reading "Page 1 of 0" stacked above this card.
+    expect(screen.queryByText(/no results/i)).toBeNull()
+    expect(screen.queryByText(/page 1 of 0/i)).toBeNull()
+  })
+
+  it("has one model filter, the one kept in the URL", async () => {
+    // DataTable's own "Search models" box filtered the same rows, was not in
+    // the URL, and survived "Clear filters".
+    mockCatalog()
+    await renderAt("/")
+    await screen.findByText("openai/gpt-5")
+    expect(screen.queryByPlaceholderText(/search models/i)).toBeNull()
   })
 
   it("still teaches discovery when the catalog itself is empty", async () => {
@@ -229,6 +242,28 @@ describe("the models table", () => {
 
     await userEvent.click(within(row).getByRole("button", { name: /1 more/ }))
     expect(within(row).getByText("groq/gpt-5")).toBeInTheDocument()
+  })
+
+  it("keeps short badges whole in a table that breaks anywhere", async () => {
+    // darkraise's cells wrap anywhere, so auto layout squeezed Source to
+    // "inf/err/ed" and Surfaces to "embeddi/ng".
+    mockCatalog()
+    await renderAt("/")
+    expect(await screen.findByText("models_dev")).toHaveClass("whitespace-nowrap")
+    expect(screen.getByText("chat")).toHaveClass("whitespace-nowrap")
+  })
+
+  it("wraps its facet toolbar rather than pushing the page sideways", async () => {
+    // jsdom lays nothing out, so this pins the rule rather than measuring
+    // it. Unwrapped, the facets and Columns made a 587px row that scrolled
+    // the whole pane sideways at 768 and 375.
+    mockCatalog()
+    await renderAt("/")
+    await screen.findByText("openai/gpt-5")
+    const box = document.querySelector(".models-table")
+    expect(box?.className).toContain("[&_.dr-data-table-toolbar]:flex-wrap")
+    expect(box?.className).toContain("[&_.dr-data-table-toolbar-filters]:flex-wrap")
+    expect(box?.querySelector(".dr-data-table-toolbar-filters")).not.toBeNull()
   })
 
   it("opens the override editor with every provider the row serves through", async () => {

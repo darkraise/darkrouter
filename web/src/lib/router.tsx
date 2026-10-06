@@ -10,18 +10,21 @@ import {
   useRouterState,
 } from "@tanstack/react-router"
 import { useCallback, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import type { RouterAdapter } from "darkraise-ui/router"
 import type { ReactNode, MouseEvent, CSSProperties } from "react"
 import { nav, settingsItem } from "../features/shell/nav"
-import { AppShell } from "../features/shell/app-shell"
+import { AppShell, useScreenKey } from "../features/shell/app-shell"
 import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
 import { api } from "./api"
-import { CommandPalette } from "../features/shell/command-palette"
+import { confirmDiscardingDrafts } from "./unsaved-changes"
+import { CommandPalette, PaletteError } from "../features/shell/command-palette"
 import { NotFoundScreen } from "../features/shell/not-found"
 import { PageIdentityBar } from "../features/shell/page-identity"
 import { usePageTitle } from "../features/shell/page-title"
 import { ScreenBoundary, ScreenError } from "../features/shell/screen-boundary"
+import { parseSearch, stringifySearch } from "./search-filters"
 
 /**
  * routerAdapter plugs a concrete router into darkraise-ui.
@@ -84,6 +87,38 @@ export const routerAdapter: RouterAdapter = {
 const footerNav = [{ label: "Settings", items: [settingsItem] }]
 
 /**
+ * "Try again" that actually fetches again.
+ *
+ * A screen that threw on a malformed response re-renders from the same cached
+ * response when its boundary resets, and throws identically: the retry did
+ * nothing a reload would not have had to. Resetting the cache first means the
+ * screen mounts into a fresh fetch. The session status is left alone -- it is
+ * what keeps the shell mounted at all, and resetting it would blank the
+ * console for the length of a round trip.
+ */
+function useRetryFresh() {
+  const queryClient = useQueryClient()
+  return useCallback(
+    () => void queryClient.resetQueries({ predicate: (q) => q.queryKey[0] !== "auth-status" }),
+    [queryClient],
+  )
+}
+
+/** The router's last resort, for an error no screen boundary caught. */
+function RootError({ error, reset }: { error: unknown; reset: () => void }) {
+  const retryFresh = useRetryFresh()
+  return (
+    <ScreenError
+      error={error}
+      reset={() => {
+        retryFresh()
+        reset()
+      }}
+    />
+  )
+}
+
+/**
  * RootShell is the chrome every screen renders inside.
  *
  * It lives here, as the root route's component, rather than wrapping
@@ -95,13 +130,37 @@ function RootShell() {
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const navigate = useNavigate()
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const retryFresh = useRetryFresh()
+  // The boundary is keyed by the screen, not by the address. A trace is a
+  // child of /requests, so opening and closing one leaves the key alone and
+  // the screen -- its loaded pages, sort, hidden columns, scroll and focus --
+  // stays mounted. Keyed by the full pathname, every trace opened remounted
+  // the log behind it.
+  const screenKey = useScreenKey()
   const openPalette = useCallback(() => setPaletteOpen(true), [])
   usePageTitle()
   return (
     <RouterAdapterProvider value={routerAdapter}>
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      {/* Its own boundary: the palette is shell, not screen, and a throw in
+          it would otherwise pass every screen's boundary and replace the rail
+          and header with the router's root error. */}
+      <ScreenBoundary
+        onReset={retryFresh}
+        fallback={(error, reset) => (
+          <PaletteError
+            error={error}
+            open={paletteOpen}
+            onRetry={reset}
+            onClose={() => {
+              setPaletteOpen(false)
+              reset()
+            }}
+          />
+        )}
+      >
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      </ScreenBoundary>
       <AppShell
         nav={nav}
         footerNav={footerNav}
@@ -115,12 +174,16 @@ function RootShell() {
         onChangePassword={() => setPasswordOpen(true)}
         onSettings={() => void navigate({ to: "/settings" })}
         onLogout={() => {
+          // Asked before the POST rather than left to the reload's
+          // beforeunload: by then the session is gone, and "Stay" kept a
+          // draft that could no longer be saved.
+          if (!confirmDiscardingDrafts("You have unsaved changes. Log out and discard them?")) return
           // The 401 the next request gets is what the app's global listener
           // turns into the login screen, so this only has to end the session.
           void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
         }}
       >
-        <ScreenBoundary key={pathname}>
+        <ScreenBoundary key={screenKey} onReset={retryFresh}>
           <Outlet />
         </ScreenBoundary>
       </AppShell>
@@ -184,13 +247,28 @@ const SettingsScreen = lazyRouteComponent(
   "SettingsScreen",
 )
 
+const requestsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/requests",
+  component: RequestsScreen,
+})
+
+// A deep link into one trace. The drawer opens from the table, but a reloaded
+// or shared URL has to land somewhere real rather than 404.
+//
+// A child of the log rather than a sibling, and with no component of its own:
+// the Requests screen renders the drawer over itself from the id it reads off
+// the URL. As a sibling it was a second copy of the screen, and every open or
+// close swapped one for the other.
+const traceRoute = createRoute({ getParentRoute: () => requestsRoute, path: "$id" })
+
 // One route per destination in §5, plus the trace deep link. Written out
 // rather than built by a helper: a helper that takes `path: string` erases the
 // literal type TanStack infers, and every typed <Link to="/requests/$id"> in
 // the app stops compiling.
 const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: OverviewScreen }),
-  createRoute({ getParentRoute: () => rootRoute, path: "/requests", component: RequestsScreen }),
+  requestsRoute.addChildren([traceRoute]),
   createRoute({ getParentRoute: () => rootRoute, path: "/usage", component: UsageScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/providers", component: ProvidersScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/providers/$id", component: ProviderDetail }),
@@ -199,18 +277,15 @@ const routes = [
   createRoute({ getParentRoute: () => rootRoute, path: "/playground", component: PlaygroundScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/connect", component: ConnectScreen }),
   createRoute({ getParentRoute: () => rootRoute, path: "/settings", component: SettingsScreen }),
-  createRoute({
-    // A deep link into one trace. The drawer opens from the table, but a
-    // reloaded or shared URL has to land somewhere real rather than 404.
-    getParentRoute: () => rootRoute,
-    path: "/requests/$id",
-    component: RequestsScreen,
-  }),
 ]
 
 export const router = createRouter({
   routeTree: rootRoute.addChildren(routes),
-  defaultErrorComponent: ({ error, reset }) => <ScreenError error={error} reset={reset} />,
+  // Plain query strings rather than TanStack's JSON-per-value encoding; see
+  // parseSearch for why a quoted number was a 400.
+  parseSearch,
+  stringifySearch,
+  defaultErrorComponent: RootError,
   defaultNotFoundComponent: () => <NotFoundScreen />,
 })
 

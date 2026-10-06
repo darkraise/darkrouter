@@ -244,17 +244,33 @@ describe("the providers list", () => {
     })
   })
 
-  it("puts the whole discovery line within reach of the truncated cell", async () => {
-    // The cell is eleven rems wide and the line is longer than that as soon
-    // as a provider has anything to report. A title only shows on hover with
-    // a mouse; the tooltip is reachable by keyboard too.
+  it("puts the whole discovery line within reach of the brief cell", async () => {
+    // The cell carries only the gist, because the full line is longer than
+    // any cell the list can spare. A title only shows on hover with a mouse;
+    // the tooltip is reachable by keyboard too.
     stub([groq])
     await renderScreen()
 
-    const trigger = await screen.findByText(/30 of 40 live/)
+    const trigger = await screen.findByText("30 of 40 live")
     await userEvent.hover(trigger)
     const tip = await screen.findByRole("tooltip")
     expect(tip).toHaveTextContent(/missing for 6 sweeps/)
+  })
+})
+
+describe("the column the pinned actions cover", () => {
+  it("is Traffic, not Discovery", async () => {
+    // At 1440 the table is wider than its card and the sticky actions sit
+    // over the last column before them. A failing sweep there read "discove".
+    stub([groq])
+    await renderScreen()
+    await screen.findByText("30 of 40 live")
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent ?? "")
+    const discovery = headers.findIndex((h) => h.includes("Discovery"))
+    const traffic = headers.findIndex((h) => h.includes("Traffic"))
+    expect(discovery).toBeGreaterThan(-1)
+    expect(traffic).toBe(headers.length - 2)
+    expect(discovery).toBeLessThan(traffic)
   })
 })
 
@@ -380,6 +396,60 @@ describe("the grid view", () => {
   it("keeps the card's own Test action", async () => {
     await grid()
     expect(cardFor(/Groq/).getByRole("button", { name: /^Test/ })).toBeInTheDocument()
+  })
+
+  it("gives the grid a column it cannot overflow at phone width", async () => {
+    // With no template the implicit column was `auto` and grew to the card's
+    // max-content: 500px wide in a 375px viewport.
+    await grid()
+    const card = screen.getByRole("button", { name: /Groq/ }).parentElement as HTMLElement
+    expect(card.parentElement!.className).toMatch(/(^|\s)grid-cols-1(\s|$)/)
+    expect(card.className).toMatch(/min-w-0/)
+  })
+})
+
+describe("a configured provider that sends no key", () => {
+  const ollama: Provider = {
+    ...groq, id: "ollama", name: "Ollama", preset: "ollama",
+    base_url: "http://localhost:11434/v1", auth_style: "none", credentials: [],
+  }
+
+  it("is not offered a credential it would never send", async () => {
+    // "Add credentials — add another key to LM Studio", on a runtime with no
+    // key and a style that ignores one.
+    stub([groq, ollama])
+    await renderScreen()
+
+    const row = (await screen.findByRole("link", { name: "Ollama" })).closest("tr")
+    if (!row) throw new Error("expected the name inside a table row")
+    expect(within(row).queryByRole("button", { name: /add credentials/i })).toBeNull()
+    expect(within(row).getByRole("button", { name: "Probe" })).toHaveAttribute(
+      "title",
+      "Probe — check the provider answers",
+    )
+  })
+
+  it("is not offered one on its card either", async () => {
+    stub([groq, ollama])
+    await renderScreen()
+    await userEvent.click(await screen.findByLabelText(/grid view/i))
+    const card = within(
+      (await screen.findByRole("button", { name: /Ollama/ })).parentElement as HTMLElement,
+    )
+    expect(card.queryByRole("button", { name: /add credentials/i })).toBeNull()
+  })
+})
+
+describe("the connection chips", () => {
+  it("count All over the rows the other filters leave, like their siblings", async () => {
+    // "All 209" beside "6 of 209" and siblings adding up to six.
+    stub([groq])
+    await renderScreen()
+    await screen.findByRole("link", { name: "Groq" })
+    await userEvent.click(screen.getByLabelText("Configured only"))
+
+    const all = await screen.findByRole("radio", { name: /^All/ })
+    await waitFor(() => expect(all).toHaveTextContent(/^All\s*1$/))
   })
 })
 

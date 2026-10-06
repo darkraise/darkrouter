@@ -6,6 +6,7 @@ import {
 } from "darkraise-ui"
 import { Lock, MoreHorizontal } from "lucide-react"
 import type { PlaygroundConfig } from "../config"
+import { useClosingMenu } from "../../../lib/menu"
 
 /**
  * What a conversation is, above the conversation.
@@ -54,6 +55,9 @@ export function ConversationHeader({
   // Escape blurs the field, and blur commits; without this the abandoned draft
   // would be saved by the very keystroke that discards it.
   const abandoning = useRef(false)
+  // Closed by the item itself: chosen with Enter, the library left it open
+  // over the settings dialog it had just opened.
+  const { menu, pick } = useClosingMenu()
 
   // The field follows the conversation, not the keystroke: selecting another
   // conversation in the rail must not leave the previous one's name in it.
@@ -82,51 +86,58 @@ export function ConversationHeader({
 
   return (
     <Card className="flex shrink-0 items-center gap-2 p-3">
-      {/* A plain reading rather than a disabled button: a control that cannot
-          be operated is still a control, and an operator will click it before
-          reading why it did nothing. The padlock is drawn only once the
-          settings are actually shut, so it marks the moment rather than
-          decorating the pill. */}
-      <span
-        className="flex max-w-[18rem] items-center gap-1.5 rounded-[var(--radius)] border border-dashed px-2.5 py-1.5 text-sm text-[hsl(var(--muted-foreground))]"
-        title={
-          locked
-            ? `Fixed by the first message: ${config.model} on the ${config.dialect} dialect`
-            : `${config.model === "" ? "No model chosen" : config.model} on the ${config.dialect} dialect`
-        }
-      >
-        {locked ? (
-          <Lock className="size-[var(--icon-size,1rem)] shrink-0" aria-hidden="true" />
-        ) : null}
-        <span className="truncate font-mono">
-          {config.model === "" ? "No model" : config.model}
+      {/* Wraps rather than squeezing the title. The pill keeps its width up
+          to its cap, so on a phone the field beside it was left about 60px --
+          six characters of a name the operator is meant to read and edit.
+          Below its floor the field drops under the pill, and the actions stay
+          at the end of the card rather than wrapping to a line of their own. */}
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {/* A plain reading rather than a disabled button: a control that cannot
+            be operated is still a control, and an operator will click it before
+            reading why it did nothing. The padlock is drawn only once the
+            settings are actually shut, so it marks the moment rather than
+            decorating the pill. */}
+        <span
+          className="flex max-w-[min(18rem,100%)] items-center gap-1.5 rounded-[var(--radius)] border border-dashed px-2.5 py-1.5 text-sm text-[hsl(var(--muted-foreground))]"
+          title={
+            locked
+              ? `Fixed by the first message: ${config.model} on the ${config.dialect} dialect`
+              : `${config.model === "" ? "No model chosen" : config.model} on the ${config.dialect} dialect`
+          }
+        >
+          {locked ? (
+            <Lock className="size-[var(--icon-size,1rem)] shrink-0" aria-hidden="true" />
+          ) : null}
+          <span className="truncate font-mono">
+            {config.model === "" ? "No model" : config.model}
+          </span>
         </span>
-      </span>
 
-      <Input
-        aria-label="Conversation title"
-        value={draftTitle}
-        disabled={disabled}
-        onChange={(e) => setDraftTitle(e.target.value)}
-        onBlur={commitTitle}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return
-          if (e.key === "Enter") {
-            e.preventDefault()
-            // Blur is what commits. Committing here as well would fire the
-            // change twice for one rename.
-            e.currentTarget.blur()
-          }
-          if (e.key === "Escape") {
-            abandoning.current = true
-            setDraftTitle(title)
-            e.currentTarget.blur()
-          }
-        }}
-        className="flex-1 border-transparent bg-transparent px-2 hover:border-[hsl(var(--border))] focus:border-[hsl(var(--border))]"
-      />
+        <Input
+          aria-label="Conversation title"
+          value={draftTitle}
+          disabled={disabled}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
+            if (e.key === "Enter") {
+              e.preventDefault()
+              // Blur is what commits. Committing here as well would fire the
+              // change twice for one rename.
+              e.currentTarget.blur()
+            }
+            if (e.key === "Escape") {
+              abandoning.current = true
+              setDraftTitle(title)
+              e.currentTarget.blur()
+            }
+          }}
+          className="min-w-[10rem] flex-1 border-transparent bg-transparent px-2 hover:border-[hsl(var(--border))] focus:border-[hsl(var(--border))]"
+        />
+      </div>
 
-      <DropdownMenu>
+      <DropdownMenu {...menu}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -142,14 +153,14 @@ export function ConversationHeader({
               that disappears reads as a menu that has lost something; one
               that stays and refuses says the settings are shut, which is the
               fact the operator is looking for. */}
-          <DropdownMenuItem disabled={locked} onSelect={onOpenSettings}>
+          <DropdownMenuItem disabled={locked} onSelect={pick(onOpenSettings)}>
             Request settings…
           </DropdownMenuItem>
           {/* The system prompt used to be edited from here. It is in the
               request settings now, beside the rest of what a request carries
               and under the same lock, rather than in a dialog that could
               change it after the turns it shaped had already been answered. */}
-          <DropdownMenuItem disabled={!canDelete} onSelect={onDelete}>
+          <DropdownMenuItem disabled={!canDelete} onSelect={pick(onDelete)}>
             Delete conversation
           </DropdownMenuItem>
         </DropdownMenuContent>

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -62,6 +63,62 @@ func TestProxyTokenDeleteRevokes(t *testing.T) {
 	}
 }
 
+// The listing must say whether proxy authentication is in force, because an
+// empty list cannot: the gateway latches authentication on at the first
+// issued token, so after the last revoke the list is empty and every
+// unauthenticated client is still refused.
+func TestProxyTokenListingReportsIssuanceAfterRevoke(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	type listing struct {
+		Tokens       []proxyTokenView `json:"tokens"`
+		Issued       *bool            `json:"issued"`
+		SharedSecret *bool            `json:"shared_secret"`
+	}
+	read := func() listing {
+		t.Helper()
+		var l listing
+		w := do(t, s, cookie, token, "GET", "/api/proxy-tokens", "")
+		if err := json.Unmarshal(w.Body.Bytes(), &l); err != nil {
+			t.Fatal(err)
+		}
+		if l.Issued == nil || l.SharedSecret == nil {
+			t.Fatalf("listing lacks issued/shared_secret: %s", w.Body.String())
+		}
+		return l
+	}
+
+	if l := read(); *l.Issued {
+		t.Fatal("a fresh instance reports a token as issued")
+	}
+	w := do(t, s, cookie, token, "POST", "/api/proxy-tokens", `{"name":"laptop"}`)
+	var created proxyTokenView
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if l := read(); !*l.Issued {
+		t.Error("issued is false with a live token")
+	}
+	do(t, s, cookie, token, "DELETE", "/api/proxy-tokens/"+created.ID, "")
+	if l := read(); len(l.Tokens) != 0 || !*l.Issued {
+		t.Errorf("after revoking the last token: %d tokens, issued=%v; want 0, true", len(l.Tokens), *l.Issued)
+	}
+}
+
+func TestProxyTokenListingReportsSharedSecretWithoutIt(t *testing.T) {
+	// The fixture's process carries DARKROUTER_PROXY_TOKEN, so the shared
+	// secret is set and its value is a string the body must not contain.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	w := do(t, s, cookie, token, "GET", "/api/proxy-tokens", "")
+	if !strings.Contains(w.Body.String(), `"shared_secret":true`) {
+		t.Errorf("listing = %s, want shared_secret true", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "fixture-proxy-token") {
+		t.Error("the listing leaked the shared secret")
+	}
+}
+
 func TestProxyTokenWritesNeedASession(t *testing.T) {
 	s, _ := testServerFull(t)
 	r := httptest.NewRequest("POST", "/api/proxy-tokens",
@@ -88,6 +145,42 @@ func TestPatchCredentialNeverEchoesTheSecret(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "sk-brand-new-value") {
 		t.Errorf("the response echoed the secret: %s", w.Body.String())
+	}
+}
+
+func TestPatchCredentialRefusesAnUnparseableSignedSecret(t *testing.T) {
+	// Creation already refuses a sigv4 secret that is not an AWS credential
+	// document; a replacement that skipped the check would store one that
+	// fails on every request it signs.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"bed","name":"bed","kind":"bedrock","base_url":"https://bedrock.invalid","auth_style":"sigv4","region":"us-east-1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	doc, _ := json.Marshal(map[string]string{"access_key_id": "AKIDEXAMPLE", "secret_access_key": "wJalrXUtnFEMI"})
+	body, _ := json.Marshal(map[string]string{"label": "primary", "secret": string(doc)})
+	w := do(t, s, cookie, token, "POST", "/api/providers/bed/keys", string(body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	w = do(t, s, cookie, token, "PATCH", "/api/providers/bed/keys/"+created.ID,
+		`{"secret":"not-a-json-document-SECRETCANARY"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("patch = %d %s, want 400", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not an AWS credential") {
+		t.Errorf("body = %s, want the shape named", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "SECRETCANARY") {
+		t.Errorf("the refusal quoted the secret: %s", w.Body.String())
 	}
 }
 
