@@ -20,6 +20,8 @@ import { keys, usePresets, useProviders } from "../../lib/queries"
 import type { Preset, Provider } from "../../lib/api-types"
 import { FilterSelect } from "../requests/filter-select"
 import { isLocalPreset } from "./local-runtimes"
+import { removeProvider } from "./local-add"
+import { endpointFact } from "./provider-state"
 import {
   AccountFields,
   emptyAccounts,
@@ -306,6 +308,13 @@ export function AddAccountsDialog({
   // retry sent before then must not POST it again: that 409s and abandons the
   // keys being retried.
   const [created, setCreated] = useState<{ id: string; freeModelsOnly: boolean } | null>(null)
+  // The row this visit created and then removed again, because every key sent
+  // with it was refused. The providers list may still hold it until its
+  // refetch lands, and a retry has to create it afresh rather than send keys
+  // to a row that is gone.
+  const [withdrawn, setWithdrawn] = useState<string | null>(null)
+  // Set when that removal did not leave things as they were.
+  const [leftBehind, setLeftBehind] = useState<string | null>(null)
   const [wasOpen, setWasOpen] = useState(open)
 
   // The row the free-models box reads its setting from. A preset usually has
@@ -336,6 +345,8 @@ export function AddAccountsDialog({
     setProgress(null)
     setNotAdded([])
     setCreated(null)
+    setWithdrawn(null)
+    setLeftBehind(null)
     setQ("")
   }
 
@@ -347,7 +358,9 @@ export function AddAccountsDialog({
   const planned = provider
     ? { needsProvider: false, provider }
     : target
-      ? planFor(target, existing)
+      ? withdrawn === target.id
+        ? { needsProvider: true }
+        : planFor(target, existing)
       : null
   const plan =
     planned?.needsProvider && created !== null && created.id === target?.id
@@ -357,16 +370,22 @@ export function AddAccountsDialog({
   // them, and its settings are where they change.
   const endpointFields = plan?.needsProvider ? endpointFieldsFor(chosen?.kind) : []
   const endpointMissing = endpointFields.some((f) => endpoint[f].trim() === "")
+  // Read off the row when there is one, and off the fields being typed when it
+  // is still to be created -- or was created by this visit and is not listed yet.
+  const settledRow = plan && "provider" in plan ? plan.provider : undefined
+  const endpointShown = chosen ? endpointFact({ ...chosen, ...(settledRow ?? endpoint) }).value : ""
 
   const submit = useApiMutation({
     mutationFn: async () => {
       if (!chosen) throw new Error("no provider chosen")
       setProgress(null)
       setNotAdded([])
+      setLeftBehind(null)
       // The provider row is created only when it does not exist yet, and from
       // the preset alone — id, kind, base URL and auth style all come from the
       // release rather than from anything typed here.
-      if (plan?.needsProvider) {
+      const creating = plan?.needsProvider === true
+      if (creating) {
         await api.post<{ id: string }>("/api/providers", {
           id: chosen.id,
           preset: chosen.id,
@@ -374,6 +393,7 @@ export function AddAccountsDialog({
           ...Object.fromEntries(endpointFields.map((f) => [f, endpoint[f].trim()])),
         })
         setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
+        setWithdrawn(null)
       } else if (freeOnlyChange(accounts, plan)) {
         // Against a provider that already exists the flag is a setting to be
         // written, not part of the POST that creates the row. Sent on its own
@@ -389,7 +409,22 @@ export function AddAccountsDialog({
           setCreated({ id: chosen.id, freeModelsOnly: accounts.freeModelsOnly })
         }
       }
-      return addCredentials(chosen.id, accounts, needsAccount(chosen.base_url), setProgress)
+      const result = await addCredentials(chosen.id, accounts, needsAccount(chosen.base_url), setProgress)
+      // The row was created to hold these keys, and none of them is on it.
+      // Left there it is a provider nobody configured that the list calls
+      // "unconfigured" -- a malformed AWS key used to leave exactly that
+      // behind -- so it goes again, as a local runtime's test row does. The
+      // keys stay in the form, and sending them again creates it afresh,
+      // with whatever region was corrected in the meantime.
+      if (creating && result.added === 0 && result.disabled.length === 0) {
+        const removal = await removeProvider(api, chosen.id)
+        if (removal.gone) {
+          setCreated(null)
+          setWithdrawn(chosen.id)
+        }
+        if (removal.leftBehind) setLeftBehind(removal.leftBehind)
+      }
+      return result
     },
     // The catalogue too: the first credential makes the provider
     // discoverable, and a sweep lands models the screen that opened this
@@ -511,7 +546,10 @@ export function AddAccountsDialog({
               <span className="min-w-0 flex-1">
                 <span className="block font-medium">{chosen.name}</span>
                 <span className="block truncate font-mono text-sm text-[hsl(var(--legend))]">
-                  {chosen.kind} · {chosen.base_url}
+                  {/* A Bedrock or Vertex preset ships no base URL: the
+                      endpoint is built from the row's region, or the one being
+                      typed below, and says so rather than ending in "· ". */}
+                  {chosen.kind} · {endpointShown}
                 </span>
               </span>
             </div>
@@ -584,6 +622,7 @@ export function AddAccountsDialog({
                   </li>
                 ))}
               </ul>
+              {leftBehind && <span>{leftBehind}</span>}
             </div>
           )}
 
