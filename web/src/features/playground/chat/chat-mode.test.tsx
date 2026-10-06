@@ -459,9 +459,29 @@ describe("Chat mode", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Conversation actions" }))
     await userEvent.click(await screen.findByRole("menuitem", { name: "Delete conversation" }))
+    // Unrecoverable, so it asks first; the menu item alone deletes nothing.
+    const confirm = await screen.findByRole("alertdialog")
+    expect(confirm).toHaveTextContent(/cannot be recovered/i)
+    expect(delMock).not.toHaveBeenCalled()
+    await userEvent.click(within(confirm).getByRole("button", { name: "Delete" }))
 
     await waitFor(() => expect(delMock).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByText(/exchange was not saved/i)).toBeNull())
+  })
+
+  it("deletes nothing from the rail until the operator confirms", async () => {
+    postMock.mockImplementation(async (path: string) => {
+      if (path === "/api/playground/conversations") return { ...stored }
+      return { seq: 0 }
+    })
+    delMock.mockResolvedValue(null)
+    mounted()
+    await chooseModel("gpt")
+    await send("first")
+    const rail = await screen.findAllByRole("button", { name: "Delete conversation" })
+    await userEvent.click(rail[0]!)
+    await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
+    expect(delMock).not.toHaveBeenCalled()
   })
 
   it("discards only the failed exchanges of the conversation on screen", async () => {
@@ -892,6 +912,30 @@ describe("Chat mode", () => {
     expect(await screen.findByText("upstream refused")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: /system & tools/i }))
     expect(screen.getByLabelText("System prompt")).toBeEnabled()
+  })
+
+  it("does not count a failed exchange as an answer missing its trace", async () => {
+    // A failed turn is not part of the conversation -- it is never sent on
+    // or stored -- so "0 of 1 answers" was counting an error as an answer.
+    streamMock.mockImplementation(async function* () {
+      throw new Error("no configured provider offers this model")
+      // Unreachable, and there to make this a generator.
+      yield ""
+    })
+    mounted()
+    await chooseModel("gpt")
+    await send("hello")
+    expect(await screen.findByText("no configured provider offers this model")).toBeInTheDocument()
+    expect(screen.queryByText(/token counts cover/i)).toBeNull()
+    expect(screen.queryByText(/still have a trace/i)).toBeNull()
+  })
+
+  it("offers the readings in a sheet for widths that fold the right column away", async () => {
+    mounted()
+    await userEvent.click(screen.getByRole("button", { name: "Show consumption" }))
+    const sheet = await screen.findByRole("dialog", { name: "Consumption" })
+    expect(within(sheet).getByText("tokens in")).toBeInTheDocument()
+    expect(within(sheet).getByText("first token")).toBeInTheDocument()
   })
 
   it("sends what was typed into the pane beside the transcript", async () => {
