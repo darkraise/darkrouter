@@ -48,9 +48,31 @@ export function modelLabel(row: RequestRow): string {
   return row.model
 }
 
+/** The Attempts cell's explanation. Two attempts or more is a failover; one
+ *  or none says whether that attempt served, because "served on the first
+ *  attempt" over a failed request, or one nothing was tried for, says the
+ *  opposite of the row it sits on. */
+export function attemptsTitle(row: Pick<RequestRow, "attempts" | "status">): string {
+  if (row.attempts === 0) return "no attempt was made"
+  if (row.attempts > 1) return `${row.attempts} attempts — this request failed over`
+  return row.status === "success" ? "served on the first attempt" : "failed on its only attempt"
+}
+
+/** Rows as the CSV carries them: the time as ISO-8601 rather than the epoch
+ *  milliseconds the table sorts on, which no spreadsheet reads as a date. */
+export function csvRows(
+  rows: RequestTableRow[],
+): (Omit<RequestTableRow, "ts_ms"> & { ts_ms: string })[] {
+  return rows.map((r) => ({ ...r, ts_ms: new Date(r.ts_ms).toISOString() }))
+}
+
 export function buildColumns(onOpen: (id: string) => void): Columns {
   return [
     {
+      // Named ids where the header is a component: the column menu labels an
+      // entry from a string header or else from the id, and the accessor key
+      // read as "Ts_ms" there.
+      id: "time",
       accessorKey: "ts_ms",
       // The zone is named once, here, rather than on every row.
       header: ({ column }) => <ColumnHeader column={column} title={`Time (${zoneLabel()})`} />,
@@ -90,11 +112,7 @@ export function buildColumns(onOpen: (id: string) => void): Columns {
       cell: ({ row }) => (
         <span
           className="tabular-nums"
-          title={
-            row.original.attempts > 1
-              ? `${row.original.attempts} attempts — this request failed over`
-              : "served on the first attempt"
-          }
+          title={attemptsTitle(row.original)}
         >
           {row.original.attempts}
         </span>
@@ -111,6 +129,7 @@ export function buildColumns(onOpen: (id: string) => void): Columns {
       ),
     },
     {
+      id: "latency",
       accessorKey: "total_ms",
       header: ({ column }) => <ColumnHeader column={column} title="Latency" />,
       // Log-scaled against a fixed domain rather than against the rows on
