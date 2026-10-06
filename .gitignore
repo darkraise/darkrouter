@@ -13,3 +13,6 @@ darkrouter.yaml
 __pycache__/
 *.pyc
 docs/ux/mockups/.check/
+
+# Per-checkout QA instance (database, binary, logs) made by the e2e harness.
+.qa-instance/
