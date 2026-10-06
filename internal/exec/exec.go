@@ -408,6 +408,9 @@ func (e *Executor) runAttempts(w http.ResponseWriter, r *http.Request, op Surfac
 			}
 			return
 		default:
+			// Whatever the advance jumped over is still a candidate the trace
+			// owes an account of, the same as one skipped before dispatch.
+			rec.Skips = append(rec.Skips, advanceSkips(cands, i, next)...)
 			i = next
 		}
 	}

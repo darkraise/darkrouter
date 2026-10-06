@@ -1311,6 +1311,47 @@ func TestCandidateWithNoRegisteredAdapterIsSkipped(t *testing.T) {
 	}
 }
 
+// A provider-level failure skips the rest of that target's credentials, and
+// the trace says so: a key that was never tried is still a candidate the
+// operator is owed an account of, not one that silently vanished.
+func TestAProviderFailureRecordsTheCredentialsItSkipped(t *testing.T) {
+	var calls atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"down"}}`))
+	}))
+	defer up.Close()
+
+	cfgStore := config.NewStoreOf(testConfig(t, nil))
+	p := providertest.Keyed("fake", "openaicompat", up.URL, "sk-1", "m")
+	p.Credentials = []provider.Credential{
+		{ID: "k1", Secret: "sk-1", Enabled: true},
+		{ID: "k2", Secret: "sk-2", Enabled: true},
+	}
+	var rec captureLogger
+	e := New(cfgStore, providertest.NewSource(p),
+		map[string]adapter.Adapter{"openaicompat": openaicompat.New()}, Deps{Log: &rec})
+
+	w := post(t, e, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	if w.Code != 502 {
+		t.Fatalf("code = %d, want 502", w.Code)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("upstream calls = %d, want 1: the second key of a failed target is skipped", n)
+	}
+	got := rec.only(t)
+	found := false
+	for _, s := range got.Skips {
+		if strings.HasSuffix(s, ":target_failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skips = %v, want one ending in :target_failed", got.Skips)
+	}
+}
+
 func TestContentFilterFromParseIsFatalNotAProviderFault(t *testing.T) {
 	if got := outcomeForParseError(&ir.Error{Type: ir.ErrContentFilter, Message: "blocked"}); got != adapter.OutcomeFatal {
 		t.Errorf("content filter = %q, want fatal; a refusal is an answer, not an outage", got)
