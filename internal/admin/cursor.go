@@ -31,6 +31,13 @@ type RequestFilters struct {
 	Source  string
 	SinceMs int64
 	UntilMs int64
+	// WindowMs is a window relative to each read: requests from the last
+	// WindowMs milliseconds as of the moment the page is served. It is what
+	// the console's 1h/24h/7d mean -- an absolute since_ms written when the
+	// button was pressed kept "1h" growing for as long as a tab stayed open,
+	// a saved view was kept, or a link was pasted. Hashed as the window, not
+	// as the instant it resolved to, so paging is not refused as time moves.
+	WindowMs int64
 }
 
 // Hash identifies the filter set a cursor was minted under.
@@ -49,6 +56,11 @@ func (f RequestFilters) Hash() string {
 		h.Write([]byte(s))
 	}
 	fmt.Fprintf(h, "%d\x00%d", f.SinceMs, f.UntilMs)
+	// Only when set, so a cursor minted without a window hashes as it always
+	// has.
+	if f.WindowMs != 0 {
+		fmt.Fprintf(h, "\x00w%d", f.WindowMs)
+	}
 	// Eight bytes is plenty: this is a mismatch detector, not a MAC. A client
 	// forging one gets a page of its own filter set, which it could have asked
 	// for directly.

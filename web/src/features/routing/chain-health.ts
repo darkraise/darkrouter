@@ -1,4 +1,5 @@
-import type { Credential, Model, Provider } from "../../lib/api-types"
+import type { BreakerEntry, Credential, Model, Provider } from "../../lib/api-types"
+import { isKeyless } from "../providers/provider-state"
 
 /**
  * What the router would make of one target, right now.
@@ -35,13 +36,16 @@ export type TargetFacts = {
   problem: string
 }
 
-/** Everything a target is judged against. Cooling is read from each
- *  credential's own flag rather than from the breaker endpoint: the provider
- *  rows already carry it, and a second source would be a second thing to keep
- *  in step. */
-export type ChainCredential = Pick<Credential, "enabled" | "cooling">
-export type ChainProvider = Pick<Provider, "id" | "enabled"> & { credentials: ChainCredential[] }
+/** Everything a target is judged against. A credential's own flag covers a
+ *  breaker tripped for the whole key; `id` is what ties it to the per-model
+ *  breakers, and is optional only so a caller standing rows in can omit it. */
+export type ChainCredential = Pick<Credential, "enabled" | "cooling"> & { id?: string }
+/** `auth_style` is optional for the same reason. Absent reads as keyed: the
+ *  stricter assumption, and the one a stood-in row has always had. */
+export type ChainProvider = Pick<Provider, "id" | "enabled"> &
+  Partial<Pick<Provider, "auth_style">> & { credentials: ChainCredential[] }
 export type ChainModel = Pick<Model, "model" | "providers" | "state">
+export type ChainBreaker = Pick<BreakerEntry, "provider_id" | "key_id" | "model" | "cooling_until">
 
 /** Only the fields the judgement reads. Named narrowly so a caller holding
  *  the provider ids alone can stand rows in without fabricating the rest of
@@ -49,6 +53,15 @@ export type ChainModel = Pick<Model, "model" | "providers" | "state">
 export type ChainContext = {
   providers: ChainProvider[]
   models: ChainModel[]
+  /** `/api/health/providers`. Breakers are keyed per (provider, key, model),
+   *  which a credential flag cannot express: a keyless provider has no
+   *  credential row to carry one, and one model cooling on a provider leaves
+   *  its other models routable. Absent means nothing is known to be cooling
+   *  beyond what the credential flags say. */
+  breakers?: ChainBreaker[]
+  /** The instant `cooling_until` is compared against. Defaults to now; a
+   *  field so a test does not depend on the clock. */
+  now?: number
 }
 
 /**
@@ -78,10 +91,41 @@ function usableCredentials(p: ChainProvider) {
   return p.credentials.filter((c) => c.enabled)
 }
 
-/** A provider the router could dispatch to at all: switched on, and holding at
- *  least one enabled credential that is not cooling. */
-function live(p: ChainProvider): boolean {
-  return p.enabled && usableCredentials(p).some((c) => !c.cooling)
+/**
+ * The credential slots the router would walk on one provider.
+ *
+ * Its enabled credentials -- or, for a keyless provider holding none, the one
+ * attempt `router/filter.go` makes with no credential, keyed on the empty id.
+ * Leaving that slot out drew every local runtime as unusable while it was
+ * serving traffic.
+ */
+function slots(p: ChainProvider): { id: string; cooling: boolean }[] {
+  const usable = usableCredentials(p)
+  if (usable.length > 0) return usable.map((c) => ({ id: c.id ?? "", cooling: c.cooling }))
+  return isKeyless(p) ? [{ id: "", cooling: false }] : []
+}
+
+/** Whether a breaker holds this slot shut for this model. The credential-wide
+ *  entry (model "") gates every model the key serves, as
+ *  `health.Breaker.Available` checks it first; the model's own entry gates
+ *  only that model. */
+function breakerCooling(ctx: ChainContext, providerId: string, keyId: string, model: string) {
+  const now = ctx.now ?? Date.now()
+  return (ctx.breakers ?? []).some(
+    (b) =>
+      b.provider_id === providerId &&
+      b.key_id === keyId &&
+      (b.model === "" || b.model === model) &&
+      b.cooling_until !== undefined &&
+      Date.parse(b.cooling_until) > now,
+  )
+}
+
+/** A provider the router could dispatch this model to right now: switched on,
+ *  and holding at least one slot cooling neither as a whole nor for this
+ *  model. */
+function live(p: ChainProvider, model: string, ctx: ChainContext): boolean {
+  return p.enabled && slots(p).some((s) => !s.cooling && !breakerCooling(ctx, p.id, s.id, model))
 }
 
 /** The catalogue rows for one model on one provider that the router would
@@ -119,8 +163,10 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
     if (!provider.enabled) {
       return { ...base, state: "provider-disabled", problem: `${providerId} is disabled` }
     }
+    // The sqlsource rule and its exception together: a provider left with no
+    // enabled credential is dropped, unless it needs none.
     const usable = usableCredentials(provider)
-    if (usable.length === 0) {
+    if (usable.length === 0 && !isKeyless(provider)) {
       return {
         ...base,
         state: "provider-unconfigured",
@@ -148,8 +194,15 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
             problem: `${providerId} does not offer ${model}`,
           }
     }
-    if (!live(provider)) {
-      return { ...base, state: "cooling", problem: `every ${providerId} credential is cooling` }
+    if (!live(provider, model, ctx)) {
+      return {
+        ...base,
+        state: "cooling",
+        problem:
+          usable.length === 0
+            ? `${providerId} is cooling for ${model} after recent failures`
+            : `every ${providerId} credential is cooling for ${model}`,
+      }
     }
     return { ...base, state: "routable", problem: "" }
   }
@@ -186,7 +239,7 @@ export function targetFacts(raw: string, ctx: ChainContext): TargetFacts {
       problem: `no configured provider offers ${trimmed}`,
     }
   }
-  const usable = ctx.providers.filter((p) => offeredBy.includes(p.id) && live(p))
+  const usable = ctx.providers.filter((p) => offeredBy.includes(p.id) && live(p, trimmed, ctx))
   if (usable.length === 0) {
     return {
       ...base,

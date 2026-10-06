@@ -11,7 +11,9 @@ describe("the document title", () => {
     expect(pageTitle("/settings")).toBe("Settings · Darkrouter")
   })
 
-  it("falls back to the app alone for a path it does not know", () => {
-    expect(pageTitle("/nowhere")).toBe("Darkrouter")
+  it("names the not-found state for a path it does not know", () => {
+    // Not the bare app name: a background tab on a dead link should say so,
+    // rather than read like the console's front page.
+    expect(pageTitle("/nowhere")).toBe("Not found · Darkrouter")
   })
 })

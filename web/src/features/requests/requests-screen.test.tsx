@@ -517,6 +517,50 @@ describe("showing newer requests", () => {
   })
 })
 
+describe("the filters a request is sent with", () => {
+  function requestUrls(): string[] {
+    const calls = (fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls
+    return calls.map(([u]) => String(u)).filter((u) => u.includes("/api/requests"))
+  }
+
+  it("filters the provider control on any attempt, not only the one that served", async () => {
+    // A request that failed at a provider has no served provider, so the
+    // served-by filter hid exactly the errors an operator filters for.
+    mockByPath((url) => (url.includes("/api/requests") ? json({ requests: [] }) : json({})))
+    await renderAt("/requests?attempted_provider=lmstudio&status=error")
+    await waitFor(() => expect(requestUrls().length).toBeGreaterThan(0))
+    expect(requestUrls()[0]).toContain("attempted_provider=lmstudio")
+    expect(screen.getByRole("combobox", { name: /filter by provider/i })).toHaveValue("lmstudio")
+  })
+
+  it("sends a preset range as a window, ignoring a since_ms frozen beside it", async () => {
+    mockByPath((url) => (url.includes("/api/requests") ? json({ requests: [] }) : json({})))
+    await renderAt("/requests?range=1h&since_ms=123")
+    await waitFor(() => expect(requestUrls().length).toBeGreaterThan(0))
+    expect(requestUrls()[0]).toContain("window_ms=3600000")
+    expect(requestUrls()[0]).not.toContain("since_ms")
+  })
+
+  it("names every select, and keeps the name once a value is picked", async () => {
+    mockByPath((url) => (url.includes("/api/requests") ? json({ requests: [] }) : json({})))
+    await renderAt("/requests?status=error&source=proxy")
+    expect(await screen.findByRole("combobox", { name: "Status" })).toHaveTextContent(
+      "Status: error",
+    )
+    expect(screen.getByRole("combobox", { name: "Source" })).toHaveTextContent("Source: proxy")
+    expect(screen.getByRole("radiogroup", { name: "Time range" })).toBeInTheDocument()
+  })
+
+  it("shows one empty state when the filters match nothing", async () => {
+    // The table's own "No results found" sat in a 640px box above the empty
+    // state that can act on it, pushing that below the fold.
+    mockByPath((url) => (url.includes("/api/requests") ? json({ requests: [] }) : json({})))
+    await renderAt("/requests?model=zzz-none")
+    await screen.findByText(/no requests match these filters/i)
+    expect(screen.getByText(/no results found/i).closest(".hidden")).not.toBeNull()
+  })
+})
+
 describe("a requests list that fails to load", () => {
   it("shows a load error instead of the empty state", async () => {
     mockByPath(() => json({ error: "log unavailable" }, 500))

@@ -43,6 +43,12 @@ func filtersFrom(r *http.Request) (RequestFilters, error) {
 	if f.UntilMs, _, err = queryInt(r, "until_ms"); err != nil {
 		return f, err
 	}
+	if f.WindowMs, _, err = queryInt(r, "window_ms"); err != nil {
+		return f, err
+	}
+	if f.WindowMs < 0 {
+		return f, fmt.Errorf("window_ms must not be negative")
+	}
 	return f, nil
 }
 
@@ -83,6 +89,13 @@ func (s *Server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 		Model: f.Model, Status: f.Status,
 		Alias: f.Alias, Surface: f.Surface, ErrorCode: f.ErrorCode,
 		Source: f.Source, SinceMs: f.SinceMs, UntilMs: f.UntilMs,
+	}
+	// Resolved per read, so "the last hour" is the last hour whenever the
+	// page is served. Both bounds apply when both are given.
+	if f.WindowMs > 0 {
+		if since := s.now().UnixMilli() - f.WindowMs; since > q.SinceMs {
+			q.SinceMs = since
+		}
 	}
 	limit, _, err := queryInt(r, "limit")
 	if err != nil {

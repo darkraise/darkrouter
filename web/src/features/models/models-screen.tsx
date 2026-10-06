@@ -13,6 +13,7 @@ import { pricePerMillion } from "../../lib/format"
 import { Ladder, type LadderRow, type PredictiveMark } from "../ladder/ladder"
 import { EmptyState, GhostRows, NoMatch } from "../shell/empty-state"
 import { OverrideEditor } from "./override-editor"
+import "./models-table.css"
 
 const FIELDS = ["model", "provider"] as const
 
@@ -198,7 +199,7 @@ function ServesCell({ row }: { row: Row }) {
 function ModelCell({ row }: { row: Model }) {
   const warning = tierWarning(row.free_tier)
   return (
-    <span className="flex min-w-[16rem] flex-col">
+    <span className="flex min-w-[12rem] flex-col">
       <span className="font-mono text-sm">{row.model}</span>
       {warning && (
         <span className="flex items-start gap-1.5 text-sm font-medium text-[hsl(var(--warning))]">
@@ -219,7 +220,7 @@ type Columns = Parameters<typeof DataTable<Row, unknown>>[0]["columns"]
 // The facet columns take string headers rather than sortable ones: a facet
 // and the column menu are both labelled from the header when it is a string
 // and from the accessor key otherwise, and "surface_list" is not a label.
-function buildColumns(onEdit: (providers: string[], model: string) => void): Columns {
+function buildColumns(onEdit: (row: Model) => void): Columns {
   return [
     {
       accessorKey: "model",
@@ -299,7 +300,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
       accessorKey: "surface_list",
       header: "Surfaces",
       cell: ({ row }) => (
-        <span className="font-mono text-sm">{row.original.surface_list || "—"}</span>
+        <span className="whitespace-nowrap font-mono text-sm">{row.original.surface_list || "—"}</span>
       ),
     },
     {
@@ -318,7 +319,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
               with a warning, so the row has to say which they are — and it
               says it in words, because the triad beside it is about what the
               model does, not about how well the catalogue knows it. */}
-          {row.original.inferred && <Badge variant="amber">inferred</Badge>}
+          {row.original.inferred && <Badge variant="amber" className="whitespace-nowrap">inferred</Badge>}
         </div>
       ),
     },
@@ -331,7 +332,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
       accessorKey: "merge_source",
       header: "Source",
       cell: ({ row }) => (
-        <Badge variant="outline" className="font-mono text-sm">
+        <Badge variant="outline" className="whitespace-nowrap font-mono text-sm">
           {row.original.merge_source}
         </Badge>
       ),
@@ -353,7 +354,7 @@ function buildColumns(onEdit: (providers: string[], model: string) => void): Col
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onEdit(row.original.providers, row.original.model)}
+            onClick={() => onEdit(row.original)}
           >
             Override
           </Button>
@@ -383,9 +384,9 @@ export function ModelsScreen() {
   // Both memoised: DataTable rebuilds its table model when either changes
   // identity, and the catalogue polls every thirty seconds.
   const rows = useMemo(() => models.map(facetRow), [models])
-  const [editing, setEditing] = useState<{ providers: string[]; model: string } | null>(null)
+  const [editing, setEditing] = useState<Model | null>(null)
   const columns = useMemo(
-    () => buildColumns((providers, model) => setEditing({ providers, model })),
+    () => buildColumns(setEditing),
     [],
   )
   const filtered = Object.values(filters).some((v) => v !== "")
@@ -420,18 +421,25 @@ export function ModelsScreen() {
       </div>
 
       {/* Paged rather than windowed: a row grows when its ladder is opened,
-          and a fixed-height window cannot hold a row that changes height. */}
-      <DataTable
-        data={rows}
-        columns={columns}
-        facets={["surface_list", "state", "caps", "band", "merge_source"]}
-        searchKey="model"
-        searchPlaceholder="Search models"
-        isLoading={catalog.isPending}
-      />
+          and a fixed-height window cannot hold a row that changes height.
 
-      {models.length === 0 && (
-        <div className="mt-4">
+          No search box of its own: the Model combobox above is the model
+          filter, and it is the one in the URL. A second one beside it
+          narrowed the same rows, survived "Clear filters", and with no match
+          put the table's own empty row and pager over the card below. For
+          the same reason the table gives way to that card rather than
+          standing empty above it. */}
+      {catalog.isPending || models.length > 0 ? (
+        <div className="models-table">
+          <DataTable
+            data={rows}
+            columns={columns}
+            facets={["surface_list", "state", "caps", "band", "merge_source"]}
+            isLoading={catalog.isPending}
+          />
+        </div>
+      ) : (
+        <div>
           {filtered ? (
             <NoMatch what="models" onClear={clear} />
           ) : (
@@ -453,6 +461,7 @@ export function ModelsScreen() {
         <OverrideEditor
           providers={editing.providers}
           model={editing.model}
+          catalog={{ surfaces: editing.surfaces, contextWindow: editing.context_window }}
           onClose={() => setEditing(null)}
         />
       )}

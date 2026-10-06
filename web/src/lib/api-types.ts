@@ -46,6 +46,9 @@ export type UsageResponse = {
   first_day: string
   last_day: string
   group_by?: UsageDimension
+  /** Present with group_by=provider: failover pairs over the same days, so
+   *  the routing graph's returns and volumes share one window. */
+  failover_edges?: FailoverEdge[]
 }
 
 // --- overview ---
@@ -87,6 +90,9 @@ export type Overview = {
   requests_per_min: number
   error_rate: number
   window_sec: number
+  /** Requests in the live window. Zero means latency and error rate were not
+   *  measured, not that they were 0. */
+  requests?: number
   today_spend: Spend
   latency: { p50_ms: number; p95_ms: number }
   series: UsageRow[]
@@ -240,6 +246,11 @@ export type Provider = {
    *  same veto, but only while that filter is on and only to a still-live
    *  grading. */
   allow_unsanctioned_free: boolean
+  /** Bedrock's region, and Vertex's project and location. Absent when unset,
+   *  and from a server that predates them. */
+  region?: string
+  project?: string
+  location?: string
 }
 
 export type Preset = {
@@ -378,6 +389,13 @@ export type DiscoveryHealthRow = {
    *  the free-models filter, and the only thing that tells a provider serving
    *  nothing apart from one serving nothing free. */
   filtered_out: number
+  /** Sweeps that have failed in a row; zero once one succeeds. Optional so a
+   *  server that predates them reads as "not failing". */
+  consecutive_failures?: number
+  /** Why the last sweep failed. Absent after a success. */
+  last_error?: string
+  /** Absent when no sweep of this provider has ever succeeded. */
+  last_success_at?: string
 }
 
 export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }
@@ -537,6 +555,16 @@ export type ConfigResponse = {
   pending_restart: string[]
   error?: string
   serving?: string
+}
+
+/** GET /api/catalog/sync: the newest finished models.dev sync, scheduled or
+ *  forced. `run` is 0, and `finished_at` absent, before any has finished. */
+export type CatalogSyncStatus = {
+  running: boolean
+  run: number
+  finished_at?: string
+  /** Present with `finished_at`; "" when that run succeeded. */
+  error?: string
 }
 
 // --- credentials for clients, and sessions ---

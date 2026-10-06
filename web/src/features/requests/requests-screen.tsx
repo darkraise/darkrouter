@@ -15,11 +15,17 @@ import { TrafficStrip } from "./traffic-strip"
 import { TraceDrawer } from "./trace-drawer"
 import { FilterSelect } from "./filter-select"
 import { SavedViewsBar } from "./saved-views-bar"
-import { buildColumns, facetRow, CSV_COLUMNS } from "./requests-columns"
+import { buildColumns, csvRows, facetRow, CSV_COLUMNS } from "./requests-columns"
 
 const FIELDS = [
   "source",
+  // Served by. The provider control writes attempted_provider instead; this
+  // one is still read so a link or saved view that carries it keeps working.
   "provider",
+  // Any attempt ran here, served or not: "this provider's errors" is the
+  // question the provider control is asked, and a request that failed at a
+  // provider has no served provider at all.
+  "attempted_provider",
   "model",
   "status",
   "alias",
@@ -88,15 +94,23 @@ export function optionsFrom(rows: RequestRow[], field: keyof RequestRow): string
   return [...seen].sort()
 }
 
-/** The filter set as the API understands it. `range` is display-only — the
- *  handler has no such parameter, and forwarding it anyway would ride a
- *  meaningless query param on every request and vary the react-query cache
- *  key for no reason. */
+/** The filter set as the API understands it.
+ *
+ *  A preset range is sent as `window_ms`, which the server resolves against
+ *  its clock on every read, and any `since_ms` beside it is dropped. Writing
+ *  `Date.now() - 1h` into the URL when the pill was pressed froze the window
+ *  there: a tab left open, a reload, a pasted link and a saved view all kept
+ *  that instant, so "1h" grew for as long as any of them lived. A `since_ms`
+ *  with no preset — a drilldown from Usage — is an absolute bound and passes
+ *  through. `range` itself is display-only and never forwarded. */
 export function apiFilters(filters: Record<string, string>): Record<string, string> {
+  const preset = TIME_WINDOWS.find((w) => w.value === filters.range)
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(filters)) {
-    if (k !== "range") out[k] = v
+    if (k === "range" || (preset && k === "since_ms")) continue
+    out[k] = v
   }
+  if (preset) out.window_ms = String(preset.ms)
   return out
 }
 
@@ -286,6 +300,8 @@ export function RequestsScreen() {
   // state below would otherwise read as "no requests yet" rather than as the
   // query failure it is.
   const initialFailure = first.isError && held === null
+  // A load that came back with nothing, as distinct from one still on its way.
+  const empty = rows.length === 0 && held !== null
 
   // The page's own values first — those are the ones with traffic behind them
   // right now — then everything else the gateway knows about.
@@ -315,8 +331,11 @@ export function RequestsScreen() {
         <ModelCombobox
           label="Filter by provider"
           placeholder="Any provider"
-          value={filters.provider}
-          onChange={(v) => onFilter("provider", v)}
+          value={filters.attempted_provider || filters.provider}
+          // Any attempt, not only the one that served, and the served-by
+          // filter an older link set is cleared rather than left hidden
+          // under it.
+          onChange={(v) => writeFilters({ attempted_provider: v, provider: "" })}
           candidates={providerOptions}
           loading={providers.isPending}
           emptyText="No provider by that name. The filter still applies."
@@ -375,6 +394,7 @@ export function RequestsScreen() {
           type="single"
           variant="outline"
           size="sm"
+          aria-label="Time range"
           // Controlled by the URL, not by click history: a reload, a pasted
           // link, or an applied saved view must show the truth about
           // since_ms rather than going blank while a window is still active.
@@ -384,8 +404,9 @@ export function RequestsScreen() {
               writeFilters({ range: "", since_ms: "" })
               return
             }
-            const window = TIME_WINDOWS.find((w) => w.value === v)
-            if (window) writeFilters({ range: v, since_ms: String(Date.now() - window.ms) })
+            // The preset alone: apiFilters turns it into a window the server
+            // resolves on every read.
+            if (TIME_WINDOWS.some((w) => w.value === v)) writeFilters({ range: v, since_ms: "" })
           }}
         >
           {TIME_WINDOWS.map((w) => (
@@ -413,7 +434,8 @@ export function RequestsScreen() {
           variant="outline"
           size="sm"
           className="ml-auto"
-          onClick={() => exportToCsv(rows, "requests.csv", CSV_COLUMNS)}
+          // The bare name: the exporter adds the extension itself.
+          onClick={() => exportToCsv(csvRows(rows), "requests", CSV_COLUMNS)}
         >
           Export CSV
         </Button>
@@ -458,9 +480,16 @@ export function RequestsScreen() {
               row and not a button. The table renders its own cells, so the
               id rides on the first cell and the click is delegated from
               here. */}
+          {/* The toolbar wraps rather than scrolling with the table: on a
+              phone the facets ran off the right edge and Columns sat outside
+              the viewport, reachable only by scrolling the table sideways. */}
+          {/* Hidden once a load has come back empty: its own "No results
+              found" filled a 640px box and pushed the empty state that can
+              act on it below the fold. Hidden rather than unmounted, so the
+              sort and the hidden columns are still there when rows return. */}
           <div
             ref={tableRef}
-            className="row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer"
+            className={`row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer [&_.dr-data-table-toolbar]:flex-wrap [&_.dr-data-table-toolbar-filters]:flex-wrap ${empty ? "hidden" : ""}`}
             style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
             onClick={openRowUnderPointer}
           >
@@ -472,7 +501,7 @@ export function RequestsScreen() {
             />
           </div>
 
-          {rows.length === 0 && (
+          {empty && (
             <div className="mt-4">
               {filtered ? (
                 <NoMatch what="requests" onClear={clear} />

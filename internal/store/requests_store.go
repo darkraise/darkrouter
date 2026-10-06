@@ -35,8 +35,10 @@ type RequestQuery struct {
 	// AttemptedProvider matches a request any of whose attempts ran on this
 	// provider, served or not: the requests behind a provider's usage.
 	AttemptedProvider string
-	Model             string
-	Status            string
+	// Model matches what the client asked for, what served, or any model
+	// an attempt ran on: see ListRequests.
+	Model  string
+	Status string
 	// Source separates console traffic from a client's: "proxy" or "console".
 	Source    string
 	Alias     string
@@ -100,7 +102,6 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		val string
 	}{
 		{"r.final_provider_id", q.Provider},
-		{"r.final_model", q.Model},
 		{"r.status", q.Status},
 		{"r.source", q.Source},
 		{"r.resolved_alias", q.Alias},
@@ -119,6 +120,17 @@ func (d *DB) ListRequests(ctx context.Context, q RequestQuery) ([]RequestSummary
 		        SELECT 1 FROM request_attempts a
 		         WHERE a.request_id = r.id AND a.provider_id = ?))`)
 		args = append(args, q.AttemptedProvider, q.AttemptedProvider)
+	}
+	if q.Model != "" {
+		// Not the served model alone. The table shows the requested model, so
+		// a filter on the served one could never find a request that failed
+		// (it has none), one sent as provider/model, or one sent to an alias;
+		// and usage credits a model with every attempt on it, so a drilldown
+		// from a model's usage has to reach the requests that tried it too.
+		where = append(where, `(r.requested_model = ? OR r.final_model = ? OR EXISTS (
+		        SELECT 1 FROM request_attempts a
+		         WHERE a.request_id = r.id AND a.model = ?))`)
+		args = append(args, q.Model, q.Model, q.Model)
 	}
 	if q.SinceMs > 0 {
 		where = append(where, "r.ts >= ?")

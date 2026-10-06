@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { api, stream, onUnauthorized, ApiError, isTransient, throwOnExecutorError, getWithETag } from "./api"
+import {
+  api,
+  stream,
+  onUnauthorized,
+  ApiError,
+  isTransient,
+  throwOnExecutorError,
+  getWithETag,
+  retryAfterSeconds,
+} from "./api"
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -312,5 +321,34 @@ describe("isTransient", () => {
     expect(isTransient(new ApiError(404, "gone"))).toBe(false)
     expect(isTransient(new ApiError(401, "not authenticated"))).toBe(false)
     expect(isTransient(new ApiError(400, "bad"))).toBe(false)
+  })
+})
+
+describe("Retry-After", () => {
+  it("reads both of its forms, in whole seconds", () => {
+    const now = Date.parse("2026-10-06T12:00:00Z")
+    expect(retryAfterSeconds("42", now)).toBe(42)
+    expect(retryAfterSeconds("Tue, 06 Oct 2026 12:00:30 GMT", now)).toBe(30)
+    // A date already past is no wait at all, not a negative one.
+    expect(retryAfterSeconds("Tue, 06 Oct 2026 11:00:00 GMT", now)).toBe(0)
+    expect(retryAfterSeconds(null, now)).toBeUndefined()
+    expect(retryAfterSeconds("soon", now)).toBeUndefined()
+  })
+
+  it("rides on the error a rate-limited call throws", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: "too many login attempts; try again later" }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "7" },
+          }),
+      ),
+    )
+    const err = await api.post("/api/auth/login", {}).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(429)
+    expect((err as ApiError).retryAfter).toBe(7)
   })
 })

@@ -104,6 +104,19 @@ describe("a session that dies while the console is open", () => {
     expect(screen.queryByRole("link", { name: /Requests/i })).not.toBeInTheDocument()
   })
 
+  it("says the session ended, and names the tab for the sign-in form", async () => {
+    // An empty form with no reason, under a tab still reading "Requests ·
+    // Darkrouter", looked like a working page in the background.
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+
+    sessionGone()
+    await expect(api.get("/api/overview")).rejects.toThrow()
+
+    expect(await screen.findByText(/session has ended/i)).toHaveAttribute("role", "status")
+    expect(document.title).toBe("Sign in · Darkrouter")
+  })
+
   it("puts the shell back when the operator signs in again", async () => {
     render(<App />)
     await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
@@ -152,5 +165,53 @@ describe("a session that dies while the console is open", () => {
     expect(
       await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 }),
     ).toBeInTheDocument()
+  })
+})
+
+describe("a malformed catalog behind the palette", () => {
+  it("keeps the rail and the palette up, rather than replacing the whole shell", async () => {
+    // An older or broken gateway's {"providers": 5} used to throw inside the
+    // palette on every render of the shell -- outside every screen boundary,
+    // so the rail and header went with it.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const body = url.includes("/api/auth/status")
+          ? { authenticated: true, csrf_token: "test-token" }
+          : url.includes("/api/providers")
+            ? { providers: 5 }
+            : url.includes("/api/models")
+              ? { models: "none" }
+              : url.includes("/api/overview")
+                ? {
+                    providers: [],
+                    requests_per_min: 0,
+                    error_rate: 0,
+                    window_sec: 60,
+                    today_spend: { micros: 0, priced: true, estimated: false },
+                    latency: { p50_ms: 0, p95_ms: 0 },
+                    series: [],
+                    failovers: [],
+                    failover_edges: [],
+                  }
+                : {}
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }),
+    )
+    render(<App />)
+    await screen.findByRole("link", { name: /Requests/i }, { timeout: 5000 })
+    const user = userEvent.setup()
+    await user.keyboard("{Control>}k{/Control}")
+    await user.keyboard("groq")
+    await screen.findByText("Nothing matches.")
+    // The rail and the header are still there to navigate with. (The
+    // overview behind them may fail on the same response; that is its own
+    // boundary's business, and stays inside the content pane.)
+    expect(screen.getByRole("link", { name: /Requests/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument()
+    expect(screen.queryByText(/this search could not render/i)).not.toBeInTheDocument()
   })
 })

@@ -57,3 +57,17 @@ describe("priorityOrder", () => {
     expect(input.map((p) => p.id)).toEqual(["b", "a"])
   })
 })
+
+describe("priorityOrder and keyless providers", () => {
+  it("keeps a keyless provider with no credentials, as sqlsource does", () => {
+    // sqlsource drops a provider with no enabled credential *unless* it is
+    // keyless. Leaving the exception out listed only the keyed providers and
+    // omitted every local runtime the router was really walking.
+    const out = priorityOrder([
+      provider("lmstudio", { auth_style: "none", credentials: [], priority: 4 }),
+      provider("groq", { priority: 20 }),
+      provider("bare", { credentials: [] }),
+    ])
+    expect(out.map((p) => p.id)).toEqual(["groq", "lmstudio"])
+  })
+})

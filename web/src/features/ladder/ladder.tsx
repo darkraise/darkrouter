@@ -25,8 +25,13 @@ export type RetrospectiveMark = "served" | "failed" | "terminated"
 export type PredictiveMark = "skipped" | "cooling"
 
 export type LadderRow<M extends string> = {
-  /** 1-based position in the chain. */
+  /** 1-based position in the chain. Also the row's key, so it stays unique on
+   *  an unranked row even though it is not shown there. */
   rank: number
+  /** Not a step in the order: a target the router would pass over. Drawn
+   *  with a dash where the number goes, because a number would claim a place
+   *  in the failover order the row does not have. */
+  unranked?: boolean
   mark: M
   target: string
   /** Short machine-ish token: an HTTP code, `timeout`, a skip reason. */
@@ -71,7 +76,7 @@ export function Ladder({
                 .filter(Boolean)
                 .join(" ")}
             >
-              {String(row.rank).padStart(2, "0")}
+              {row.unranked ? "–" : String(row.rank).padStart(2, "0")}
             </span>
             <span
               className={row.terminated ? "spine spine-terminated" : "spine"}

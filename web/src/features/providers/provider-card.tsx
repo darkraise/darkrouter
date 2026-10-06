@@ -38,7 +38,7 @@ export function ProviderCard({
   onAdd?: () => void
 }) {
   return (
-    <Card className={row.configured ? "p-0" : "p-0 opacity-70"}>
+    <Card className={row.configured ? "min-w-0 p-0" : "min-w-0 p-0 opacity-70"}>
       <button
         type="button"
         onClick={onOpen}
@@ -50,7 +50,9 @@ export function ProviderCard({
             <p className="truncate font-medium">{row.name}</p>
             <p className="truncate font-mono text-sm text-[hsl(var(--legend))]">{row.id}</p>
           </div>
-          <Badge variant={STATE_VARIANT[row.state]}>{row.state}</Badge>
+          <Badge variant={STATE_VARIANT[row.state]} className="shrink-0">
+            {row.state}
+          </Badge>
         </div>
 
         <dl className="grid grid-cols-2 gap-y-1 text-sm">

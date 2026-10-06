@@ -187,8 +187,11 @@ func (s *Store) reloadLocked() error {
 		s.lastErr.Store(&err)
 		return err
 	}
-	prev := s.cur.Load()
-	next.Warnings = append(next.Warnings, restartOnlyWarnings(prev, next)...)
+	// Against the boot snapshot, not the previous one: a key moved back to
+	// the value this process started with is running that value already, and
+	// the consecutive diff reported the move back as one more edit waiting
+	// for a restart while PendingRestart said nothing was.
+	next.Warnings = append(next.Warnings, restartOnlyWarnings(s.boot.Load(), next)...)
 	s.cur.Store(next)
 	s.lastErr.Store(nil)
 	return nil
@@ -196,17 +199,19 @@ func (s *Store) reloadLocked() error {
 
 func (s *Store) loadNext() (*Config, error) { return s.load() }
 
-// restartOnlyWarnings names every restart-only field this edit changed.
+// restartOnlyWarnings names every restart-only field whose value differs from
+// the one the process is running, which is boot, so it agrees with
+// PendingRestart rather than describing only the latest edit.
 //
 // Driven by the same table RestartOnly is built from, so a field cannot be
 // cold in one and hot in the other.
-func restartOnlyWarnings(prev, next *Config) []string {
-	if prev == nil {
+func restartOnlyWarnings(boot, next *Config) []string {
+	if boot == nil {
 		return nil
 	}
 	var out []string
 	for _, f := range restartOnlyFields {
-		if f.value(prev) != f.value(next) {
+		if f.value(boot) != f.value(next) {
 			out = append(out, f.name+" changed; takes effect on restart")
 		}
 	}

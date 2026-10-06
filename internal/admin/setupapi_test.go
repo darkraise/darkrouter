@@ -83,6 +83,37 @@ func TestClaimRefusesAnEmptyUsername(t *testing.T) {
 	}
 }
 
+// A name over the limit is refused for its length. It once shared the empty
+// case's message, so an operator looking at a full field read that a username
+// was required.
+func TestClaimRefusesALongUsernameForItsLength(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSON(t, s, "/api/auth/setup",
+		`{"username":"`+strings.Repeat("a", maxUsernameChars+1)+`","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 400 {
+		t.Fatalf("code = %d, want 400", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "at most 64 characters") || strings.Contains(body, "required") {
+		t.Errorf("body = %s, want the length named", body)
+	}
+	// The limit counts characters: 64 of them that are three bytes each fit.
+	rec = postJSON(t, s, "/api/auth/setup",
+		`{"username":"`+strings.Repeat("名", maxUsernameChars)+`","password":"`+claimPassword+`","confirm":"`+claimPassword+`"}`)
+	if rec.Code != 200 {
+		t.Errorf("a 64-character name = %d, want 200: %s", rec.Code, rec.Body)
+	}
+}
+
+// Four CJK characters are twelve bytes. The stated rule is characters, so the
+// claim is refused rather than founding an admin on a four-character password.
+func TestClaimRefusesAPasswordShortInCharactersButNotBytes(t *testing.T) {
+	s, _ := testServer(t)
+	rec := postJSON(t, s, "/api/auth/setup", `{"username":"alice","password":"密码密码","confirm":"密码密码"}`)
+	if rec.Code != 400 || !strings.Contains(rec.Body.String(), "at least 12 characters") {
+		t.Errorf("claim = %d %s, want 400 naming the floor", rec.Code, rec.Body)
+	}
+}
+
 func TestASecondClaimIsRefused(t *testing.T) {
 	s, _ := testServer(t)
 	postJSON(t, s, "/api/auth/setup",

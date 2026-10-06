@@ -76,6 +76,11 @@ function Shell() {
       )
     return (
       <LoginScreen
+        // A session that was in use and stopped being accepted -- expired,
+        // or revoked from another browser -- says so, rather than dropping
+        // the operator onto a blank form. A first visit has nothing to
+        // explain.
+        reason={revoked ? "expired" : undefined}
         onAuthenticated={() => {
           setRevoked(false)
           void status.refetch()

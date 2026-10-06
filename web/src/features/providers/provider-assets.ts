@@ -56,7 +56,6 @@ export const PROVIDER_ASSETS: Record<string, ProviderAsset> = {
   "openadapter": { file: "openadapter.svg" },
   "openvecta": { file: "openvecta.svg" },
   "orcarouter": { file: "orcarouter.svg" },
-  "ovhcloud": { file: "ovhcloud.svg" },
   "pioneer": { file: "pioneer.svg" },
   "predibase": { file: "predibase.png" },
   "publicai": { file: "publicai.svg" },

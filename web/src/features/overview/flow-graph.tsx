@@ -49,6 +49,17 @@ const GEOM = {
   maxHeight: 620,
 } as const
 
+/** Room right of the provider column for a return: the bow reaches 96px past
+ *  it and the count label sits on the bow. In pixels rather than as a share
+ *  of the canvas, because the bow is pixels too and a share shrank to nothing
+ *  on a narrow screen. */
+const RETURN_ROOM = 112
+
+/** The width the laid-out graph needs at full size. The canvas never gets
+ *  narrower than this: below it the graph scrolls sideways rather than being
+ *  zoomed out until its 14px text renders at six. */
+const NATURAL_WIDTH = GEOM.providerX + GEOM.providerW + RETURN_ROOM + 16
+
 /** The widest an edge may be drawn. A share of one maps here; everything else
  *  is proportional, so two providers at 50% look equal rather than both maxed. */
 const MAX_EDGE = 10
@@ -62,6 +73,8 @@ export type FlowProvider = {
   /** No edge is drawn for a provider the router cannot currently choose. */
   candidate: boolean
   credentials: number
+  /** Routes without a credential, so having none is its normal state. */
+  keyless: boolean
   cooling: number
   needsReauth: boolean
   state: ProviderTile["state"]
@@ -85,7 +98,10 @@ function rowY(index: number): number {
 export function providerNote(p: FlowProvider): string {
   const creds = `${p.credentials} ${p.credentials === 1 ? "credential" : "credentials"}`
   if (p.state === "disabled") return "disabled"
-  if (p.credentials === 0) return "no credentials"
+  // A keyless provider with no key is configured, and is often the one doing
+  // the serving: "no credentials" there sent operators looking for a key that
+  // does not exist.
+  if (p.credentials === 0) return p.keyless ? "no key needed" : "no credentials"
   if (p.needsReauth) return `${creds} · needs reconnection`
   if (p.cooling > 0) return `${creds} · ${p.cooling} cooling`
   return creds
@@ -136,6 +152,12 @@ export function buildGraph(
         width: at(GEOM.providerW),
       } as ProviderData,
       draggable: false,
+      // xyflow turns pointer events off on a node that is neither selectable,
+      // draggable nor handled, so the row's link answered only the keyboard
+      // and a click fell through to the pane. `nopan` keeps a press on the
+      // row from starting a pan in place of the click.
+      style: { pointerEvents: "all" as const },
+      className: "nopan",
     })),
   ]
 
@@ -280,9 +302,24 @@ function ProviderNode({ data }: NodeProps) {
 const nodeTypes = { alias: AliasNode, router: RouterNode, provider: ProviderNode }
 const edgeTypes = { failover: FailoverEdge }
 
+/** How the graph is fitted to its canvas, on mount and on every resize alike.
+ *
+ *  Asymmetric: the returns bow out past the right-hand column, and a uniform
+ *  padding that made room for them would leave the same gap on the left where
+ *  nothing is drawn. Edges are not in the bounds fitView measures, so the
+ *  returns' room is reserved here. Never above full size: the canvas is held
+ *  at the graph's natural width, so zooming in only pushed the returns off it. */
+const FIT_OPTIONS = {
+  padding: { top: "4%", right: `${RETURN_ROOM}px`, bottom: "4%", left: "2%" },
+  minZoom: 0.4,
+  maxZoom: 1,
+} as const
+
 /** Refits when the canvas changes size. The `fitView` prop fits once, on
  *  mount, so without this the graph keeps a width it no longer has — a
- *  narrowed window leaves the provider column off the right-hand edge. */
+ *  narrowed window leaves the provider column off the right-hand edge. It
+ *  refits with the mount's options: a bare fitView() fell back to xyflow's
+ *  defaults, zoomed past full size and dropped the room kept for returns. */
 function FitOnResize({ target }: { target: RefObject<HTMLDivElement | null> }) {
   const { fitView } = useReactFlow()
   useEffect(() => {
@@ -291,7 +328,7 @@ function FitOnResize({ target }: { target: RefObject<HTMLDivElement | null> }) {
     let frame = 0
     const observer = new ResizeObserver(() => {
       cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => void fitView())
+      frame = requestAnimationFrame(() => void fitView(FIT_OPTIONS))
     })
     observer.observe(el)
     return () => {
@@ -327,39 +364,41 @@ export function FlowGraph({
   const wrap = useRef<HTMLDivElement>(null)
 
   return (
-    <div className="rf-wrap" style={{ height }} ref={wrap}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-        // Asymmetric: the returns bow out past the right-hand column, and a
-        // uniform padding that made room for them would leave the same gap on
-        // the left where nothing is drawn.
-        fitViewOptions={{
-          padding: { top: "4%", right: "14%", bottom: "4%", left: "2%" },
-          minZoom: 0.4,
-          maxZoom: 1,
-        }}
-        minZoom={0.4}
-        maxZoom={1.5}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        // Scroll belongs to the page. A graph that eats the wheel traps an
-        // operator halfway down the screen they were scrolling.
-        zoomOnScroll={false}
-        panOnScroll={false}
-        preventScrolling={false}
-        // The canvas is one panel of a console, not a React Flow showcase.
-        proOptions={{ hideAttribution: true }}
-        aria-label="Routing flow: aliases, the router, and providers in priority order"
+    // The outer box scrolls sideways; the inner one is the canvas, held at
+    // the graph's natural width, so a phone scrolls a legible graph rather
+    // than squinting at a zoomed-out one.
+    <div className="rf-wrap" style={{ height }}>
+      <div
+        className="rf-canvas"
+        style={{ minWidth: Math.round(NATURAL_WIDTH * scale) }}
+        ref={wrap}
       >
-        <FitOnResize target={wrap} />
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="rf-bg" />
-        <Controls showInteractive={false} position="bottom-right" />
-      </ReactFlow>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+          fitViewOptions={FIT_OPTIONS}
+          minZoom={0.4}
+          maxZoom={1.5}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          // Scroll belongs to the page. A graph that eats the wheel traps an
+          // operator halfway down the screen they were scrolling.
+          zoomOnScroll={false}
+          panOnScroll={false}
+          preventScrolling={false}
+          // The canvas is one panel of a console, not a React Flow showcase.
+          proOptions={{ hideAttribution: true }}
+          aria-label="Routing flow: aliases, the router, and providers in priority order"
+        >
+          <FitOnResize target={wrap} />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="rf-bg" />
+          <Controls showInteractive={false} position="bottom-right" />
+        </ReactFlow>
+      </div>
     </div>
   )
 }

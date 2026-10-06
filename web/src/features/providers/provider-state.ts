@@ -19,18 +19,44 @@ export function isKeyless(p: { auth_style?: string }): boolean {
   )
 }
 
+/**
+ * Whether a credential added here would ever be sent.
+ *
+ * Narrower than `!isKeyless`: an `optional` gateway serves a key better and an
+ * `anonymous` one accepts the operator's own in place of the published one.
+ * `none` writes no header at all, so a key stored on it is a secret kept for
+ * nothing — and every `none` preset is a runtime reached by its address.
+ */
+export function takesCredential(p: { auth_style?: string }): boolean {
+  return p.auth_style !== "none"
+}
+
+/** Discovery has failed on its latest sweeps and nothing it found is live. A
+ *  provider whose sweep fails while its models stay live is serving from what
+ *  it last listed; one with nothing live has nothing to serve. */
+export function discoveryFailing(row: DiscoveryHealthRow | undefined): boolean {
+  return row !== undefined && (row.consecutive_failures ?? 0) > 0 && row.live === 0
+}
+
 /** The four states the overview emits. `degraded` is not a synonym for
- *  `cooling`: a credential cools, a provider degrades. */
-export function providerState(p: Provider): ProviderState {
+ *  `cooling`: a credential cools, a provider degrades.
+ *
+ *  `discovery` is optional so a caller without the sweep readings still gets
+ *  the credential-based answer. */
+export function providerState(p: Provider, discovery?: DiscoveryHealthRow): ProviderState {
   if (!p.enabled) return "disabled"
+  // A keyless provider has no credential to say it works, so the sweep is the
+  // only evidence there is. Without this every unreachable free gateway read
+  // "healthy" while its probe said Forbidden.
+  const keylessState: ProviderState = discoveryFailing(discovery) ? "degraded" : "healthy"
   // Keyless first: a provider that needs no key is configured the moment it
   // exists, and calling it unconfigured sends an operator looking for a
   // credential that would do nothing.
-  if (p.credentials.length === 0) return isKeyless(p) ? "healthy" : "unconfigured"
+  if (p.credentials.length === 0) return isKeyless(p) ? keylessState : "unconfigured"
   // The router drops a disabled credential, so only enabled ones decide
   // whether this provider can be sent to.
   const usable = p.credentials.filter((c) => c.enabled)
-  if (usable.length === 0) return isKeyless(p) ? "healthy" : "degraded"
+  if (usable.length === 0) return isKeyless(p) ? keylessState : "degraded"
   if (usable.some((c) => c.cooling)) return "degraded"
   return "healthy"
 }
@@ -55,11 +81,40 @@ export function breakersFor(
   return entries.filter((e) => e.provider_id === providerID && e.cooling_until)
 }
 
+/** What one breaker entry has cooled: a credential, a model, or one model on
+ *  one credential. A per-model breaker carries no key, and printing only the
+ *  key left those rows reading "—" with nothing to say which model it was. */
+export function coolingSubject(e: BreakerEntry, keyLabel?: string): string {
+  const key = keyLabel || e.key_id
+  const model = e.model || "all models"
+  return key ? `${key}/${model}` : model
+}
+
+/** The heading over a set of breaker entries, named for what is cooling. A
+ *  keyless provider's breakers are all per-model, and "2 credentials cooling"
+ *  beside "none configured" contradicted itself. */
+export function coolingTitle(entries: BreakerEntry[]): string {
+  const n = entries.length
+  const keyed = entries.filter((e) => e.key_id).length
+  const noun =
+    keyed === n
+      ? n === 1 ? "credential" : "credentials"
+      : keyed === 0
+        ? n === 1 ? "model" : "models"
+        : n === 1 ? "breaker" : "breakers"
+  return `${n} ${noun} cooling`
+}
+
 /** One provider's discovery health, reduced to what the table cell shows. */
 export function discoveryLine(row: DiscoveryHealthRow | undefined): string {
   // Absence is the signal: "0 of 0 live" would read as a sweep that ran and
   // found nothing, which is a different fact from one that never ran.
   if (!row) return "never discovered"
+  // Before the counts: a provider whose every sweep fails has no models, and
+  // "0 of 0 live" is the wording for one that answered with an empty list.
+  if (discoveryFailing(row)) {
+    return row.last_error ? `discovery failing · ${row.last_error}` : "discovery failing"
+  }
   // A sweep that imported nothing because the free filter dropped everything
   // is not an empty provider. Saying "0 of 0 live" for it sends an operator
   // to look at a listing endpoint that is working perfectly.
@@ -80,12 +135,25 @@ export type ProbeOutcome = { kind: "success" | "error"; message: string }
 
 /** What a probe proved, as the toast should say it. A refused credential
  *  arrives as a 200 with `ok:false` — the button exists to discover exactly
- *  that — so the verdict is read from the body, never from the status. */
-export function probeOutcome(result: ProbeResult): ProbeOutcome {
+ *  that — so the verdict is read from the body, never from the status.
+ *
+ *  `subject` is the provider probed. Without a credential there is nothing to
+ *  have been accepted, and "Credential accepted" on a keyless runtime claimed
+ *  a check that never happened. */
+export function probeOutcome(
+  result: ProbeResult,
+  subject?: { auth_style?: string; credentials?: readonly unknown[] },
+): ProbeOutcome {
+  const credentialled = subject === undefined || (subject.credentials?.length ?? 0) > 0
   if (!result.ok) {
-    return { kind: "error", message: result.error || "the provider refused the credential" }
+    return {
+      kind: "error",
+      message:
+        result.error ||
+        (credentialled ? "the provider refused the credential" : "the provider refused the request"),
+    }
   }
-  const parts = ["Credential accepted"]
+  const parts = [credentialled ? "Credential accepted" : "Endpoint answered"]
   if (result.model_count !== undefined) parts.push(`${result.model_count} models`)
   parts.push(duration(result.latency_ms))
   return { kind: "success", message: parts.join(" · ") }
