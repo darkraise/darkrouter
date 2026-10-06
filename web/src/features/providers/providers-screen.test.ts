@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { breakersFor, discoveryLine, probeOutcome, providerState } from "./providers-screen"
 import { filterProviderRows, mergeProviderRows } from "./provider-rows"
-import type { BreakerEntry, Credential, Provider } from "../../lib/api-types"
+import { coolingSubject, coolingTitle, discoveryFailing, takesCredential } from "./provider-state"
+import type { BreakerEntry, Credential, DiscoveryHealthRow, Provider } from "../../lib/api-types"
 
 const cred = (over: Partial<Credential> = {}): Credential => ({
   id: "k1",
@@ -170,5 +171,85 @@ describe("a row probe's verdict", () => {
 
   it("has a reason even when the provider gave none", () => {
     expect(probeOutcome({ ok: false, probe: "models", latency_ms: 0 }).message).toMatch(/refused/i)
+  })
+
+  it("does not claim a credential was accepted on a provider that has none", () => {
+    // LM Studio holds no key; "Credential accepted" claimed a check that
+    // never happened.
+    const lmstudio = provider({ id: "lmstudio", auth_style: "none", credentials: [] })
+    expect(probeOutcome({ ok: true, probe: "models", latency_ms: 1, model_count: 5 }, lmstudio))
+      .toEqual({ kind: "success", message: "Endpoint answered · 5 models · 1 ms" })
+  })
+
+  it("still names the credential when the provider has one", () => {
+    expect(probeOutcome({ ok: true, probe: "models", latency_ms: 1 }, provider()).message)
+      .toMatch(/^Credential accepted/)
+  })
+})
+
+describe("a failing discovery sweep", () => {
+  const failing: DiscoveryHealthRow = {
+    provider_id: "aihorde", total: 0, live: 0, stale: 0, removed_upstream: 0,
+    max_missing_streak: 0, filtered_out: 0,
+    consecutive_failures: 1, last_error: "Forbidden",
+  }
+
+  it("is named as failing rather than read as an empty catalogue", () => {
+    expect(discoveryLine(failing)).toBe("discovery failing · Forbidden")
+  })
+
+  it("degrades a keyless provider, whose sweep is the only evidence it works", () => {
+    const aihorde = provider({ id: "aihorde", auth_style: "anonymous", credentials: [] })
+    expect(providerState(aihorde, failing)).toBe("degraded")
+    expect(providerState(aihorde)).toBe("healthy")
+    expect(mergeProviderRows([], [aihorde], [failing])[0]?.state).toBe("degraded")
+  })
+
+  it("leaves a provider still serving what it last listed alone", () => {
+    // A sweep that times out while the models it found an hour ago are still
+    // live is a blip, not a provider that cannot serve.
+    const blip = { ...failing, total: 4, live: 4 }
+    expect(discoveryFailing(blip)).toBe(false)
+    expect(discoveryLine(blip)).toBe("4 of 4 live")
+  })
+
+  it("is not read off a server that predates the failure fields", () => {
+    const { consecutive_failures: _c, last_error: _e, ...old } = failing
+    expect(discoveryFailing(old)).toBe(false)
+  })
+})
+
+describe("whether a credential would ever be sent", () => {
+  it("is no for a style that writes no key", () => {
+    expect(takesCredential({ auth_style: "none" })).toBe(false)
+  })
+
+  it("is yes for the keyless styles that still read one", () => {
+    expect(takesCredential({ auth_style: "optional" })).toBe(true)
+    expect(takesCredential({ auth_style: "anonymous" })).toBe(true)
+    expect(takesCredential({ auth_style: "bearer" })).toBe(true)
+  })
+})
+
+describe("a breaker entry", () => {
+  const entry = (over: Partial<BreakerEntry> = {}): BreakerEntry => ({
+    provider_id: "lmstudio", key_id: "", model: "mock-error",
+    cooling_until: "2026-10-06T05:00:00Z", backoff_level: 3, consecutive_failures: 5,
+    ...over,
+  })
+
+  it("names the model when no credential is involved", () => {
+    expect(coolingSubject(entry())).toBe("mock-error")
+  })
+
+  it("names the credential by its label when it has one", () => {
+    expect(coolingSubject(entry({ key_id: "01K" }), "primary")).toBe("primary/mock-error")
+    expect(coolingSubject(entry({ key_id: "01K", model: "" }))).toBe("01K/all models")
+  })
+
+  it("is counted as what is cooling", () => {
+    expect(coolingTitle([entry(), entry({ model: "mock-ratelimit" })])).toBe("2 models cooling")
+    expect(coolingTitle([entry({ key_id: "a" })])).toBe("1 credential cooling")
+    expect(coolingTitle([entry({ key_id: "a" }), entry()])).toBe("2 breakers cooling")
   })
 })

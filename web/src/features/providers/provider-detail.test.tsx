@@ -14,7 +14,7 @@ import type { RouterAdapter } from "darkraise-ui/router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { toast } from "darkraise-ui"
 import { ProviderDetail } from "./provider-detail"
-import type { Preset, Provider } from "../../lib/api-types"
+import type { BreakerEntry, DiscoveryHealthRow, Preset, Provider } from "../../lib/api-types"
 
 const stubRouterAdapter: RouterAdapter = {
   Link: ({ children }) => <>{children}</>,
@@ -83,7 +83,11 @@ const configured: Provider = {
   credentials: [],
 }
 
-function stub(providers: Provider[], presets: Preset[]) {
+function stub(
+  providers: Provider[],
+  presets: Preset[],
+  extra: { discovery?: DiscoveryHealthRow[]; health?: BreakerEntry[] } = {},
+) {
   const json = (body: unknown) =>
     new Response(JSON.stringify(body), {
       status: 200,
@@ -97,7 +101,8 @@ function stub(providers: Provider[], presets: Preset[]) {
       if (path === "/api/presets") return json({ presets })
       if (path.startsWith("/api/models")) return json({ models: [], aliases: [] })
       if (path.startsWith("/api/usage")) return json({ days: [] })
-      if (path === "/api/health/discovery") return json({ providers: [] })
+      if (path === "/api/health/discovery") return json({ providers: extra.discovery ?? [] })
+      if (path === "/api/health/providers") return json({ providers: extra.health ?? [] })
       return json([])
     }),
   )
@@ -595,5 +600,114 @@ describe("the requests sparkline", () => {
     const card = (await screen.findByText("requests · 30d")).parentElement!
     await waitFor(() => expect(within(card).getByText("did not load")).toBeInTheDocument())
     expect(within(card).queryByText("0")).toBeNull()
+  })
+})
+
+describe("a keyless provider whose every sweep fails", () => {
+  const aihorde: Provider = {
+    ...configured,
+    id: "aihorde",
+    name: "AI Horde",
+    preset: "aihorde",
+    base_url: "https://oai.aihorde.net/v1",
+    auth_style: "anonymous",
+  }
+  const aihordePreset: Preset = { ...preset, id: "aihorde", name: "AI Horde", auth_kind: "anonymous" }
+  const failing: DiscoveryHealthRow = {
+    provider_id: "aihorde", total: 0, live: 0, stale: 0, removed_upstream: 0,
+    max_missing_streak: 0, filtered_out: 0,
+    consecutive_failures: 3, last_error: 'Get "https://oai.aihorde.net/v1/models": Forbidden',
+  }
+
+  it("is degraded, and says why, rather than healthy with nothing asked", async () => {
+    // The backend had recorded the 403 all along; the page read only the
+    // model counts and so called the provider healthy, "0 of 0 live", and
+    // said nothing had asked it what it serves.
+    stub([aihorde], [aihordePreset], { discovery: [failing] })
+    await renderProvider("aihorde")
+
+    expect(await screen.findByText("degraded")).toBeInTheDocument()
+    expect(await screen.findByText("Discovery has failed 3 times")).toBeInTheDocument()
+    expect(screen.getAllByText(/Forbidden/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/nothing has asked/i)).toBeNull()
+    expect(screen.queryByText(/0 of 0 live/)).toBeNull()
+  })
+
+  it("can be swept again from the page that reports it", async () => {
+    stub([aihorde], [aihordePreset], { discovery: [failing] })
+    await renderProvider("aihorde")
+
+    await userEvent.click(await screen.findByRole("button", { name: "Run discovery" }))
+    await waitFor(() =>
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledWith(
+        "/api/providers/aihorde/discover",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    )
+  })
+})
+
+describe("the cooling card", () => {
+  it("names the model a per-model breaker cooled, and does not call it a credential", async () => {
+    const lmstudio: Provider = {
+      ...configured, id: "lmstudio", name: "LM Studio", preset: "lmstudio",
+      base_url: "http://localhost:1234/v1", auth_style: "none",
+    }
+    stub([lmstudio], [{ ...preset, id: "lmstudio", name: "LM Studio", auth_kind: "none" }], {
+      health: [
+        {
+          provider_id: "lmstudio", key_id: "", model: "mock-error",
+          cooling_until: "2026-10-06T05:00:00Z", backoff_level: 3, consecutive_failures: 5,
+        },
+      ],
+    })
+    await renderProvider("lmstudio")
+
+    expect(await screen.findByText("1 model cooling")).toBeInTheDocument()
+    expect(screen.getByText(/mock-error · backoff 3/)).toBeInTheDocument()
+    expect(screen.queryByText(/credentials? cooling/)).toBeNull()
+  })
+})
+
+describe("a disabled provider", () => {
+  it("has no usable credentials, whatever their own switches say", async () => {
+    stub([{ ...configured, enabled: false, credentials: [cred] }], [preset])
+    await renderProvider("groq")
+
+    const card = (await screen.findByText("credentials usable")).parentElement!
+    await waitFor(() => expect(within(card).getByText("0/1")).toBeInTheDocument())
+    expect(within(card).getByText("provider disabled")).toBeInTheDocument()
+  })
+})
+
+describe("the header at phone width", () => {
+  it("keeps a floor under the name so the buttons wrap before it vanishes", async () => {
+    stub([{ ...configured, credentials: [cred] }], [preset])
+    await renderProvider("groq")
+
+    const name = await screen.findByRole("heading", { name: "Groq" })
+    // The block the name sits in, not the heading: it is the flex item that
+    // was allowed to shrink to nothing.
+    expect(name.parentElement!.parentElement!.className).toMatch(/min-w-\[12rem\]/)
+  })
+})
+
+describe("an unconfigured local runtime", () => {
+  it("does not say its catalogue waits on a credential", async () => {
+    stub([], [
+      { ...preset, id: "ollama", name: "Ollama", base_url: "http://localhost:11434/v1", auth_kind: "none" },
+    ])
+    await renderProvider("ollama")
+
+    expect(
+      await screen.findByText("Discovery lists its models on the first sweep after it is added."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/once a credential exists/)).toBeNull()
+  })
+
+  it("still says so for a provider that does need a key", async () => {
+    stub([], [preset])
+    await renderProvider("groq")
+    expect(await screen.findByText(/once a credential exists/)).toBeInTheDocument()
   })
 })
