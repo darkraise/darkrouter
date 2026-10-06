@@ -8,7 +8,7 @@ import {
   PasswordInputField,
 } from "darkraise-ui/components/password-input"
 import { api, ApiError, setCsrfToken } from "../../lib/api"
-import { MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
+import { MAX_USERNAME, MIN_PASSWORD, passwordConfirmationProblem } from "../../lib/password-rules"
 import { IdentityMark } from "./identity-mark"
 import { PasswordToggle } from "./password-toggle"
 
@@ -93,6 +93,7 @@ export function FirstRun({ onClaimed }: { onClaimed: () => void }) {
               ref={usernameField}
               autoFocus
               autoComplete="username"
+              maxLength={MAX_USERNAME}
               aria-invalid={error !== "" || undefined}
               value={username}
               onChange={(e) => setUsername(e.target.value)}

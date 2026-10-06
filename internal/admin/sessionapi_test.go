@@ -133,6 +133,12 @@ func TestPasswordChangeRejectsAShortPassword(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatalf("short password = %d, want 400", w.Code)
 	}
+	// Counted in characters: four CJK characters are twelve bytes.
+	w = do(t, s, cookie, token, "POST", "/api/auth/password",
+		`{"current":"`+testPassword+`","new":"密码密码"}`)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "the new password must be at least 12 characters") {
+		t.Errorf("four-character password = %d %s, want 400 naming the floor", w.Code, w.Body.String())
+	}
 }
 
 func TestAuthStatusSaysWhetherTheConsoleIsClaimed(t *testing.T) {

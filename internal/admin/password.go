@@ -10,6 +10,7 @@ package admin
 import (
 	"fmt"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -79,4 +80,23 @@ func VerifyPassword(hash, password string) bool {
 	}
 	verifyCalls.Add(1)
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// passwordProblem is the floor and the ceiling every new password meets, named
+// by subject so a claim says "the password" and a change "the new password".
+// It returns "" for a usable one.
+//
+// The floor counts characters and the ceiling bytes, because they guard
+// different things. The floor is the policy stated to a person, "at least 12
+// characters", and len counts UTF-8 bytes: four CJK characters are twelve of
+// them, so a byte floor accepted a four-character password. The ceiling is
+// bcrypt's, which reads 72 bytes and silently ignores the rest.
+func passwordProblem(subject, password string) string {
+	if utf8.RuneCountInString(password) < minPasswordChars {
+		return fmt.Sprintf("%s must be at least %d characters", subject, minPasswordChars)
+	}
+	if len(password) > maxPasswordBytes {
+		return fmt.Sprintf("%s must be at most %d bytes", subject, maxPasswordBytes)
+	}
+	return ""
 }
