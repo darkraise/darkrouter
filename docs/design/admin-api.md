@@ -106,7 +106,8 @@ callback because the manual-paste path needs a POST of its own.
 | `GET`, `PUT /api/aliases` | session / CSRF |
 | `GET`, `PUT /api/policy` | session / CSRF |
 | `GET`, `PUT /api/config`, `POST /api/config/reload` | session / CSRF |
-| `POST /api/catalog/sync` | CSRF — 202 `{"triggered": true}` |
+| `POST /api/catalog/sync` | CSRF — 202 `{"triggered": true, "run": <n>}` |
+| `GET /api/catalog/sync` | session — `{"running", "run", "finished_at"?, "error"?}`; the newest finished sync, `error` "" on success |
 | `POST /api/route/preview` | CSRF |
 
 A model row carries its free-tier record: `free_type`, `monthly_tokens`,

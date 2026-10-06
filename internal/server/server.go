@@ -565,9 +565,9 @@ func (s *Server) AdminHandler() http.Handler {
 			"log_records_dropped": s.logw.Dropped(),
 			"log_records_written": s.logw.Written(),
 			// Measured against the snapshot this process booted on, not
-			// against the previous reload: the consecutive diff that lands in
-			// warnings is cleared by the next unrelated save while the old
-			// value is still the one in force.
+			// against the previous reload, so an unrelated save cannot clear
+			// it while the old value is still the one in force. The warning
+			// in warnings is judged against the same snapshot.
 			"pending_restart": pending,
 		}
 		if cfgErr != nil {
