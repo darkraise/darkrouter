@@ -3,6 +3,7 @@ import type { ConfigFieldMeta, ConfigResponse } from "../../lib/api-types"
 import {
   SETTINGS,
   displayOf,
+  bytesProblem,
   formatBytes,
   formatDuration,
   parseBytes,
@@ -213,6 +214,26 @@ describe("parseBytes", () => {
     expect(parseBytes("")).toBeUndefined()
     expect(parseBytes("many")).toBeUndefined()
     expect(parseBytes("-1")).toBeUndefined()
+  })
+  it("refuses a size past what a number holds exactly, rather than rounding it", () => {
+    // 9999999999 GB came out as 10737418238926258000, which nobody typed.
+    expect(parseBytes("9999999999 GB")).toBeUndefined()
+    expect(parseBytes("99999999999999999999")).toBeUndefined()
+    expect(parseBytes(String(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER)
+  })
+})
+
+describe("bytesProblem", () => {
+  it("passes what the box can store", () => {
+    expect(bytesProblem("32 MB")).toBeNull()
+    expect(bytesProblem("33554432")).toBeNull()
+  })
+  it("names the units the box takes for text it cannot read", () => {
+    expect(bytesProblem("2 TB")).toBe("Use a size such as 512 KB, 32 MB or 1 GB.")
+    expect(bytesProblem("lots")).toBe("Use a size such as 512 KB, 32 MB or 1 GB.")
+  })
+  it("says a readable size is too large rather than unreadable", () => {
+    expect(bytesProblem("9999999999 GB")).toBe("That size is too large.")
   })
 })
 

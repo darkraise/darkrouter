@@ -225,7 +225,14 @@ func (s *Server) commitConfig(w http.ResponseWriter, r *http.Request, p config.P
 	var publish config.PublishError
 	switch {
 	case errors.As(err, &rejected):
-		writeError(w, http.StatusBadRequest, rejected.Error())
+		body := map[string]any{"error": rejected.Error()}
+		// The keys the refusal is about, for a client that puts it on their
+		// fields. Omitted rather than empty when it names none -- an unknown
+		// key, an alias problem -- so that client falls back to a toast.
+		if len(rejected.Keys) > 0 {
+			body["keys"] = rejected.Keys
+		}
+		writeJSON(w, http.StatusBadRequest, body)
 	case errors.As(err, &conflict):
 		// 409, not 400: the save itself is fine, it was computed against a
 		// table that has since moved. A retry that reloads first can succeed

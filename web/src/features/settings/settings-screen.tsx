@@ -13,7 +13,7 @@ import type { ConfigResponse, Session } from "../../lib/api-types"
 import { AccountsCard } from "./accounts-card"
 import { ChangePasswordDialog } from "./change-password-dialog"
 import { SettingField } from "./setting-field"
-import { displayOf, sameSetting, settingGroups, type GroupId } from "./settings-catalog"
+import { bytesProblem, displayOf, sameSetting, settingGroups, type GroupId } from "./settings-catalog"
 
 export { passwordProblem, revokedText } from "./change-password-dialog"
 
@@ -84,13 +84,41 @@ export function settingsPatch(
  * The server's refusal, against the fields it names.
  *
  * One refusal can belong to several keys: a cross-key rule reverts its whole
- * set together and its message lists them, so the operator sees the complaint
- * on every field that has to move for it to pass rather than on one of them.
+ * set together and names them all in `keys`, so the operator sees the
+ * complaint on every field that has to move for it to pass rather than on one
+ * of them. A refusal without `keys` -- an older gateway's -- is placed on the
+ * patched fields its message names.
  */
-export function fieldErrors(message: string, fields: string[]): Record<string, string> {
+export function fieldErrors(
+  message: string,
+  fields: string[],
+  keys?: string[],
+): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const field of fields) {
-    if (message.includes(field)) out[field] = message
+  for (const field of keys ?? fields.filter((f) => message.includes(f))) {
+    out[field] = message
+  }
+  return out
+}
+
+/** The `keys` a refusal's body carries, when it carries any. */
+function refusedKeys(body: unknown): string[] | undefined {
+  if (typeof body !== "object" || body === null) return undefined
+  const keys = (body as { keys?: unknown }).keys
+  return Array.isArray(keys) && keys.every((k) => typeof k === "string") ? keys : undefined
+}
+
+/**
+ * What the screen can refuse before a round trip. Only sizes: their box takes
+ * "32 MB" and stores bytes, so the server's refusal would be about a spelling
+ * the operator never used.
+ */
+export function localFieldErrors(patch: ConfigPatch, cfg: ConfigResponse): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [field, value] of Object.entries(patch.set ?? {})) {
+    if (cfg.fields[field]?.kind !== "bytes") continue
+    const problem = bytesProblem(value)
+    if (problem) out[field] = problem
   }
   return out
 }
@@ -210,7 +238,7 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
         // hunting the field across five cards.
         const mapped =
           err instanceof ApiError && err.status === 400
-            ? fieldErrors(err.message, patchedKeys(patch))
+            ? fieldErrors(err.message, patchedKeys(patch), refusedKeys(err.body))
             : {}
         setErrors(mapped)
         // A refusal that named no key -- a database failure, an alias problem
@@ -259,6 +287,15 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
 
   const patch = settingsPatch(draft, reset, cfg)
   const dirty = Object.keys(patch).length > 0
+
+  const submit = () => {
+    const local = localFieldErrors(patch, cfg)
+    if (Object.keys(local).length > 0) {
+      setErrors(local)
+      return
+    }
+    save.mutate(patch)
+  }
 
   const change = (field: string, next: string) => {
     setDraft((d) => ({ ...d, [field]: next }))
@@ -322,7 +359,7 @@ function SettingsForm({ cfg }: { cfg: ConfigResponse }) {
             <Button size="sm" variant="ghost" onClick={() => reseedFrom(cfg)}>
               Discard
             </Button>
-            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(patch)}>
+            <Button size="sm" disabled={save.isPending} onClick={submit}>
               Save
             </Button>
           </div>

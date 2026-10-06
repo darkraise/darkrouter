@@ -454,6 +454,41 @@ func TestPutConfigRefusesABootstrapKey(t *testing.T) {
 	}
 }
 
+// A refusal names the keys it is about beside its sentence, so the console
+// places it on those rows without reading key names out of the text. A
+// cross-key rule names every key in it; a refusal about no key names none.
+func TestPutConfigRefusalCarriesItsKeys(t *testing.T) {
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	refuse := func(body string) (string, []string, bool) {
+		t.Helper()
+		w := do(t, s, cookie, token, "PUT", "/api/config", body)
+		if w.Code != 400 {
+			t.Fatalf("PUT %s = %d, want 400: %s", body, w.Code, w.Body.String())
+		}
+		var out struct {
+			Error string   `json:"error"`
+			Keys  []string `json:"keys"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Error, out.Keys, strings.Contains(w.Body.String(), `"keys"`)
+	}
+
+	msg, keys, _ := refuse(`{"set":{"capture.max_bytes":"2 TB"}}`)
+	if msg != "capture.max_bytes must be a whole number of bytes" || !slices.Equal(keys, []string{"capture.max_bytes"}) {
+		t.Errorf("bytes refusal = %q %v", msg, keys)
+	}
+	msg, keys, _ = refuse(`{"set":{"policy.timeout.total":"30s"}}`)
+	if strings.Contains(msg, "[") || len(keys) != 3 || !slices.Contains(keys, "policy.timeout.connect") {
+		t.Errorf("rule refusal = %q %v, want a sentence and all three keys", msg, keys)
+	}
+	if _, _, has := refuse(`{"set":{"no.such.key":"1"}}`); has {
+		t.Error("a refusal about no setting carried a keys field")
+	}
+}
+
 func TestPutConfigRefusesAValueTheLoaderWouldReject(t *testing.T) {
 	s, db := testServerFull(t)
 	cookie, token := login(t, s)
