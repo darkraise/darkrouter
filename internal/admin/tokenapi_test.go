@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -144,6 +145,42 @@ func TestPatchCredentialNeverEchoesTheSecret(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "sk-brand-new-value") {
 		t.Errorf("the response echoed the secret: %s", w.Body.String())
+	}
+}
+
+func TestPatchCredentialRefusesAnUnparseableSignedSecret(t *testing.T) {
+	// Creation already refuses a sigv4 secret that is not an AWS credential
+	// document; a replacement that skipped the check would store one that
+	// fails on every request it signs.
+	s, _ := testServerFull(t)
+	cookie, token := login(t, s)
+	if w := do(t, s, cookie, token, "POST", "/api/providers",
+		`{"id":"bed","name":"bed","kind":"bedrock","base_url":"https://bedrock.invalid","auth_style":"sigv4","region":"us-east-1"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	doc, _ := json.Marshal(map[string]string{"access_key_id": "AKIDEXAMPLE", "secret_access_key": "wJalrXUtnFEMI"})
+	body, _ := json.Marshal(map[string]string{"label": "primary", "secret": string(doc)})
+	w := do(t, s, cookie, token, "POST", "/api/providers/bed/keys", string(body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("key: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	w = do(t, s, cookie, token, "PATCH", "/api/providers/bed/keys/"+created.ID,
+		`{"secret":"not-a-json-document-SECRETCANARY"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("patch = %d %s, want 400", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not an AWS credential") {
+		t.Errorf("body = %s, want the shape named", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "SECRETCANARY") {
+		t.Errorf("the refusal quoted the secret: %s", w.Body.String())
 	}
 }
 
