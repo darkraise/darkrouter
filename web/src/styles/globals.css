@@ -46,6 +46,13 @@
   flex: 1 1 auto;
 }
 
+/* The actions keep the right-hand end on their own rather than relying on
+   the identity's `mr-auto` to push them there: a header with no identity in
+   it -- the not-found page, before it had one -- left them beside the rail. */
+.app-header-actions {
+  margin-left: auto;
+}
+
 /* The 14px floor, applied to the three library components that sit under it.
    CLAUDE.md's first typography rule is that `text-sm` is the floor and that
    hierarchy below body text comes from colour and weight rather than from a
