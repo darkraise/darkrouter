@@ -246,6 +246,11 @@ export type Provider = {
    *  same veto, but only while that filter is on and only to a still-live
    *  grading. */
   allow_unsanctioned_free: boolean
+  /** Bedrock's region, and Vertex's project and location. Absent when unset,
+   *  and from a server that predates them. */
+  region?: string
+  project?: string
+  location?: string
 }
 
 export type Preset = {
@@ -384,6 +389,13 @@ export type DiscoveryHealthRow = {
    *  the free-models filter, and the only thing that tells a provider serving
    *  nothing apart from one serving nothing free. */
   filtered_out: number
+  /** Sweeps that have failed in a row; zero once one succeeds. Optional so a
+   *  server that predates them reads as "not failing". */
+  consecutive_failures?: number
+  /** Why the last sweep failed. Absent after a success. */
+  last_error?: string
+  /** Absent when no sweep of this provider has ever succeeded. */
+  last_success_at?: string
 }
 
 export type DiscoveryHealthResponse = { providers: DiscoveryHealthRow[] }

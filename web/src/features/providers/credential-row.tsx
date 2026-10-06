@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Badge, Button,
   PasswordInput, PasswordInputControl, PasswordInputField,
@@ -23,6 +23,24 @@ import { ConfirmButton } from "../shell/confirm-button"
 export function CredentialRow({ providerId, credential }: { providerId: string; credential: Credential }) {
   const [draftSecret, setDraftSecret] = useState("")
   const [replacing, setReplacing] = useState(false)
+  // The field is unmounted when the replace ends, and focus inside an element
+  // that leaves the page falls to <body> -- a keyboard user thrown back to the
+  // top. So whoever ends it asks for focus to come back to Replace, and it is
+  // moved there once Replace is on the page again.
+  const replaceRef = useRef<HTMLButtonElement>(null)
+  const refocusReplace = useRef(false)
+  useEffect(() => {
+    if (!replacing && refocusReplace.current) {
+      refocusReplace.current = false
+      replaceRef.current?.focus()
+    }
+  }, [replacing])
+
+  const endReplace = () => {
+    refocusReplace.current = true
+    setReplacing(false)
+    setDraftSecret("")
+  }
 
   const patch = useApiMutation({
     mutationFn: (vars: { enabled?: boolean; secret?: string }) =>
@@ -30,9 +48,8 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
     success: "Credential updated",
     warning: (notRouted) => notRouted,
     invalidates: [keys.providers, keys.health, keys.overview],
-    onSuccess: () => {
-      setDraftSecret("")
-      setReplacing(false)
+    onSuccess: (_reply, vars) => {
+      if (vars.secret !== undefined) endReplace()
     },
   })
 
@@ -76,42 +93,37 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
             password box beside every key on the screen. */}
         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
           {replacing ? (
-            <>
+            // A form, so Enter in the field saves the way it does everywhere
+            // else a single value is typed.
+            <form
+              className="flex items-center gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (draftSecret !== "" && !patch.isPending) patch.mutate({ secret: draftSecret })
+              }}
+            >
               <PasswordInput className="w-40">
                 <PasswordInputControl>
                   <PasswordInputField
                     placeholder="new secret"
+                    aria-label={`New secret for ${credential.label}`}
                     autoFocus
                     value={draftSecret}
                     onChange={(e) => setDraftSecret(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setReplacing(false)
-                        setDraftSecret("")
-                      }
+                      if (e.key === "Escape") endReplace()
                     }}
                   />
                   <PasswordToggle />
                 </PasswordInputControl>
               </PasswordInput>
-              <Button
-                size="sm"
-                disabled={draftSecret === ""}
-                onClick={() => patch.mutate({ secret: draftSecret })}
-              >
+              <Button type="submit" size="sm" disabled={draftSecret === "" || patch.isPending}>
                 Save
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setReplacing(false)
-                  setDraftSecret("")
-                }}
-              >
+              <Button type="button" size="sm" variant="ghost" onClick={endReplace}>
                 Cancel
               </Button>
-            </>
+            </form>
           ) : (
             <>
               {/* Only the half that takes capacity away asks: putting a
@@ -136,7 +148,7 @@ export function CredentialRow({ providerId, credential }: { providerId: string; 
                   Enable
                 </Button>
               )}
-              <Button size="sm" variant="ghost" onClick={() => setReplacing(true)}>
+              <Button ref={replaceRef} size="sm" variant="ghost" onClick={() => setReplacing(true)}>
                 Replace
               </Button>
               <ConfirmButton

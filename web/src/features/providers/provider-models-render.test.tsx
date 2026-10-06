@@ -52,6 +52,60 @@ describe("the provider's models table", () => {
     expect(screen.getByText("free / free")).toBeInTheDocument()
   })
 
+  it("never reads a model serving chat and embeddings as embedding alone", () => {
+    render(
+      <ProviderModels
+        models={[
+          model({ model: "chat" }),
+          model({ model: "embed-only", surfaces: ["embedding"] }),
+          model({ model: "both", surfaces: ["llm", "embedding"] }),
+        ]}
+        loading={false}
+      />,
+    )
+    // The capabilities cell's badges, each kept on one line.
+    const cells = (name: string) =>
+      screen.getByText(name).closest("tr")!.querySelectorAll("td")[1]!
+        .querySelectorAll(".whitespace-nowrap")
+    expect(cells("chat")).toHaveLength(0)
+    expect([...cells("embed-only")].map((b) => b.textContent)).toEqual(["embedding"])
+    expect([...cells("both")].map((b) => b.textContent)).toEqual(["llm", "embedding"])
+  })
+
+  it("says a failing sweep is failing rather than that nothing has asked", () => {
+    render(
+      <ProviderModels
+        models={[]}
+        loading={false}
+        discovery={{
+          provider_id: "aihorde", total: 0, live: 0, stale: 0, removed_upstream: 0,
+          max_missing_streak: 0, filtered_out: 0, consecutive_failures: 1, last_error: "Forbidden",
+        }}
+      />,
+    )
+    expect(screen.getByText("Discovery has failed once")).toBeInTheDocument()
+    expect(screen.getByText(/Forbidden/)).toBeInTheDocument()
+    expect(screen.queryByText(/nothing has asked/i)).toBeNull()
+  })
+
+  it("tells an empty answer apart from a sweep that never ran", () => {
+    const { unmount } = render(<ProviderModels models={[]} loading={false} />)
+    expect(screen.getByText(/nothing has asked/i)).toBeInTheDocument()
+    expect(screen.queryByText(/one of its own keys/)).toBeNull()
+    unmount()
+    render(
+      <ProviderModels
+        models={[]}
+        loading={false}
+        discovery={{
+          provider_id: "lmstudio", total: 0, live: 0, stale: 0, removed_upstream: 0,
+          max_missing_streak: 0, filtered_out: 0, consecutive_failures: 0,
+        }}
+      />,
+    )
+    expect(screen.getByText("The last sweep found nothing to import")).toBeInTheDocument()
+  })
+
   it("names the unit once, in the header, and gives the name column room", () => {
     render(<ProviderModels models={[model({ model: "a-rather-long-model-name" })]} loading={false} />)
     expect(screen.getByRole("columnheader", { name: /\$ \/ M tokens/ })).toBeInTheDocument()

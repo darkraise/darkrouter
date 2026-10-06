@@ -1,4 +1,5 @@
 import type { BreakerEntry, DiscoveryHealthRow, Model, Provider, UsageRow } from "../../lib/api-types"
+import { discoveryFailing } from "./provider-state"
 
 /** Daily request totals for one provider, one per entry of `days` so the
  *  sparkline's x-axis is time. Days the provider served nothing are absent
@@ -71,6 +72,12 @@ export function discoveryFraction(row: DiscoveryHealthRow | undefined): string |
  *  first: it is the one an operator would otherwise misread as a fault. */
 export function discoveryNote(row: DiscoveryHealthRow | undefined): string {
   if (!row) return "never discovered"
+  // A failing sweep has no models, and "live of known" under 0/0 read as a
+  // provider that answered with an empty list.
+  if (discoveryFailing(row)) {
+    const n = row.consecutive_failures ?? 0
+    return `failing · ${n} ${n === 1 ? "sweep" : "sweeps"} in a row`
+  }
   if (row.total === 0 && row.filtered_out > 0) {
     return `none free of ${row.filtered_out} listed`
   }
