@@ -154,6 +154,31 @@ describe("settingsPatch", () => {
   })
 })
 
+describe("the base URL of a provider whose endpoint is derived", () => {
+  it("previews the endpoint an empty box means, following the region", async () => {
+    // Bedrock stores no base URL, so the box opened empty under help text
+    // that said nothing about where the requests then go.
+    const bedrock = provider({ kind: "bedrock", base_url: "", region: "us-east-1" })
+    mount(<ProviderSettingsDialog provider={bedrock} open onOpenChange={() => {}} />)
+
+    const box = screen.getByLabelText("Base URL")
+    expect(box).toHaveValue("")
+    expect(box).toHaveAttribute("placeholder", "https://bedrock-runtime.us-east-1.amazonaws.com")
+    expect(screen.getByText(/derives the endpoint from the region/)).toBeInTheDocument()
+
+    const region = screen.getByLabelText("Region")
+    await userEvent.clear(region)
+    await userEvent.type(region, "eu-west-1")
+    expect(box).toHaveAttribute("placeholder", "https://bedrock-runtime.eu-west-1.amazonaws.com")
+  })
+
+  it("keeps the ordinary help for a provider that names its own", () => {
+    mount(<ProviderSettingsDialog provider={provider()} open onOpenChange={() => {}} />)
+    expect(screen.getByLabelText("Base URL")).not.toHaveAttribute("placeholder")
+    expect(screen.getByText(/Emptying the box leaves it unchanged/)).toBeInTheDocument()
+  })
+})
+
 describe("reopening the settings dialog", () => {
   it("shows what the provider says now, not what it said at mount", () => {
     // The dialog outlives any one visit. A draft seeded once would keep

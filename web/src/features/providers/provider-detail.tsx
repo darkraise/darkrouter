@@ -52,6 +52,7 @@ import {
   coolingSubject,
   coolingTitle,
   discoveryFailing,
+  endpointFact,
   isKeyless,
   providerState,
   takesCredential,
@@ -75,6 +76,13 @@ function Fact({ term, children }: { term: string; children: React.ReactNode }) {
       </dd>
     </>
   )
+}
+
+/** Bedrock and Vertex store no base URL, so the endpoint they are derived to
+ *  is shown in its place rather than an empty value under "Base URL". */
+function EndpointFact({ of }: { of: Parameters<typeof endpointFact>[0] }) {
+  const { term, value } = endpointFact(of)
+  return <Fact term={term}>{value}</Fact>
 }
 
 /**
@@ -247,7 +255,7 @@ function UnconfiguredProvider({ preset }: { preset: Preset }) {
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium">Connection</h2>
             <dl className="text-sm">
-              <Fact term="Base URL">{preset.base_url}</Fact>
+              <EndpointFact of={preset} />
               <Fact term="Preset">{preset.id}</Fact>
               <Fact term="Auth style">{preset.auth_kind}</Fact>
               <Fact term="Kind">{preset.kind}</Fact>
@@ -654,7 +662,7 @@ export function ProviderDetail() {
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium">Connection</h2>
             <dl className="text-sm">
-              <Fact term="Base URL">{provider.base_url}</Fact>
+              <EndpointFact of={provider} />
               <Fact term="Preset">{provider.preset || "—"}</Fact>
               <Fact term="Auth style">{provider.auth_style}</Fact>
               <Fact term="Kind">{provider.kind}</Fact>

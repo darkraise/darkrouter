@@ -15,6 +15,7 @@ import { useApiMutation } from "../../lib/mutations"
 import { keys } from "../../lib/queries"
 import type { Provider } from "../../lib/api-types"
 import { endpointFieldsFor } from "./add-accounts-dialog"
+import { endpointOf } from "./provider-state"
 
 /**
  * A provider's settings as the dialog edits them.
@@ -127,6 +128,11 @@ export function ProviderSettingsDialog({
   // Only the fields this kind reads. Region on an openaicompat provider means
   // nothing, and offering it invited a value that would be stored and ignored.
   const endpointFields = endpointFieldsFor(provider.kind)
+  // What an empty box means for a provider whose host is built from its other
+  // fields, read off the draft so the preview follows a region being typed.
+  const derived = provider.base_url
+    ? undefined
+    : endpointOf({ ...draft, base_url: "", kind: provider.kind })
 
   return (
     <Dialog
@@ -181,11 +187,15 @@ export function ProviderSettingsDialog({
               id="provider-base-url"
               value={draft.baseUrl}
               onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              placeholder={derived?.url || undefined}
               spellCheck={false}
               className="font-mono"
             />
             <span className="text-sm text-[hsl(var(--legend))]">
-              The endpoint the gateway calls. Emptying the box leaves it unchanged.
+              {derived?.derivedFrom
+                ? `Left empty, the gateway derives the endpoint from ${derived.derivedFrom}. ` +
+                  "A URL here replaces it, for a private endpoint."
+                : "The endpoint the gateway calls. Emptying the box leaves it unchanged."}
             </span>
           </div>
 
