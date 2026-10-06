@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import {
   Avatar,
   AvatarFallback,
@@ -22,6 +22,19 @@ import { IdentityMark } from "./identity-mark"
 import type { NavGroup, NavItem } from "./nav"
 
 const SHORTCUT = /Mac|iPhone|iPad/i.test(navigator.platform) ? "⌘K" : "Ctrl K"
+
+/**
+ * Which screen is showing: the path of the first route under the root.
+ *
+ * Not the pathname, because a trace is a child of /requests: /requests and
+ * /requests/01J… are one screen with a drawer open over it, and whatever is
+ * keyed on "the screen changed" -- its error boundary, where focus goes --
+ * must not fire when a trace opens or closes. /providers/groq and
+ * /providers/nebius are separate routes' matches, so they stay two screens.
+ */
+export function useScreenKey(): string {
+  return useRouterState({ select: (s) => s.matches[1]?.pathname ?? s.location.pathname })
+}
 
 /**
  * The console's chrome: rail, header and content pane.
