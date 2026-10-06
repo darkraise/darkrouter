@@ -254,6 +254,12 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp["failover_edges"] = edges
+		failedOver, err := s.deps.DB.FailedOverSince(r.Context(), start)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		resp["failed_over"] = failedOver
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

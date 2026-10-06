@@ -3,6 +3,7 @@ import {
   errorSeries,
   flowProviders,
   requestSeries,
+  routerFailoverCount,
   spendQualifier,
   spendReading,
   spendSeries,
@@ -256,5 +257,17 @@ describe("the failover strip", () => {
     })
     expect(label).toContain("m-4")
     expect(label).not.toContain("→ →")
+  })
+})
+
+describe("routerFailoverCount", () => {
+  it("reads the server's request count, which includes same-provider rescues", () => {
+    // One cross-provider arc, but three requests failed over: two were
+    // rescued by another model on the provider that failed them.
+    expect(routerFailoverCount(3, [{ count: 1 }])).toBe(3)
+  })
+
+  it("sums the arcs for a server that sends no count", () => {
+    expect(routerFailoverCount(undefined, [{ count: 2 }, { count: 1 }])).toBe(3)
   })
 })
