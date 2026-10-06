@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { aliasNameProblem, plannedTargets } from "./add-alias-dialog"
+import { aliasNameProblem, aliasNameWarning, plannedTargets } from "./add-alias-dialog"
 
 describe("aliasNameProblem", () => {
   it("says nothing about a name nobody has typed yet", () => {
@@ -53,5 +53,36 @@ describe("plannedTargets", () => {
 
   it("trims what was typed", () => {
     expect(plannedTargets([{ id: "1", value: " groq/a " }])).toEqual(["groq/a"])
+  })
+})
+
+describe("aliasNameWarning", () => {
+  const candidates = ["mock-fast", "lmstudio/mock-fast", "groq/llama", "llama"]
+  const providers = ["lmstudio", "groq"]
+
+  it("warns that a catalogue model's name would be taken over", () => {
+    // Rule 1 wins: every client asking for mock-fast would be routed through
+    // this chain from the moment of Save, with nothing to say so.
+    const w = aliasNameWarning("mock-fast", candidates, providers)
+    expect(w?.text).toMatch(/mock-fast is a model in the catalogue/)
+    expect(w?.strong).toBe(false)
+  })
+
+  it("warns more strongly about a pinned provider/model name", () => {
+    // A client that named the provider explicitly is the one least expecting
+    // to be routed somewhere else.
+    const w = aliasNameWarning("lmstudio/mock-fast", candidates, providers)
+    expect(w?.text).toMatch(/is how a request pins lmstudio/)
+    expect(w?.strong).toBe(true)
+  })
+
+  it("treats any configured provider prefix as pinned, catalogued or not", () => {
+    expect(aliasNameWarning("groq/not-yet-imported", candidates, providers)?.strong).toBe(true)
+  })
+
+  it("says nothing about a name that shadows nothing", () => {
+    expect(aliasNameWarning("sonnet", candidates, providers)).toBeNull()
+    expect(aliasNameWarning("meta-llama/x", candidates, providers)).toBeNull()
+    expect(aliasNameWarning("  ", candidates, providers)).toBeNull()
   })
 })
