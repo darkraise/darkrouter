@@ -18,6 +18,7 @@ import { nav, settingsItem } from "../features/shell/nav"
 import { AppShell, useScreenKey } from "../features/shell/app-shell"
 import { ChangePasswordDialog } from "../features/settings/change-password-dialog"
 import { api } from "./api"
+import { confirmDiscardingDrafts } from "./unsaved-changes"
 import { CommandPalette, PaletteError } from "../features/shell/command-palette"
 import { NotFoundScreen } from "../features/shell/not-found"
 import { PageIdentityBar } from "../features/shell/page-identity"
@@ -173,6 +174,10 @@ function RootShell() {
         onChangePassword={() => setPasswordOpen(true)}
         onSettings={() => void navigate({ to: "/settings" })}
         onLogout={() => {
+          // Asked before the POST rather than left to the reload's
+          // beforeunload: by then the session is gone, and "Stay" kept a
+          // draft that could no longer be saved.
+          if (!confirmDiscardingDrafts("You have unsaved changes. Log out and discard them?")) return
           // The 401 the next request gets is what the app's global listener
           // turns into the login screen, so this only has to end the session.
           void api.post("/api/auth/logout", {}).finally(() => window.location.reload())
