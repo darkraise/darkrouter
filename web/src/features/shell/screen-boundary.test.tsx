@@ -78,4 +78,24 @@ describe("ScreenBoundary", () => {
     )
     expect(screen.getByText("Overview")).toBeInTheDocument()
   })
+
+  it("shows the caller's fallback instead, for something that is not a screen", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    broken = true
+    render(
+      <ScreenBoundary
+        fallback={(error, reset) => (
+          <button type="button" onClick={() => ((broken = false), reset())}>
+            {error.message}, retry
+          </button>
+        )}
+      >
+        <UntilReset />
+      </ScreenBoundary>,
+    )
+    expect(screen.queryByText(/could not render/i)).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole("button", { name: "still broken, retry" }))
+    expect(screen.getByText("Recovered")).toBeInTheDocument()
+  })
 })
+
