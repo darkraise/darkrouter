@@ -334,6 +334,11 @@ jobs:
           labels: ${{ steps.release.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # The runtime stage's `apk upgrade` has to run on every build. Restored
+          # from the cache, it keeps whatever Alpine shipped when the layer was
+          # first built, and Trivy then fails on a fix Alpine has already
+          # published.
+          no-cache-filters: runtime
 
       # Scan the candidate that was just pushed, by digest, so the report
       # describes the exact bytes the promotion step below would publish.
