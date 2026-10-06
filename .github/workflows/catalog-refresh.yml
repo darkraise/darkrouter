@@ -80,7 +80,8 @@ jobs:
 
       # Paths span internal/ and web/, so upload-artifact's least-common-ancestor
       # root is the repository root and the tree unpacks in place in `propose`.
-      # Dropping the web/ entries would silently re-root the archive.
+      # Dropping the web/ entries would silently re-root the archive. `propose`
+      # deletes this same list before unpacking; keep the two in step.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: catalogue
@@ -110,6 +111,21 @@ jobs:
           # create-pull-request configures its own authentication. Persisting
           # checkout credentials too sends duplicate Authorization headers.
           persist-credentials: false
+
+      # The artifact holds only what the generator wrote, so unpacking it over
+      # the checkout cannot delete anything. Clearing the uploaded paths first
+      # turns a logo the generator dropped into a deletion in the PR rather
+      # than a stale file embedded in every binary.
+      - name: Clear the generated paths
+        run: |
+          rm -rf \
+            internal/catalog/presets.yaml \
+            internal/catalog/provenance.yaml \
+            internal/catalog/presetgen-conflicts.md \
+            internal/catalog/models_snapshot.json \
+            internal/catalog/free_models.json \
+            web/public/providers \
+            web/src/features/providers/provider-assets.ts
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
