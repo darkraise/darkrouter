@@ -489,7 +489,7 @@ export function RequestsScreen() {
               sort and the hidden columns are still there when rows return. */}
           <div
             ref={tableRef}
-            className={`row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer [&_.dr-data-table-toolbar]:flex-wrap [&_.dr-data-table-toolbar-filters]:flex-wrap${empty ? " hidden" : ""}`}
+            className={`row-height-pinned overflow-x-auto [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap [&_tbody_tr]:cursor-pointer [&_.dr-data-table-toolbar]:flex-wrap [&_.dr-data-table-toolbar-filters]:flex-wrap ${empty ? "hidden" : ""}`}
             style={{ "--row-h": `${rowHeight}px` } as CSSProperties}
             onClick={openRowUnderPointer}
           >
