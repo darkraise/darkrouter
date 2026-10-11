@@ -3,7 +3,7 @@ module github.com/darkraise/darkrouter
 go 1.26.9
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.47.0
+	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
 	github.com/oklog/ulid/v2 v2.1.2
