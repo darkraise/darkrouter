@@ -6,7 +6,7 @@
 # with every rebuild of the upstream image and has to be resolved by pulling;
 # Dependabot's docker ecosystem tracks these tags instead and opens a pull
 # request when one moves, which is the review point a digest bump would need
-# anyway. Tags in this file: node:26-alpine, golang:1.27.1-alpine, alpine:3.24.
+# anyway. Tags in this file: node:26-alpine, golang:1.27.2-alpine, alpine:3.24.
 ARG WITH_AUGGIE=1
 
 FROM node:26-alpine AS web
@@ -21,7 +21,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.27.1-alpine AS build
+FROM golang:1.27.2-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
