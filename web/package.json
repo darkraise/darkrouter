@@ -14,7 +14,7 @@
   "dependencies": {
     "@lobehub/icons": "^5.23.0",
     "@tanstack/react-query": "^5.102.1",
-    "@tanstack/react-router": "^1.170.32",
+    "@tanstack/react-router": "^1.170.41",
     "@xyflow/react": "^12.12.0",
     "darkraise-ui": "6.7.0",
     "lucide-react": "^1.41.0",
