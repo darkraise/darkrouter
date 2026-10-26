@@ -71,7 +71,7 @@ aimlapi:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: aimlapi
   litellm_id: aiml
   website: https://aimlapi.com
   resells_prices: true
@@ -88,6 +88,19 @@ ainative:
   free_tier: true
   website: https://ainative.studio
   models_url: https://api.ainative.studio/api/v1/models
+ainetcafe:
+  name: ainetcafe
+  kind: openaicompat
+  base_url: https://microquickjs.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: ainetcafe
+  no_litellm: true
+  free_tier: true
+  website: https://ainetcafe.com/k3/
+  models_url: https://microquickjs.com/v1/models
 aion:
   name: Aion Labs
   kind: openaicompat
@@ -299,6 +312,18 @@ api-airforce:
   website: https://api.airforce
   api_key_url: https://api.airforce
   models_url: https://api.airforce/v1/models
+apmix:
+  name: Apmix
+  kind: openaicompat
+  base_url: https://api.apmix.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://apmix.ai
+  models_url: https://api.apmix.ai/v1/models
 arcee-ai:
   name: Arcee AI
   kind: openaicompat
@@ -422,6 +447,18 @@ bazaarlink:
   website: https://bazaarlink.ai
   api_key_url: https://bazaarlink.ai
   models_url: https://bazaarlink.ai/api/v1/models
+beatapi:
+  name: BeatAPI
+  kind: openaicompat
+  base_url: https://api.beatapi.io/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://beatapi.io
+  models_url: https://api.beatapi.io/v1/models
 bedrock:
   name: Amazon Bedrock
   kind: bedrock
@@ -433,6 +470,17 @@ bedrock:
   models_dev_id: amazon-bedrock
   litellm_id: bedrock
   website: https://aws.amazon.com/bedrock
+bigmodel:
+  name: BigModel.cn (Zhipu)
+  kind: openaicompat
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://open.bigmodel.cn
 blackbox:
   name: Blackbox AI
   kind: openaicompat
@@ -539,6 +587,18 @@ chatanywhere:
   free_tier: true
   website: https://chatanywhere.tech
   models_url: https://api.chatanywhere.org/v1/models
+chatplayground:
+  name: chatplayground
+  kind: openaicompat
+  base_url: https://app.chatplayground.ai/api/chat
+  auth:
+    style: api-key
+    header: cookie
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  models_url: https://app.chatplayground.ai/api/models
 cheaperinference:
   name: Cheaper Inference
   kind: openaicompat
@@ -662,7 +722,7 @@ crof:
     style: bearer
   surfaces:
     - llm
-  models_dev_id: crof
+  no_models_dev: true
   no_litellm: true
   website: https://crof.ai
 dahl:
@@ -678,6 +738,18 @@ dahl:
   free_tier: true
   website: https://inference.dahl.global
   api_key_url: https://dahl.global/dashboard
+daoxe:
+  name: DaoXE
+  kind: openaicompat
+  base_url: https://api.daoxe.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: daoxe
+  no_litellm: true
+  website: https://daoxe.com
+  models_url: https://api.daoxe.com/v1/models
 databricks:
   name: Databricks
   kind: openaicompat
@@ -717,6 +789,18 @@ deepseek:
   api_key_url: https://platform.deepseek.com/api_keys
   quirks:
     - echo-reasoning-content
+demonroute:
+  name: Demon Route
+  kind: openaicompat
+  base_url: https://api.demonroute.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://demonroute.com
+  models_url: https://api.demonroute.com/v1/models
 dgrid:
   name: DGrid
   kind: openaicompat
@@ -959,7 +1043,7 @@ freemodel-dev:
 freetheai:
   name: FreeTheAi
   kind: openaicompat
-  base_url: https://api.freetheai.xyz/v1
+  base_url: https://api.freetheai.org/v1
   auth:
     style: bearer
   surfaces:
@@ -967,8 +1051,8 @@ freetheai:
   no_models_dev: true
   no_litellm: true
   free_tier: true
-  website: https://freetheai.xyz
-  models_url: https://api.freetheai.xyz/v1/models
+  website: https://freetheai.org
+  models_url: https://api.freetheai.org/v1/models
 friendliai:
   name: FriendliAI
   kind: openaicompat
@@ -1353,7 +1437,7 @@ liquid:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: liquid
   no_litellm: true
   free_tier: true
   website: https://liquid.ai
@@ -1664,6 +1748,18 @@ naga-ai:
   free_tier: true
   website: https://naga.ac
   models_url: https://api.naga.ac/v1/models
+nan:
+  name: NaN.Builders
+  kind: openaicompat
+  base_url: https://api.nan.builders/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  models_dev_id: nan
+  no_litellm: true
+  website: https://nan.builders
+  models_url: https://api.nan.builders/v1/models
 nanogpt:
   name: NanoGPT
   kind: openaicompat
@@ -1727,6 +1823,18 @@ nlpcloud:
   litellm_id: nlp_cloud
   free_tier: true
   website: https://docs.nlpcloud.com
+nous:
+  name: Nous Research
+  kind: openaicompat
+  base_url: https://inference-api.nousresearch.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://nousresearch.com
+  api_key_url: https://portal.nousresearch.com/api-keys
 nous-research:
   name: Nous Research
   kind: openaicompat
@@ -1842,6 +1950,19 @@ oneminai:
   no_models_dev: true
   no_litellm: true
   website: https://1min.ai
+onomeo:
+  name: onomeo
+  kind: openaicompat
+  base_url: https://onomeo.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://onomeo.com
+  models_url: https://onomeo.com/v1/models
 oobabooga:
   name: Text Generation WebUI
   kind: openaicompat
@@ -1888,16 +2009,13 @@ openai:
 opencode:
   name: OpenCode Free
   kind: openaicompat
-  base_url: https://opencode.ai/zen/v1
+  base_url: https://opencode.ai
   auth:
     style: optional
   surfaces:
     - llm
   models_dev_id: opencode
   no_litellm: true
-  free_tier: true
-  website: https://opencode.ai
-  models_url: https://opencode.ai/zen/v1/models
 opencode-go:
   name: OpenCode Go
   kind: openaicompat
@@ -2192,6 +2310,18 @@ routeway:
   free_tier: true
   website: https://routeway.ai
   models_url: https://api.routeway.ai/v1/models
+runcrate:
+  name: Runcrate
+  kind: openaicompat
+  base_url: https://api.runcrate.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://www.runcrate.ai/inference/free?utm_source=9router&utm_medium=directory&utm_campaign=gpu_pricing
+  api_key_url: https://www.runcrate.ai/dashboard/api-keys
 sambanova:
   name: SambaNova
   kind: openaicompat
@@ -2200,7 +2330,7 @@ sambanova:
     style: bearer
   surfaces:
     - llm
-  no_models_dev: true
+  models_dev_id: sambanova
   litellm_id: sambanova
   free_tier: true
   website: https://sambanova.ai
@@ -2266,6 +2396,7 @@ sensenova:
   no_litellm: true
   free_tier: true
   website: https://platform.sensenova.cn
+  api_key_url: https://token.sensenova.cn
 siliconflow:
   name: SiliconFlow
   kind: openaicompat
@@ -2327,6 +2458,7 @@ stepfun:
   no_litellm: true
   free_tier: true
   website: https://stepfun.com
+  models_url: https://api.stepfun.com/v1/models
 sumopod:
   name: SumoPod
   kind: openaicompat
@@ -2415,6 +2547,18 @@ tokenharbor:
   no_litellm: true
   website: https://tokenharbor.ai
   api_key_url: https://tokenharbor.ai/dashboard
+tokenmarket:
+  name: Token Market
+  kind: openaicompat
+  base_url: https://api.tokensmarket.ai/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://www.tokensmarket.ai
+  models_url: https://api.tokensmarket.ai/v1/models
 tokenreply:
   name: TokenReply
   kind: openaicompat
@@ -2491,6 +2635,18 @@ uncloseai:
   free_tier: true
   website: https://uncloseai.com
   models_url: https://hermes.ai.unturf.com/v1/models
+unifically:
+  name: Unifically
+  kind: openaicompat
+  base_url: https://api.unifically.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  website: https://unifically.com
+  models_url: https://api.unifically.com/v1/models?category=llm
 unorouter:
   name: UnoRouter
   kind: openaicompat
@@ -2719,6 +2875,7 @@ xiaomi-mimo-token-plan:
   no_models_dev: true
   no_litellm: true
   website: https://mimo.mi.com
+  models_url: https://token-plan-sgp.xiaomimimo.com/v1/models
 xiaomi-tokenplan:
   name: Xiaomi MiMo (Token Plan)
   kind: openaicompat
@@ -2755,6 +2912,19 @@ xkiro:
   no_litellm: true
   free_tier: true
   website: https://xkiro.com
+y-api:
+  name: Y-API
+  kind: openaicompat
+  base_url: https://api.y-api.bestvirtualgoods.com/v1
+  auth:
+    style: bearer
+  surfaces:
+    - llm
+  no_models_dev: true
+  no_litellm: true
+  free_tier: true
+  website: https://y-api.bestvirtualgoods.com
+  models_url: https://api.y-api.bestvirtualgoods.com/v1/models
 yi:
   name: Yi (01.AI)
   kind: openaicompat
@@ -2789,7 +2959,7 @@ zai:
     - llm
   models_dev_id: zai
   litellm_id: zai
-  website: https://open.bigmodel.cn
+  website: https://z.ai/model-api
 zenmux:
   name: ZenMux
   kind: openaicompat
