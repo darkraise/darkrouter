@@ -2,6 +2,9 @@
 
 A self-hosted LLM gateway. One endpoint, many providers, deterministic failover.
 
+**Darkrouter dSmart** is the routing engine. It routes requests by model
+capabilities, provider priority, and health, with deterministic failover.
+
 ## Status
 
 The gateway and operator console are implemented. Three inbound dialects —

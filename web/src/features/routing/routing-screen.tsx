@@ -779,7 +779,7 @@ export function RoutingScreen() {
 
       <Card className="mt-6 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-medium">Preview</h2>
+          <h2 className="text-sm font-medium">dSmart route preview</h2>
           <ToggleGroup
             type="single"
             value={view}

@@ -77,7 +77,7 @@ const PAGES: { path: string; identity: PageIdentity }[] = [
     path: "/routing",
     identity: {
       title: "Routing",
-      description: "How it chooses, and what it would choose right now",
+      description: "How Darkrouter dSmart chooses, and what it would choose right now",
       icon: Split,
     },
   },

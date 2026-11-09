@@ -395,7 +395,7 @@ export function TraceDrawer({
             </dl>
 
             <section>
-              <h3 className="mb-2 text-sm font-medium">Attempts</h3>
+              <h3 className="mb-2 text-sm font-medium">dSmart attempts</h3>
               {trace.data.attempts.length > 0 ? (
                 <Ladder
                   mode="retrospective"

@@ -1,4 +1,8 @@
-# Execution, routing and health
+# Darkrouter dSmart: execution, routing and health
+
+Darkrouter dSmart is the gateway's capability-aware routing and deterministic
+failover engine. dSmart resolves eligible candidates, orders them by routing
+policy, and executes attempts until one succeeds or the chain stops.
 
 ## Resolution is pure
 
